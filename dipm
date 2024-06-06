@@ -1,0 +1,215 @@
+#!/bin/sh
+
+program_name='dipm'
+
+cache_home=${XDG_CACHE_HOME:-$HOME/.cache}
+data_home=${XDG_DATA_HOME:-$HOME/.local/share}
+
+bin_dir="$HOME/.local/bin"
+cache_dir="$cache_home/$program_name"
+data_dir="$data_home/$program_name"
+mkdir -p "$bin_dir" "$cache_dir" "$data_dir"
+
+pkgs_file="$cache_dir/pkgs"
+installed_file="$data_dir/installed"
+
+usage() {
+    true
+}
+
+download_url_to() {
+    link=$1
+    dir=$2
+
+    if command -v wget >/dev/null; then
+        wget --show-progress -qP "$dir" "$link"
+        return
+    fi
+    if command -v curl >/dev/null; then
+        curl --progress-bar -LO --output-dir "$dir" "$link"
+        return
+    fi
+
+    echo 'error: system is missing curl or wget' >&2
+    return 1
+}
+
+is_pkgs_file_up_to_date() {
+    if ! [ -e "$pkgs_file" ]; then
+        return 1
+    fi
+
+    date_format='+%Y-%m-%d'
+    today=$(date "$date_format")
+    last_modified=$(date -r "$pkgs_file" "$date_format")
+    [ "$today" = "$last_modified" ]
+}
+
+download_pkgs_file() {
+    {
+        echo 'fzf.version=0.53.0'
+        echo 'fzf.install=fzf'
+        echo 'fzf.url_linux_x86_64=https://github.com/junegunn/fzf/releases/download/0.53.0/fzf-0.53.0-linux_amd64.tar.gz'
+        echo 'fzf.hash_linux_x86_64=af2663c3309967dc191d21537e53c2e9f8a37f490a32456b9498a006f05e3796'
+    } >"$pkgs_file"
+}
+
+download_pkgs_file_if_out_of_date() {
+    if ! is_pkgs_file_up_to_date; then
+        download_pkgs_file
+    fi
+}
+
+validate_pkg_hash() {
+    expected_hash=$1
+    download_dir=$2
+
+    actual_hash=$(find "$download_dir" -type f -exec sha256sum '{}' ';' | cut -d' ' -f1)
+
+    if [ "$expected_hash" != "$actual_hash" ]; then
+        echo 'error: hash mismatch' >&2
+        echo "  expected $expected_hash" >&2
+        echo "  found    $actual_hash" >&2
+        return 1
+    fi
+}
+
+extract_pkg() {
+    download_dir=$1
+
+    file=$(find "$download_dir" -type f)
+    file_mime=$(file -b --mime-type "$file")
+    case $file_mime in
+        application/gzip) tar -xvf "$file" -C "$download_dir" >/dev/null ;;
+        *) ;;
+    esac
+}
+
+install_pkg() {
+    file_to_install=$1
+    version=$2
+    download_dir=$3
+
+    file_name=$(basename "$file_to_install")
+    install_location="$bin_dir/$file_name"
+
+    if [ -f "$install_location" ]; then
+        echo "error: file '$install_location' already exists" >&2
+        return 1
+    fi
+
+    cp "$download_dir/$file_to_install" "$install_location"
+
+    echo "${pkg}.location=$install_location" >>"$installed_file"
+    echo "${pkg}.version=$version" >>"$installed_file"
+}
+
+pkg_field_no_err_msg() {
+    file=$1
+    pkg=$2
+    field=$3
+    if ! value=$(grep "${pkg}.${field}=" "$file"); then
+        return 1
+    fi
+
+    echo "$value" | cut -d'=' -f2-
+}
+
+pkg_field() {
+    file=$1
+    pkg=$2
+    field=$3
+
+    if ! pkg_field_no_err_msg "$file" "$pkg" "$field"; then
+        echo "error: package '$pkg' has no field '$field'" >&2
+        return 1
+    fi
+}
+
+is_pkg_installed() {
+    pkg=$1
+    if ! [ -f "$installed_file" ]; then
+        return 1
+    fi
+
+    pkg_field_no_err_msg "$installed_file" "$pkg" 'location' >/dev/null
+}
+
+install() {
+    pkg=$1
+
+    if is_pkg_installed "$pkg"; then
+        echo "$pkg is already installed" >&2
+        return 1
+    fi
+
+    os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    arch=$(uname -m)
+
+    version=$(pkg_field "$pkgs_file" "$pkg" 'version') || return 1
+    file_to_install=$(pkg_field "$pkgs_file" "$pkg" 'install') || return 1
+    url=$(pkg_field "$pkgs_file" "$pkg" "url_${os}_${arch}") || return 1
+    expected_hash=$(pkg_field "$pkgs_file" "$pkg" "hash_${os}_${arch}") || return 1
+
+    tmp_dir=$(mktemp -dt 'dipm.XXXXXXXX')
+    download_url_to "$url" "$tmp_dir" &&
+        validate_pkg_hash "$expected_hash" "$tmp_dir" &&
+        extract_pkg "$tmp_dir" &&
+        install_pkg "$file_to_install" "$version" "$tmp_dir"
+
+    exit_code=$?
+    rm -r "$tmp_dir"
+
+    return "$exit_code"
+}
+
+uninstall() {
+    pkg=$1
+    if ! is_pkg_installed "$pkg"; then
+        echo "$pkg is not installed" >&2
+        return 1
+    fi
+
+    location=$(pkg_field "$installed_file" "$pkg" 'location') || return 1
+
+    sed -i "/^$pkg\./d" "$installed_file"
+    rm "$location"
+}
+
+update() {
+    pkg=$1
+    if ! is_pkg_installed "$pkg"; then
+        echo "$pkg is not installed" >&2
+        return 1
+    fi
+
+    old_version=$(pkg_field "$installed_file" "$pkg" 'version') || return 1
+    new_version=$(pkg_field "$pkgs_file" "$pkg" 'version') || return 1
+    if [ "$old_version" = "$new_version" ]; then
+        echo "$pkg is up to date" >&2
+        return 1
+    fi
+
+    uninstall "$pkg"
+    install "$pkg"
+}
+
+cmd=$1
+pkg=$2
+
+case $cmd in
+    install)
+        download_pkgs_file_if_out_of_date
+        install "$pkg"
+        ;;
+    update)
+        download_pkgs_file_if_out_of_date
+        update "$pkg"
+        ;;
+    uninstall) uninstall "$pkg" ;;
+    -h | --help | help) usage ;;
+    *)
+        echo "error: Invalid argument '$cmd'"
+        usage >&2
+        ;;
+esac
