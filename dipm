@@ -94,14 +94,19 @@ install_pkg() {
     download_dir=$3
 
     file_name=$(basename "$file_to_install")
+    from_location="$download_dir/$file_to_install"
     install_location="$bin_dir/$file_name"
 
+    if ! [ -f "$from_location" ]; then
+        echo "error: file '$file_to_install' doesn't exist" >&2
+        return 1
+    fi
     if [ -f "$install_location" ]; then
         echo "error: file '$install_location' already exists" >&2
         return 1
     fi
 
-    cp "$download_dir/$file_to_install" "$install_location"
+    cp "$from_location" "$install_location"
 
     echo "${pkg}.location=$install_location" >>"$installed_file"
     echo "${pkg}.version=$version" >>"$installed_file"
