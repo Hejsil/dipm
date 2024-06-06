@@ -13,6 +13,8 @@ mkdir -p "$bin_dir" "$cache_dir" "$data_dir"
 pkgs_file="$cache_dir/pkgs"
 installed_file="$data_dir/installed"
 
+pkgs_url='https://raw.githubusercontent.com/Hejsil/dipm-pkgs/master/pkgs'
+
 usage() {
     true
 }
@@ -46,12 +48,7 @@ is_pkgs_file_up_to_date() {
 }
 
 download_pkgs_file() {
-    {
-        echo 'fzf.version=0.53.0'
-        echo 'fzf.install=fzf'
-        echo 'fzf.url_linux_x86_64=https://github.com/junegunn/fzf/releases/download/0.53.0/fzf-0.53.0-linux_amd64.tar.gz'
-        echo 'fzf.hash_linux_x86_64=af2663c3309967dc191d21537e53c2e9f8a37f490a32456b9498a006f05e3796'
-    } >"$pkgs_file"
+    download_url_to "$pkgs_url" "$cache_dir"
 }
 
 download_pkgs_file_if_out_of_date() {
