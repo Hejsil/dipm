@@ -157,7 +157,7 @@ install_using_dir() {
     arch=$(uname -m)
 
     version=$(pkg_field "$pkgs_file" "$pkg" 'version') || return 1
-    file_to_install=$(pkg_field "$pkgs_file" "$pkg" 'install') || return 1
+    file_to_install=$(pkg_field "$pkgs_file" "$pkg" "install_${os}_${arch}") || return 1
     url=$(pkg_field "$pkgs_file" "$pkg" "url_${os}_${arch}") || return 1
     expected_hash=$(pkg_field "$pkgs_file" "$pkg" "hash_${os}_${arch}") || return 1
 
