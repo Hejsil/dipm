@@ -24,11 +24,17 @@ download_url_to() {
     dir=$2
 
     if command -v wget >/dev/null; then
-        wget --show-progress -qP "$dir" "$link"
+        if ! wget --show-progress -qP "$dir" "$link"; then
+            echo "error: could not download '$link'" >&2
+            return 1
+        fi
         return
     fi
     if command -v curl >/dev/null; then
-        curl --progress-bar -LO --output-dir "$dir" "$link"
+        if ! curl --progress-bar -LO --output-dir "$dir" "$link"; then
+            echo "error: could not download '$link'" >&2
+            return 1
+        fi
         return
     fi
 
