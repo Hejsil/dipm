@@ -91,10 +91,15 @@ extract_pkg() {
 
 install_pkg() {
     file_to_install=$1
-    version=$2
-    download_dir=$3
+    rename=$2
+    version=$3
+    download_dir=$4
 
-    file_name=$(basename "$file_to_install")
+    file_name=$rename
+    if [ -z "$file_name" ]; then
+        file_name=$(basename "$file_to_install")
+    fi
+
     from_location="$download_dir/$file_to_install"
     install_location="$bin_dir/$file_name"
 
@@ -108,12 +113,13 @@ install_pkg() {
     fi
 
     cp "$from_location" "$install_location"
+    chmod +x "$install_location"
 
     echo "${pkg}.location=$install_location" >>"$installed_file"
     echo "${pkg}.version=$version" >>"$installed_file"
 }
 
-pkg_field_no_err_msg() {
+pkg_field_optional() {
     file=$1
     pkg=$2
     field=$3
@@ -129,7 +135,7 @@ pkg_field() {
     pkg=$2
     field=$3
 
-    if ! pkg_field_no_err_msg "$file" "$pkg" "$field"; then
+    if ! pkg_field_optional "$file" "$pkg" "$field"; then
         echo "error: package '$pkg' has no field '$field'" >&2
         return 1
     fi
@@ -141,7 +147,7 @@ is_pkg_installed() {
         return 1
     fi
 
-    pkg_field_no_err_msg "$installed_file" "$pkg" 'location' >/dev/null
+    pkg_field_optional "$installed_file" "$pkg" 'location' >/dev/null
 }
 
 install_using_dir() {
@@ -161,6 +167,8 @@ install_using_dir() {
     url=$(pkg_field "$pkgs_file" "$pkg" "url_${os}_${arch}") || return 1
     expected_hash=$(pkg_field "$pkgs_file" "$pkg" "hash_${os}_${arch}") || return 1
 
+    rename=$(pkg_field_optional "$pkgs_file" "$pkg" 'rename')
+
     download_url_to "$url" "$dir" || return 1
     if [ "$DIPM_DEBUG" ]; then
         echo "debug: after download:" >&2
@@ -174,7 +182,7 @@ install_using_dir() {
         tree "$dir" >&2
     fi
 
-    install_pkg "$file_to_install" "$version" "$dir" || return 1
+    install_pkg "$file_to_install" "$rename" "$version" "$dir" || return 1
 
 }
 
