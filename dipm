@@ -16,7 +16,15 @@ installed_file="$data_dir/installed"
 pkgs_url='https://raw.githubusercontent.com/Hejsil/dipm-pkgs/master/pkgs'
 
 usage() {
-    true
+    echo 'Usage: dipm [command] [options]'
+    echo ''
+    echo 'Commands:'
+    echo '  install <name>     Install a package'
+    echo '  uninstall <name>   Uninstall a package'
+    echo '  update <name>      Update a package'
+    echo '  update             Update all packages'
+    echo '  list               List all installed packages and their versions'
+    echo '  help               Print this help and exit'
 }
 
 download_url_to() {
@@ -278,7 +286,7 @@ case $cmd in
     uninstall) uninstall "$pkg" ;;
     -h | --help | help) usage ;;
     *)
-        echo "error: Invalid argument '$cmd'"
+        echo "error: Unknown command '$cmd'"
         usage >&2
         ;;
 esac
