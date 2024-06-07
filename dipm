@@ -223,8 +223,30 @@ list() {
     grep '^[^.]*\.version=' "$installed_file" | sed 's/\.version=/\t/'
 }
 
+update_no_check() {
+    pkg=$1
+    uninstall "$pkg" || return 1
+    install "$pkg" || return 1
+}
+
+update_all() {
+    list | while read -r pkg old_version; do
+        new_version=$(pkg_field "$pkg" 'version' <"$pkgs_file") || continue
+        if [ "$old_version" = "$new_version" ]; then
+            continue
+        fi
+
+        update_no_check "$pkg"
+    done
+}
+
 update() {
     pkg=$1
+    if [ -z "$pkg" ]; then
+        update_all
+        return
+    fi
+
     if ! is_pkg_installed "$pkg"; then
         echo "$pkg is not installed" >&2
         return 1
@@ -237,8 +259,7 @@ update() {
         return 1
     fi
 
-    uninstall "$pkg"
-    install "$pkg"
+    update_no_check "$pkg"
 }
 
 cmd=$1
