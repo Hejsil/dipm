@@ -219,6 +219,10 @@ uninstall() {
     rm "$location"
 }
 
+list() {
+    grep '^[^.]*\.version=' "$installed_file" | sed 's/\.version=/\t/'
+}
+
 update() {
     pkg=$1
     if ! is_pkg_installed "$pkg"; then
@@ -249,6 +253,7 @@ case $cmd in
         download_pkgs_file_if_out_of_date
         update "$pkg"
         ;;
+    list) list ;;
     uninstall) uninstall "$pkg" ;;
     -h | --help | help) usage ;;
     *)
