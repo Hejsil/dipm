@@ -129,10 +129,9 @@ install_pkg() {
 }
 
 pkg_field_optional() {
-    file=$1
-    pkg=$2
-    field=$3
-    if ! value=$(grep "${pkg}.${field}=" "$file"); then
+    pkg=$1
+    field=$2
+    if ! value=$(grep "${pkg}.${field}="); then
         return 1
     fi
 
@@ -140,11 +139,10 @@ pkg_field_optional() {
 }
 
 pkg_field() {
-    file=$1
-    pkg=$2
-    field=$3
+    pkg=$1
+    field=$2
 
-    if ! pkg_field_optional "$file" "$pkg" "$field"; then
+    if ! pkg_field_optional "$pkg" "$field"; then
         echo "error: package '$pkg' has no field '$field'" >&2
         return 1
     fi
@@ -156,7 +154,7 @@ is_pkg_installed() {
         return 1
     fi
 
-    pkg_field_optional "$installed_file" "$pkg" 'location' >/dev/null
+    pkg_field_optional "$pkg" 'location' <"$installed_file" >/dev/null
 }
 
 install_using_dir() {
@@ -171,12 +169,13 @@ install_using_dir() {
     os=$(uname -s | tr '[:upper:]' '[:lower:]')
     arch=$(uname -m)
 
-    version=$(pkg_field "$pkgs_file" "$pkg" 'version') || return 1
-    file_to_install=$(pkg_field "$pkgs_file" "$pkg" "install_${os}_${arch}") || return 1
-    url=$(pkg_field "$pkgs_file" "$pkg" "url_${os}_${arch}") || return 1
-    expected_hash=$(pkg_field "$pkgs_file" "$pkg" "hash_${os}_${arch}") || return 1
+    fields=$(grep "^${pkg}." "$pkgs_file")
+    version=$(echo "$fields" | pkg_field "$pkg" 'version') || return 1
+    file_to_install=$(echo "$fields" | pkg_field "$pkg" "install_${os}_${arch}") || return 1
+    url=$(echo "$fields" | pkg_field "$pkg" "url_${os}_${arch}") || return 1
+    expected_hash=$(echo "$fields" | pkg_field "$pkg" "hash_${os}_${arch}") || return 1
 
-    rename=$(pkg_field_optional "$pkgs_file" "$pkg" 'rename')
+    rename=$(echo "$fields" | pkg_field_optional "$pkg" 'rename')
 
     download_url_to "$url" "$dir" || return 1
     if [ "$DIPM_DEBUG" ]; then
@@ -214,7 +213,7 @@ uninstall() {
         return 1
     fi
 
-    location=$(pkg_field "$installed_file" "$pkg" 'location') || return 1
+    location=$(pkg_field "$pkg" 'location' <"$installed_file") || return 1
 
     sed -i "/^$pkg\./d" "$installed_file"
     rm "$location"
@@ -227,8 +226,8 @@ update() {
         return 1
     fi
 
-    old_version=$(pkg_field "$installed_file" "$pkg" 'version') || return 1
-    new_version=$(pkg_field "$pkgs_file" "$pkg" 'version') || return 1
+    old_version=$(pkg_field "$pkg" 'version' <"$installed_file") || return 1
+    new_version=$(pkg_field "$pkg" 'version' <"$pkgs_file") || return 1
     if [ "$old_version" = "$new_version" ]; then
         echo "$pkg is up to date" >&2
         return 1
