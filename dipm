@@ -54,7 +54,12 @@ is_pkgs_file_up_to_date() {
 }
 
 download_pkgs_file() {
-    download_url_to "$pkgs_url" "$cache_dir"
+    tmp_dir=$(mktemp -dt 'dipm.XXXXXXXX')
+    if download_url_to "$pkgs_url" "$tmp_dir"; then
+        mv "$tmp_dir/pkgs" "$cache_dir/pkgs"
+    fi
+
+    rm -r "$tmp_dir"
 }
 
 download_pkgs_file_if_out_of_date() {
