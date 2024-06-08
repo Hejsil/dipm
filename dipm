@@ -10,14 +10,14 @@ cache_dir="$cache_home/$program_name"
 data_dir="$data_home/$program_name"
 mkdir -p "$bin_dir" "$cache_dir" "$data_dir"
 
-pkgs_file="$cache_dir/pkgs"
-installed_file="$data_dir/installed"
+pkgs_file="$cache_dir/pkgs.ini"
+installed_file="$data_dir/installed.ini"
 
-pkgs_url='https://raw.githubusercontent.com/Hejsil/dipm-pkgs/master/pkgs'
+pkgs_url='https://raw.githubusercontent.com/Hejsil/dipm-pkgs/master/pkgs.ini'
 
 usage() {
     echo 'Usage: dipm [command] [options]'
-    echo ''
+    echo
     echo 'Commands:'
     echo '  install <name>     Install a package'
     echo '  uninstall <name>   Uninstall a package'
@@ -25,6 +25,48 @@ usage() {
     echo '  update             Update all packages'
     echo '  list               List all installed packages and their versions'
     echo '  help               Print this help and exit'
+}
+
+ini_section() {
+    section=$1
+    awk "/\[.*\]/ {print_it=0} /^\[$section\]$/ {print_it=1} print_it"
+}
+
+ini_delete_section() {
+    section=$1
+    awk "/\[.*\]/ {print_it=1} /^\[$section\]$/ {print_it=0} print_it"
+}
+
+ini_field() {
+    field=$1
+    grep "${field}=" | cut -d'=' -f2-
+}
+
+error_if_empty() {
+    string=$1
+    msg=$2
+    if [ -z "$string" ]; then
+        echo "$msg" >&2
+        return 1
+    fi
+}
+
+error_if_file() {
+    string=$1
+    msg=$2
+    if [ -f "$string" ]; then
+        echo "$msg" >&2
+        return 1
+    fi
+}
+
+error_if_not_file() {
+    string=$1
+    msg=$2
+    if ! [ -f "$string" ]; then
+        echo "$msg" >&2
+        return 1
+    fi
 }
 
 download_url_to() {
@@ -64,7 +106,7 @@ is_pkgs_file_up_to_date() {
 download_pkgs_file() {
     tmp_dir=$(mktemp -dt 'dipm.XXXXXXXX')
     if download_url_to "$pkgs_url" "$tmp_dir"; then
-        mv "$tmp_dir/pkgs" "$cache_dir/pkgs"
+        mv "$tmp_dir/pkgs.ini" "$pkgs_file"
     fi
 
     rm -r "$tmp_dir"
@@ -120,40 +162,17 @@ install_pkg() {
     from_location="$download_dir/$file_to_install"
     install_location="$bin_dir/$file_name"
 
-    if ! [ -f "$from_location" ]; then
-        echo "error: file '$file_to_install' doesn't exist" >&2
-        return 1
-    fi
-    if [ -f "$install_location" ]; then
-        echo "error: file '$install_location' already exists" >&2
-        return 1
-    fi
+    error_if_not_file "$from_location" "error: file '$file_to_install' doesn't exist" || return 1
+    error_if_file "$install_location" "error: file '$install_location' already exists" || return 1
 
     cp "$from_location" "$install_location"
     chmod +x "$install_location"
 
-    echo "${pkg}.location=$install_location" >>"$installed_file"
-    echo "${pkg}.version=$version" >>"$installed_file"
-}
-
-pkg_field_optional() {
-    pkg=$1
-    field=$2
-    if ! value=$(grep "${pkg}.${field}="); then
-        return 1
-    fi
-
-    echo "$value" | cut -d'=' -f2-
-}
-
-pkg_field() {
-    pkg=$1
-    field=$2
-
-    if ! pkg_field_optional "$pkg" "$field"; then
-        echo "error: package '$pkg' has no field '$field'" >&2
-        return 1
-    fi
+    {
+        echo "[$pkg]"
+        echo "location=$install_location"
+        echo "version=$version"
+    } >>"$installed_file"
 }
 
 is_pkg_installed() {
@@ -162,7 +181,11 @@ is_pkg_installed() {
         return 1
     fi
 
-    pkg_field_optional "$pkg" 'location' <"$installed_file" >/dev/null
+    section=$(ini_section "$pkg" <"$installed_file")
+    version=$(echo "$section" | ini_field "version")
+    location=$(echo "$section" | ini_field "location")
+
+    [ -n "$version" ] && [ -n "$location" ]
 }
 
 install_using_dir() {
@@ -177,13 +200,18 @@ install_using_dir() {
     os=$(uname -s | tr '[:upper:]' '[:lower:]')
     arch=$(uname -m)
 
-    fields=$(grep "^${pkg}." "$pkgs_file")
-    version=$(echo "$fields" | pkg_field "$pkg" 'version') || return 1
-    file_to_install=$(echo "$fields" | pkg_field "$pkg" "install_${os}_${arch}") || return 1
-    url=$(echo "$fields" | pkg_field "$pkg" "url_${os}_${arch}") || return 1
-    expected_hash=$(echo "$fields" | pkg_field "$pkg" "hash_${os}_${arch}") || return 1
+    info_section=$(ini_section "$pkg\.info" <"$pkgs_file")
+    arch_section=$(ini_section "$pkg\.${os}_${arch}" <"$pkgs_file")
+    version=$(echo "$info_section" | ini_field 'version')
+    file_to_install=$(echo "$arch_section" | ini_field 'install')
+    url=$(echo "$arch_section" | ini_field 'url')
+    expected_hash=$(echo "$arch_section" | ini_field 'hash')
+    rename=$(echo "$arch_section" | ini_field 'rename')
 
-    rename=$(echo "$fields" | pkg_field_optional "$pkg" 'rename')
+    error_if_empty "$version" "error: '$pkg' does not have field 'version'" || return 1
+    error_if_empty "$file_to_install" "error: '$pkg' does not have field 'install'" || return 1
+    error_if_empty "$url" "error: '$pkg' does not have field 'url'" || return 1
+    error_if_empty "$expected_hash" "error: '$pkg' does not have field 'hash'" || return 1
 
     download_url_to "$url" "$dir" || return 1
     if [ "$DIPM_DEBUG" ]; then
@@ -199,7 +227,6 @@ install_using_dir() {
     fi
 
     install_pkg "$file_to_install" "$rename" "$version" "$dir" || return 1
-
 }
 
 install() {
@@ -214,21 +241,28 @@ install() {
     return "$exit_code"
 }
 
-uninstall() {
-    pkg=$1
-    if ! is_pkg_installed "$pkg"; then
-        echo "$pkg is not installed" >&2
-        return 1
-    fi
+list() {
+    pkgs=$(mktemp -t 'dipm.XXXXXXXX')
+    versions=$(mktemp -t 'dipm.XXXXXXXX')
 
-    location=$(pkg_field "$pkg" 'location' <"$installed_file") || return 1
+    grep '^\[.*\]$' "$installed_file" | tr -d '][' >"$pkgs"
+    grep '^version=' "$installed_file" | sed 's/version=//' >"$versions"
+    paste "$pkgs" "$versions"
 
-    sed -i "/^$pkg\./d" "$installed_file"
-    rm "$location"
+    rm "$pkgs" "$versions"
 }
 
-list() {
-    grep '^[^.]*\.version=' "$installed_file" | sed 's/\.version=/\t/'
+uninstall() {
+    pkg=$1
+    section=$(ini_section "$pkg" <"$installed_file")
+    location=$(echo "$section" | ini_field "location")
+
+    error_if_empty "$location" "error: '$pkg' is not installed" || return 1
+    rm "$location"
+
+    new_installed_file=$(mktemp -t 'dipm.XXXXXXXX')
+    ini_delete_section "$pkg" <"$installed_file" >"$new_installed_file"
+    mv "$new_installed_file" "$installed_file"
 }
 
 update_no_check() {
@@ -260,8 +294,11 @@ update() {
         return 1
     fi
 
-    old_version=$(pkg_field "$pkg" 'version' <"$installed_file") || return 1
-    new_version=$(pkg_field "$pkg" 'version' <"$pkgs_file") || return 1
+    installed_section=$(ini_section "$pkg" <"$installed_file")
+    info_section=$(ini_section "$pkg\.info" <"$pkgs_file")
+
+    old_version=$(echo "$installed_section" | ini_field 'version')
+    new_version=$(echo "$info_section" | ini_field 'version')
     if [ "$old_version" = "$new_version" ]; then
         echo "$pkg is up to date" >&2
         return 1
