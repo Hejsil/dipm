@@ -29,12 +29,12 @@ usage() {
 
 ini_section() {
     section=$1
-    awk "/\[.*\]/ {print_it=0} /^\[$section\]$/ {print_it=1} print_it"
+    awk "/^\[.*\]$/ {print_it=0} /^\[$section\]$/ {print_it=1} print_it"
 }
 
 ini_delete_section() {
     section=$1
-    awk "/\[.*\]/ {print_it=1} /^\[$section\]$/ {print_it=0} print_it"
+    awk "/^\[.*\]$/ {print_it=1} /^\[$section\]$/ {print_it=0} print_it"
 }
 
 ini_field() {
