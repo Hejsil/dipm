@@ -149,20 +149,20 @@ extract_pkg() {
 }
 
 install_pkg() {
-    file_to_install=$1
+    install_bin=$1
     rename=$2
     version=$3
     download_dir=$4
 
     file_name=$rename
     if [ -z "$file_name" ]; then
-        file_name=$(basename "$file_to_install")
+        file_name=$(basename "$install_bin")
     fi
 
-    from_location="$download_dir/$file_to_install"
+    from_location="$download_dir/$install_bin"
     install_location="$bin_dir/$file_name"
 
-    error_if_not_file "$from_location" "error: file '$file_to_install' doesn't exist" || return 1
+    error_if_not_file "$from_location" "error: file '$install_bin' doesn't exist" || return 1
     error_if_file "$install_location" "error: file '$install_location' already exists" || return 1
 
     cp "$from_location" "$install_location"
@@ -203,13 +203,13 @@ install_using_dir() {
     info_section=$(ini_section "$pkg\.info" <"$pkgs_file")
     arch_section=$(ini_section "$pkg\.${os}_${arch}" <"$pkgs_file")
     version=$(echo "$info_section" | ini_field 'version')
-    file_to_install=$(echo "$arch_section" | ini_field 'install')
+    install_bin=$(echo "$arch_section" | ini_field 'install_bin')
     url=$(echo "$arch_section" | ini_field 'url')
     expected_hash=$(echo "$arch_section" | ini_field 'hash')
     rename=$(echo "$arch_section" | ini_field 'rename')
 
     error_if_empty "$version" "error: '$pkg' does not have field 'version'" || return 1
-    error_if_empty "$file_to_install" "error: '$pkg' does not have field 'install'" || return 1
+    error_if_empty "$install_bin" "error: '$pkg' does not have field 'install_bin'" || return 1
     error_if_empty "$url" "error: '$pkg' does not have field 'url'" || return 1
     error_if_empty "$expected_hash" "error: '$pkg' does not have field 'hash'" || return 1
 
@@ -226,7 +226,7 @@ install_using_dir() {
         tree "$dir" >&2
     fi
 
-    install_pkg "$file_to_install" "$rename" "$version" "$dir" || return 1
+    install_pkg "$install_bin" "$rename" "$version" "$dir" || return 1
 }
 
 install() {
