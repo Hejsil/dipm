@@ -149,30 +149,39 @@ extract_pkg() {
 }
 
 install_pkg() {
-    install_bin=$1
-    rename=$2
-    version=$3
-    download_dir=$4
+    pkg=$1
+    install_bin=$2
+    rename=$3
+    version=$4
+    download_dir=$5
 
-    file_name=$rename
-    if [ -z "$file_name" ]; then
-        file_name=$(basename "$install_bin")
-    fi
+    echo "[$pkg]" >>"$installed_file"
+    echo "version=$version" >>"$installed_file"
+    install_pkg_file 'bin' "$download_dir" "$install_bin" "$rename" || return 1
+}
 
-    from_location="$download_dir/$install_bin"
-    install_location="$bin_dir/$file_name"
+install_pkg_file() {
+    type=$1
+    from_dir=$2
+    from=$3
+    name=${4:-$(basename "$from")}
 
-    error_if_not_file "$from_location" "error: file '$install_bin' doesn't exist" || return 1
+    case $type in
+        bin) install_dir=$bin_dir ;;
+    esac
+
+    from_location="$from_dir/$from"
+    install_location="$install_dir/$name"
+
+    error_if_not_file "$from_location" "error: file '$from' doesn't exist" || return 1
     error_if_file "$install_location" "error: file '$install_location' already exists" || return 1
 
-    cp "$from_location" "$install_location"
-    chmod +x "$install_location"
+    cp -r "$from_location" "$install_location"
+    case $type in
+        bin) chmod +x "$install_location" ;;
+    esac
 
-    {
-        echo "[$pkg]"
-        echo "location=$install_location"
-        echo "version=$version"
-    } >>"$installed_file"
+    echo "location=$install_location" >>"$installed_file"
 }
 
 is_pkg_installed() {
@@ -226,7 +235,10 @@ install_using_dir() {
         tree "$dir" >&2
     fi
 
-    install_pkg "$install_bin" "$rename" "$version" "$dir" || return 1
+    install_pkg "$pkg" "$install_bin" "$rename" "$version" "$dir" || {
+        uninstall "$pkg" >/dev/null 2>/dev/null
+        return 1
+    }
 }
 
 install() {
@@ -257,12 +269,13 @@ uninstall() {
     section=$(ini_section "$pkg" <"$installed_file")
     location=$(echo "$section" | ini_field "location")
 
-    error_if_empty "$location" "error: '$pkg' is not installed" || return 1
-    rm "$location"
-
     new_installed_file=$(mktemp -t 'dipm.XXXXXXXX')
     ini_delete_section "$pkg" <"$installed_file" >"$new_installed_file"
     mv "$new_installed_file" "$installed_file"
+
+    error_if_empty "$location" "error: '$pkg' is not installed" || return 1
+    rm "$location"
+
 }
 
 update_no_check() {
