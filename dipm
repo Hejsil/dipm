@@ -151,13 +151,18 @@ extract_pkg() {
 install_pkg() {
     pkg=$1
     install_bin=$2
-    rename=$3
-    version=$4
-    download_dir=$5
+    version=$3
+    download_dir=$4
 
     echo "[$pkg]" >>"$installed_file"
     echo "version=$version" >>"$installed_file"
-    install_pkg_file 'bin' "$download_dir" "$install_bin" "$rename" || return 1
+    echo "$install_bin" | tr ':' '\t' | while read -r name from; do
+        if [ -z "$from" ]; then
+            from="$name"
+            name=''
+        fi
+        install_pkg_file 'bin' "$download_dir" "$from" "$name" || return 1
+    done
 }
 
 install_pkg_file() {
@@ -215,7 +220,6 @@ install_using_dir() {
     install_bin=$(echo "$arch_section" | ini_field 'install_bin')
     url=$(echo "$arch_section" | ini_field 'url')
     expected_hash=$(echo "$arch_section" | ini_field 'hash')
-    rename=$(echo "$arch_section" | ini_field 'rename')
 
     error_if_empty "$version" "error: '$pkg' does not have field 'version'" || return 1
     error_if_empty "$install_bin" "error: '$pkg' does not have field 'install_bin'" || return 1
@@ -235,7 +239,7 @@ install_using_dir() {
         tree "$dir" >&2
     fi
 
-    install_pkg "$pkg" "$install_bin" "$rename" "$version" "$dir" || {
+    install_pkg "$pkg" "$install_bin" "$version" "$dir" || {
         uninstall "$pkg" >/dev/null 2>/dev/null
         return 1
     }
