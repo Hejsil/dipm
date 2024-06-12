@@ -286,7 +286,8 @@ update_no_check() {
 
 update_all() {
     list | while read -r pkg old_version; do
-        new_version=$(pkg_field "$pkg" 'version' <"$pkgs_file") || continue
+        info_section=$(ini_section "$pkg\.info" <"$pkgs_file")
+        new_version=$(echo "$info_section" | ini_field 'version')
         if [ "$old_version" = "$new_version" ]; then
             continue
         fi
