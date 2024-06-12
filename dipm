@@ -278,8 +278,7 @@ uninstall() {
     mv "$new_installed_file" "$installed_file"
 
     error_if_empty "$location" "error: '$pkg' is not installed" || return 1
-    rm "$location"
-
+    echo "$location" | xargs -d'\n' rm -r
 }
 
 update_no_check() {
