@@ -254,7 +254,8 @@ install() {
     install_using_dir "$1" "$tmp_dir"
     exit_code=$?
 
-    rm -r "$tmp_dir"
+    # Keep the temp dir in debug mode
+    [ -z "$DIPM_DEBUG" ] && rm -r "$tmp_dir"
 
     return "$exit_code"
 }
