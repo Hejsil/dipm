@@ -23,7 +23,8 @@ usage() {
     echo '  uninstall <name>   Uninstall a package'
     echo '  update <name>      Update a package'
     echo '  update             Update all packages'
-    echo '  list               List all installed packages and their versions'
+    echo '  installed          List all installed packages and their versions'
+    echo '  packages           List all packages and their versions'
     echo '  help               Print this help and exit'
 }
 
@@ -264,15 +265,25 @@ install() {
     return "$exit_code"
 }
 
-list() {
+list_packages_in() {
+    file=$1
+    section=$2
     pkgs=$(mktemp -t 'dipm.XXXXXXXX')
     versions=$(mktemp -t 'dipm.XXXXXXXX')
 
-    grep '^\[.*\]$' "$installed_file" | tr -d '][' >"$pkgs"
-    grep '^version=' "$installed_file" | sed 's/version=//' >"$versions"
+    grep "^\[.*$section\]$" "$file" | sed -e 's/^\[//' -e "s/$section\]$//" >"$pkgs"
+    grep '^version=' "$file" | sed 's/^version=//' >"$versions"
     paste "$pkgs" "$versions"
 
     rm "$pkgs" "$versions"
+}
+
+installed() {
+    list_packages_in "$installed_file" ""
+}
+
+packages() {
+    list_packages_in "$pkgs_file" "\.info"
 }
 
 uninstall() {
@@ -295,7 +306,7 @@ update_no_check() {
 }
 
 update_all() {
-    list | while read -r pkg old_version; do
+    installed | while read -r pkg old_version; do
         info_section=$(ini_section "$pkg\.info" <"$pkgs_file")
         new_version=$(echo "$info_section" | ini_field 'version')
         if [ "$old_version" = "$new_version" ]; then
@@ -343,7 +354,8 @@ case $cmd in
         download_pkgs_file_if_out_of_date
         update "$pkg"
         ;;
-    list) list ;;
+    installed) installed ;;
+    packages) packages ;;
     uninstall) uninstall "$pkg" ;;
     -h | --help | help) usage ;;
     *)
