@@ -143,14 +143,14 @@ extract_pkg() {
         application/x-bzip2) tar -xvf "$file" -C "$download_dir" >/dev/null ;;
         application/x-xz) tar -xvf "$file" -C "$download_dir" >/dev/null ;;
         application/zstd) tar -xvf "$file" -C "$download_dir" >/dev/null ;;
-        application/octet-stream) {
+        application/octet-stream) (
             cd "$download_dir" || return 1
             unzip "$file" >/dev/null
-        } ;;
-        application/zip) {
+        ) ;;
+        application/zip) (
             cd "$download_dir" || return 1
             unzip "$file" >/dev/null
-        } ;;
+        ) ;;
         *) ;;
     esac
 }
