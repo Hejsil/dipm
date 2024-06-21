@@ -145,6 +145,7 @@ extract_pkg() {
         *.tar.zst) tar -xvf "$file" -C "$download_dir" >/dev/null ;;
         *.tbz) tar -xvf "$file" -C "$download_dir" >/dev/null ;;
         *.tgz) tar -xvf "$file" -C "$download_dir" >/dev/null ;;
+        *.gz) gzip -d "$file" >/dev/null ;;
         *.zip) (
             cd "$download_dir" || return 1
             unzip "$file" >/dev/null
