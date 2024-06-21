@@ -166,17 +166,17 @@ install_pkg() {
     echo "$install_bin" | tr ':' '\t' | while read -r name from; do
         if [ -z "$from" ]; then
             from="$name"
-            name=''
+            name="$(basename "$from")"
         fi
-        install_pkg_file 'bin' "$download_dir" "$from" "$name" || return 1
+        install_file 'bin' "$download_dir" "$from" "$name" || return 1
     done
 }
 
-install_pkg_file() {
+install_file() {
     type=$1
     from_dir=$2
     from=$3
-    name=${4:-$(basename "$from")}
+    name=$4
 
     case $type in
         bin) install_dir=$bin_dir ;;
