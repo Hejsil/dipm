@@ -40,7 +40,7 @@ ini_delete_section() {
 
 ini_field() {
     field=$1
-    grep "${field}=" | cut -d'=' -f2-
+    grep -F "${field}=" | cut -d'=' -f2-
 }
 
 error_if_empty() {
