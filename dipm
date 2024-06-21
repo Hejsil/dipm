@@ -6,9 +6,10 @@ cache_home=${XDG_CACHE_HOME:-$HOME/.cache}
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 
 bin_dir="$HOME/.local/bin"
+lib_dir="$HOME/.local/lib"
 cache_dir="$cache_home/$program_name"
 data_dir="$data_home/$program_name"
-mkdir -p "$bin_dir" "$cache_dir" "$data_dir"
+mkdir -p "$bin_dir" "$lib_dir" "$cache_dir" "$data_dir"
 
 pkgs_file="$cache_dir/pkgs.ini"
 installed_file="$data_dir/installed.ini"
@@ -52,19 +53,19 @@ error_if_empty() {
     fi
 }
 
-error_if_file() {
+error_if_exist() {
     string=$1
     msg=$2
-    if [ -f "$string" ]; then
+    if [ -e "$string" ]; then
         echo "$msg" >&2
         return 1
     fi
 }
 
-error_if_not_file() {
+error_if_doesnt_exist() {
     string=$1
     msg=$2
-    if ! [ -f "$string" ]; then
+    if ! [ -e "$string" ]; then
         echo "$msg" >&2
         return 1
     fi
@@ -157,22 +158,35 @@ extract_pkg() {
 
 install_pkg() {
     pkg=$1
-    install_bin=$2
-    version=$3
-    download_dir=$4
+    version=$2
+    download_dir=$3
+    install_bin=$4
+    install_lib=$5
 
     echo "[$pkg]" >>"$installed_file"
     echo "version=$version" >>"$installed_file"
-    echo "$install_bin" | tr ':' '\t' | while read -r name from; do
+    install_all 'bin' "$download_dir" "$install_bin"
+    install_all 'lib' "$download_dir" "$install_lib"
+}
+
+install_all() {
+    type=$1
+    download_dir=$2
+    installs=$3
+    if [ -z "$installs" ]; then
+        return
+    fi
+
+    echo "$installs" | tr ':' '\t' | while read -r name from; do
         if [ -z "$from" ]; then
             from="$name"
             name="$(basename "$from")"
         fi
-        install_file 'bin' "$download_dir" "$from" "$name" || return 1
+        install_one "$type" "$download_dir" "$from" "$name" || return 1
     done
 }
 
-install_file() {
+install_one() {
     type=$1
     from_dir=$2
     from=$3
@@ -180,13 +194,14 @@ install_file() {
 
     case $type in
         bin) install_dir=$bin_dir ;;
+        lib) install_dir=$lib_dir ;;
     esac
 
     from_location="$from_dir/$from"
     install_location="$install_dir/$name"
 
-    error_if_not_file "$from_location" "error: file '$from' doesn't exist" || return 1
-    error_if_file "$install_location" "error: file '$install_location' already exists" || return 1
+    error_if_doesnt_exist "$from_location" "error: file '$from' doesn't exist" || return 1
+    error_if_exist "$install_location" "error: file '$install_location' already exists" || return 1
 
     cp -r "$from_location" "$install_location"
     case $type in
@@ -225,11 +240,11 @@ install_using_dir() {
     arch_section=$(ini_section "$pkg\.${os}_${arch}" <"$pkgs_file")
     version=$(echo "$info_section" | ini_field 'version')
     install_bin=$(echo "$arch_section" | ini_field 'install_bin')
+    install_lib=$(echo "$arch_section" | ini_field 'install_lib')
     url=$(echo "$arch_section" | ini_field 'url')
     expected_hash=$(echo "$arch_section" | ini_field 'hash')
 
     error_if_empty "$version" "error: '$pkg' does not have field 'version'" || return 1
-    error_if_empty "$install_bin" "error: '$pkg' does not have field 'install_bin'" || return 1
     error_if_empty "$url" "error: '$pkg' does not have field 'url'" || return 1
     error_if_empty "$expected_hash" "error: '$pkg' does not have field 'hash'" || return 1
 
@@ -246,7 +261,7 @@ install_using_dir() {
         tree -h "$dir" >&2
     fi
 
-    install_pkg "$pkg" "$install_bin" "$version" "$dir" || {
+    install_pkg "$pkg" "$version" "$dir" "$install_bin" "$install_lib" || {
         uninstall "$pkg" >/dev/null 2>/dev/null
         return 1
     }
