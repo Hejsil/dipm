@@ -254,14 +254,14 @@ install_using_dir() {
     download_url_to "$url" "$dir" || return 1
     if [ "$DIPM_DEBUG" ]; then
         echo "debug: after download:" >&2
-        tree -h "$dir" >&2
+        find "$dir" >&2
     fi
 
     validate_pkg_hash "$expected_hash" "$dir" || return 1
     extract_pkg "$dir" || return 1
     if [ "$DIPM_DEBUG" ]; then
         echo "debug: after extraction:" >&2
-        tree -h "$dir" >&2
+        find "$dir" >&2
     fi
 
     install_pkg "$pkg" "$version" "$dir" "$install_bin" "$install_lib" "$install_share" || {
