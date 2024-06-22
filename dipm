@@ -7,9 +7,10 @@ data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 
 bin_dir="$HOME/.local/bin"
 lib_dir="$HOME/.local/lib"
+share_dir="$data_home"
 cache_dir="$cache_home/$program_name"
 data_dir="$data_home/$program_name"
-mkdir -p "$bin_dir" "$lib_dir" "$cache_dir" "$data_dir"
+mkdir -p "$bin_dir" "$lib_dir" "$share_dir" "$cache_dir" "$data_dir"
 
 pkgs_file="$cache_dir/pkgs.ini"
 installed_file="$data_dir/installed.ini"
@@ -160,11 +161,13 @@ install_pkg() {
     download_dir=$3
     install_bin=$4
     install_lib=$5
+    install_share=$6
 
     echo "[$pkg]" >>"$installed_file"
     echo "version=$version" >>"$installed_file"
     install_all 'bin' "$download_dir" "$install_bin"
     install_all 'lib' "$download_dir" "$install_lib"
+    install_all 'share' "$download_dir" "$install_share"
 }
 
 install_all() {
@@ -193,6 +196,7 @@ install_one() {
     case $type in
         bin) install_dir=$bin_dir ;;
         lib) install_dir=$lib_dir ;;
+        share) install_dir=$share_dir ;;
     esac
 
     from_location="$from_dir/$from"
@@ -239,6 +243,7 @@ install_using_dir() {
     version=$(echo "$info_section" | ini_field 'version')
     install_bin=$(echo "$arch_section" | ini_field 'install_bin')
     install_lib=$(echo "$arch_section" | ini_field 'install_lib')
+    install_share=$(echo "$arch_section" | ini_field 'install_share')
     url=$(echo "$arch_section" | ini_field 'url')
     expected_hash=$(echo "$arch_section" | ini_field 'hash')
 
@@ -259,7 +264,7 @@ install_using_dir() {
         tree -h "$dir" >&2
     fi
 
-    install_pkg "$pkg" "$version" "$dir" "$install_bin" "$install_lib" || {
+    install_pkg "$pkg" "$version" "$dir" "$install_bin" "$install_lib" "$install_share" || {
         uninstall "$pkg" >/dev/null 2>/dev/null
         return 1
     }
