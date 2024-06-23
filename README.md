@@ -12,6 +12,15 @@ $ ls ~/.local/bin/fzf # fzf has now been installed in ~/.local/bin
 $ dipm uninstall fzf # Uninstall fzf
 ```
 
+# How to install
+
+```sh
+curl -L https://github.com/Hejsil/dipm/raw/master/dipm > /tmp/dipm &&
+    chmod +x /tmp/dipm &&
+    /tmp/dipm install dipm &&
+    rm /tmp/dipm
+```
+
 # Why?
 
 I love Arch linux. The main reason for this is the Arch User Repositiory (AUR). With the AUR, most
