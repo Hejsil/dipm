@@ -140,6 +140,7 @@ extract_pkg() {
 
     file=$(find "$download_dir" -type f)
     case $file in
+        *.tar) tar -xvf "$file" -C "$download_dir" >/dev/null ;;
         *.tar.bz2) tar -xvf "$file" -C "$download_dir" >/dev/null ;;
         *.tar.gz) tar -xvf "$file" -C "$download_dir" >/dev/null ;;
         *.tar.xz) tar -xvf "$file" -C "$download_dir" >/dev/null ;;
