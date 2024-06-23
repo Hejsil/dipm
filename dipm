@@ -10,7 +10,6 @@ lib_dir="$HOME/.local/lib"
 share_dir="$data_home"
 cache_dir="$cache_home/$program_name"
 data_dir="$data_home/$program_name"
-mkdir -p "$bin_dir" "$lib_dir" "$share_dir" "$cache_dir" "$data_dir"
 
 pkgs_file="$cache_dir/pkgs.ini"
 installed_file="$data_dir/installed.ini"
@@ -109,6 +108,7 @@ is_pkgs_file_up_to_date() {
 download_pkgs_file() {
     tmp_dir=$(mktemp -dt 'dipm.XXXXXXXX')
     if download_url_to "$pkgs_url" "$tmp_dir"; then
+        mkdir -p "$(dirname "$pkgs_file")"
         mv "$tmp_dir/pkgs.ini" "$pkgs_file"
     fi
 
@@ -164,6 +164,8 @@ install_pkg() {
     install_lib=$5
     install_share=$6
 
+    mkdir -p "$(dirname "$installed_file")"
+
     echo "[$pkg]" >>"$installed_file"
     echo "version=$version" >>"$installed_file"
     install_all 'bin' "$download_dir" "$install_bin"
@@ -206,6 +208,7 @@ install_one() {
     error_if_doesnt_exist "$from_location" "error: file '$from' doesn't exist" || return 1
     error_if_exist "$install_location" "error: file '$install_location' already exists" || return 1
 
+    mkdir -p "$(dirname "$install_location")"
     cp -r "$from_location" "$install_location"
     case $type in
         bin) chmod +x "$install_location" ;;
