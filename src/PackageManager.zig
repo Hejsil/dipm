@@ -148,10 +148,15 @@ fn installOneUnchecked(pm: *PackageManager, package: Package.Specific) !void {
 
 fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Package.Specific) !void {
     const downloaded_file_name = std.fs.path.basename(package.install.url);
+
     const downloaded_file = try dir.createFile(downloaded_file_name, .{
         .read = true,
     });
     defer downloaded_file.close();
+
+    // TODO: Get rid of this once we have support for bz2 compression
+    const downloaded_path = try dir.realpathAlloc(pm.allocator, downloaded_file_name);
+    defer pm.allocator.free(downloaded_path);
 
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     var hashing_writer = std.compress.hashedWriter(downloaded_file.writer(), &hasher);
@@ -173,7 +178,7 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
         try downloaded_file.seekTo(0);
 
         const output_path = FileType.stripPath(downloaded_file_name);
-        try extract(pm.allocator, downloaded_file, file_type, dir, output_path);
+        try extract(pm.allocator, downloaded_path, downloaded_file, file_type, dir, output_path);
     }
 }
 
@@ -287,6 +292,7 @@ fn copyTree(from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
 
 fn extract(
     allocator: std.mem.Allocator,
+    file_path: []const u8,
     file: std.fs.File,
     file_type: FileType,
     out_dir: std.fs.Dir,
@@ -294,10 +300,22 @@ fn extract(
 ) !void {
     const tar_pipe_options = std.tar.PipeOptions{ .exclude_empty_directories = true };
     switch (file_type) {
-        .tar_xz => {
+        .tar_bz2 => {
+            // TODO: For now we bail out to an external program for tar.bz2 files.
+            //       This makes dipm not self contained, which kinda defeats the points
+            const out_path = try out_dir.realpathAlloc(allocator, ".");
+            defer allocator.free(out_path);
+
+            const result = try std.process.Child.run(.{
+                .allocator = allocator,
+                .argv = &.{ "tar", "-xvf", file_path, "-C", out_path },
+            });
+            allocator.free(result.stdout);
+            allocator.free(result.stderr);
+        },
+        .tar_gz => {
             var buffered_reader = std.io.bufferedReader(file.reader());
-            var decomp = try std.compress.xz.decompress(allocator, buffered_reader.reader());
-            defer decomp.deinit();
+            var decomp = std.compress.gzip.decompressor(buffered_reader.reader());
             try std.tar.pipeToFileSystem(out_dir, decomp.reader(), tar_pipe_options);
         },
         .tar_zst => {
@@ -308,17 +326,11 @@ fn extract(
             });
             try std.tar.pipeToFileSystem(out_dir, decomp.reader(), tar_pipe_options);
         },
-        .tar_gz => {
+        .tar_xz => {
             var buffered_reader = std.io.bufferedReader(file.reader());
-            var decomp = std.compress.gzip.decompressor(buffered_reader.reader());
+            var decomp = try std.compress.xz.decompress(allocator, buffered_reader.reader());
+            defer decomp.deinit();
             try std.tar.pipeToFileSystem(out_dir, decomp.reader(), tar_pipe_options);
-        },
-        .tar => {
-            var buffered_reader = std.io.bufferedReader(file.reader());
-            try std.tar.pipeToFileSystem(out_dir, buffered_reader.reader(), tar_pipe_options);
-        },
-        .zip => {
-            try std.zip.extract(out_dir, file.seekableStream(), .{});
         },
         .gz => {
             const out_file = try out_dir.createFile(out_name, .{});
@@ -333,6 +345,13 @@ fn extract(
                     break;
                 try out_file.writeAll(buf[0..len]);
             }
+        },
+        .tar => {
+            var buffered_reader = std.io.bufferedReader(file.reader());
+            try std.tar.pipeToFileSystem(out_dir, buffered_reader.reader(), tar_pipe_options);
+        },
+        .zip => {
+            try std.zip.extract(out_dir, file.seekableStream(), .{});
         },
         .binary => {},
     }
@@ -524,18 +543,21 @@ pub fn IniFile(comptime T: type) type {
 }
 
 const FileType = enum {
+    tar_bz2,
     tar_gz,
     tar_xz,
     tar_zst,
+    gz,
     tar,
     zip,
-    gz,
     binary,
 
     pub const extension_filetype_map = [_]struct { ext: []const u8, file_type: FileType }{
+        .{ .ext = ".tar.bz2", .file_type = .tar_bz2 },
         .{ .ext = ".tar.gz", .file_type = .tar_gz },
         .{ .ext = ".tar.xz", .file_type = .tar_xz },
         .{ .ext = ".tar.zst", .file_type = .tar_zst },
+        .{ .ext = ".tbz", .file_type = .tar_bz2 },
         .{ .ext = ".tgz", .file_type = .tar_gz },
         .{ .ext = ".tar", .file_type = .tar },
         .{ .ext = ".zip", .file_type = .zip },
