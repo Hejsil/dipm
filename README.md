@@ -4,7 +4,6 @@ A package manager for installing linux programs that are self contained
 
 ```sh
 $ dipm install fzf # Install fzf
-fzf-0.53.0-linux_am 100%[=================>]   1,48M  --.-KB/s    in 0,07s
 
 $ ls ~/.local/bin/fzf # fzf has now been installed in ~/.local/bin
 /home/user/.local/bin/fzf
