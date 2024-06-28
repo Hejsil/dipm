@@ -276,8 +276,9 @@ fn copyTree(from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
 
             try copyTree(child_from_dir, child_to_dir);
         },
-        .sym_link, .file => try from_dir.copyFile(entry.name, to_dir, entry.name, .{}),
+        .file => try from_dir.copyFile(entry.name, to_dir, entry.name, .{}),
 
+        .sym_link,
         .block_device,
         .character_device,
         .named_pipe,
