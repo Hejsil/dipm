@@ -405,6 +405,14 @@ fn uninstallOneUnchecked(pm: *PackageManager, package: []const u8) !void {
     _ = pm.installed_file.data.packages.orderedRemove(package);
 }
 
+pub fn updateAll(pm: *PackageManager) !void {
+    const installed_packages = pm.installed_file.data.packages.keys();
+    const packages_to_update = try pm.allocator.dupe([]const u8, installed_packages);
+    defer pm.allocator.free(packages_to_update);
+
+    return pm.updateMany(packages_to_update);
+}
+
 pub fn updateOne(pm: *PackageManager, package_name: []const u8) !void {
     return pm.updateMany(&.{package_name});
 }

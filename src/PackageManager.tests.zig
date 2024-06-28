@@ -160,6 +160,8 @@ test "update" {
     defer pm_v1.deinit();
 
     try pm_v1.pm.installOne("test-xz");
+    try pm_v1.pm.installOne("test-zst");
+
     // TODO: Currently the package manager cannot install the same package again if the tmp dir
     //       hasn't been cleaned. This needs to be fixed.
     try pm_v1.pm.cleanup();
@@ -182,9 +184,82 @@ test "update" {
         \\location = {[prefix]s}/share/test-xz-dir
         \\location = {[prefix]s}/share/test-xz
         \\
+        \\[test-zst]
+        \\version = 0.1.0
+        \\location = {[prefix]s}/bin/test-zst
+        \\location = {[prefix]s}/lib/test-zst-dir
+        \\location = {[prefix]s}/lib/test-zst
+        \\location = {[prefix]s}/share/test-zst-dir
+        \\location = {[prefix]s}/share/test-zst
+        \\
     , .{ .prefix = pm_v2.pm.prefix_path }));
 
     try pm_v2.pm.updateOne("test-xz");
+    try pm_v2.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+        \\[test-zst]
+        \\version = 0.1.0
+        \\location = {[prefix]s}/bin/test-zst
+        \\location = {[prefix]s}/lib/test-zst-dir
+        \\location = {[prefix]s}/lib/test-zst
+        \\location = {[prefix]s}/share/test-zst-dir
+        \\location = {[prefix]s}/share/test-zst
+        \\
+        \\[test-xz]
+        \\version = 0.2.0
+        \\location = {[prefix]s}/bin/test-xz
+        \\location = {[prefix]s}/lib/test-xz-dir
+        \\location = {[prefix]s}/lib/test-xz
+        \\location = {[prefix]s}/share/test-xz-dir
+        \\location = {[prefix]s}/share/test-xz
+        \\
+    , .{ .prefix = pm_v2.pm.prefix_path }));
+
+    try pm_v2.cleanup();
+}
+
+test "update all" {
+    const repo_v1 = simple_repository_v1.get();
+    var pm_v1 = try TestingPackageManager.init(.{
+        .pkgs_ini_path = repo_v1.pkgs_ini_path,
+    });
+    defer pm_v1.deinit();
+
+    try pm_v1.pm.installOne("test-xz");
+    try pm_v1.pm.installOne("test-zst");
+
+    // TODO: Currently the package manager cannot install the same package again if the tmp dir
+    //       hasn't been cleaned. This needs to be fixed.
+    try pm_v1.pm.cleanup();
+
+    const repo_v2 = simple_repository_v2.get();
+    var pm_v2 = try TestingPackageManager.init(.{
+        .pkgs_ini_path = repo_v2.pkgs_ini_path,
+        .prefix = pm_v1.pm.prefix_path,
+    });
+    defer pm_v2.deinit();
+
+    // the package manager should still know about the installed v1
+    var buf: [std.mem.page_size]u8 = undefined;
+    try pm_v2.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+        \\[test-xz]
+        \\version = 0.1.0
+        \\location = {[prefix]s}/bin/test-xz
+        \\location = {[prefix]s}/lib/test-xz-dir
+        \\location = {[prefix]s}/lib/test-xz
+        \\location = {[prefix]s}/share/test-xz-dir
+        \\location = {[prefix]s}/share/test-xz
+        \\
+        \\[test-zst]
+        \\version = 0.1.0
+        \\location = {[prefix]s}/bin/test-zst
+        \\location = {[prefix]s}/lib/test-zst-dir
+        \\location = {[prefix]s}/lib/test-zst
+        \\location = {[prefix]s}/share/test-zst-dir
+        \\location = {[prefix]s}/share/test-zst
+        \\
+    , .{ .prefix = pm_v2.pm.prefix_path }));
+
+    try pm_v2.pm.updateAll();
     try pm_v2.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
         \\[test-xz]
         \\version = 0.2.0
@@ -193,6 +268,14 @@ test "update" {
         \\location = {[prefix]s}/lib/test-xz
         \\location = {[prefix]s}/share/test-xz-dir
         \\location = {[prefix]s}/share/test-xz
+        \\
+        \\[test-zst]
+        \\version = 0.2.0
+        \\location = {[prefix]s}/bin/test-zst
+        \\location = {[prefix]s}/lib/test-zst-dir
+        \\location = {[prefix]s}/lib/test-zst
+        \\location = {[prefix]s}/share/test-zst-dir
+        \\location = {[prefix]s}/share/test-zst
         \\
     , .{ .prefix = pm_v2.pm.prefix_path }));
 

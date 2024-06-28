@@ -114,7 +114,11 @@ fn update(program: *Program) !void {
     });
     defer pm.deinit();
 
-    try pm.updateMany(packages_to_update.keys());
+    if (packages_to_update.count() == 0) {
+        try pm.updateAll();
+    } else {
+        try pm.updateMany(packages_to_update.keys());
+    }
 
     try pm.cleanup();
 }
