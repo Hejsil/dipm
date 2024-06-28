@@ -20,6 +20,6 @@ jobs:
           mv zig-out/bin/dipm zig-out/bin/dipm-${{ matrix.target }}
 
       - env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ github.event.release.tag_name }} zig-out/bin/dipm-${{ matrix.target }}
