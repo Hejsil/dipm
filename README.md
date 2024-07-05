@@ -14,7 +14,7 @@ $ dipm uninstall fzf # Uninstall fzf
 # How to install
 
 ```sh
-curl -L https://github.com/hejsil/dipm/releases/download/0.9.0/dipm-x86_64-linux-musl > /tmp/dipm &&
+curl -L https://github.com/Hejsil/dipm/releases/latest/download/dipm-x86_64-linux-musl > /tmp/dipm &&
     chmod +x /tmp/dipm &&
     /tmp/dipm install dipm &&
     rm /tmp/dipm
