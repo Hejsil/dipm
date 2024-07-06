@@ -384,6 +384,46 @@ test "not found" {
     try pm.cleanup();
 }
 
+test "dedupe install/uninstall" {
+    const repo = simple_repository_v1.get();
+    var pm = try TestingPackageManager.init(.{
+        .pkgs_ini_path = repo.pkgs_ini_path,
+    });
+    defer pm.deinit();
+
+    try pm.pm.installMany(&.{ "test-xz", "test-xz" });
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-xz 0.1.0<R>
+        \\
+    );
+    pm.diag.reset();
+
+    try pm.pm.uninstallMany(&.{ "test-xz", "test-xz" });
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-xz 0.1.0 -> ✗<R>
+        \\
+    );
+    pm.diag.reset();
+
+    try pm.cleanup();
+}
+
+test "dedupe not found" {
+    const repo = simple_repository_v1.get();
+    var pm = try TestingPackageManager.init(.{
+        .pkgs_ini_path = repo.pkgs_ini_path,
+    });
+    defer pm.deinit();
+
+    try pm.pm.installMany(&.{ "not-found", "not-found" });
+    try pm.expectDiagnostics(
+        \\<B><y>⚠<R> <B>not-found<R>
+        \\└── Package not found for linux_x86_64
+        \\
+    );
+    try pm.cleanup();
+}
+
 const simple_repository_v1 = struct {
     fn get() *const TestingPackageRepository {
         once.call();

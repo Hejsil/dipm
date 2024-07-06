@@ -112,19 +112,19 @@ pub fn installMany(pm: *PackageManager, package_names: []const []const u8) !void
     var packages_to_install = try pm.packagesToInstall(package_names);
     defer packages_to_install.deinit();
 
-    const len = packages_to_install.items.len;
+    const len = packages_to_install.count();
     for (0..len) |i_forward| {
         const i_backwards = len - (i_forward + 1);
-        const package = packages_to_install.items[i_backwards];
+        const package = packages_to_install.values()[i_backwards];
 
         if (pm.isInstalled(package.name)) {
             if (pm.diagnostics) |diag|
                 try diag.alreadyInstalled(.{ .name = package.name });
-            _ = packages_to_install.swapRemove(i_backwards);
+            _ = packages_to_install.swapRemoveAt(i_backwards);
         }
     }
 
-    for (packages_to_install.items) |package| {
+    for (packages_to_install.values()) |package| {
         pm.installOneUnchecked(package) catch |err| switch (err) {
             error.DiagnosticsInvalidHash => continue,
             error.DiagnosticsDownloadFailed => continue,
@@ -144,33 +144,30 @@ pub fn installMany(pm: *PackageManager, package_names: []const []const u8) !void
 fn packagesToInstall(
     pm: *PackageManager,
     package_names: []const []const u8,
-) !std.ArrayList(Package.Specific) {
-    var packages_to_install = std.ArrayList(Package.Specific).init(pm.gpa);
+) !std.StringArrayHashMap(Package.Specific) {
+    var packages_to_install = std.StringArrayHashMap(Package.Specific).init(pm.gpa);
     errdefer packages_to_install.deinit();
 
+    // First, deduplicate. The value is undefined and set later
     try packages_to_install.ensureTotalCapacity(package_names.len);
-    for (package_names) |package_name| {
-        // TODO: Add to diagnostics and continue instead of failing
-        const package = pm.pkgs_file.data.packages.get(package_name) orelse {
-            if (pm.diagnostics) |diag|
-                try diag.notFound(.{
-                    .name = package_name,
-                    .os = pm.os,
-                    .arch = pm.arch,
-                });
-            continue;
-        };
-        const specific_package = package.specific(package_name, pm.os, pm.arch) orelse {
-            if (pm.diagnostics) |diag|
-                try diag.notFound(.{
-                    .name = package_name,
-                    .os = pm.os,
-                    .arch = pm.arch,
-                });
-            continue;
-        };
+    for (package_names) |package_name|
+        packages_to_install.putAssumeCapacity(package_name, undefined);
 
-        packages_to_install.appendAssumeCapacity(specific_package);
+    // Now, populate. The packages that dont exist gets removed here.
+    for (packages_to_install.keys(), packages_to_install.values(), 0..) |package_name, *entry, i| {
+        entry.* = blk: {
+            const package = pm.pkgs_file.data.packages.get(package_name) orelse break :blk null;
+            break :blk package.specific(package_name, pm.os, pm.arch);
+        } orelse {
+            if (pm.diagnostics) |diag|
+                try diag.notFound(.{
+                    .name = package_name,
+                    .os = pm.os,
+                    .arch = pm.arch,
+                });
+            packages_to_install.swapRemoveAt(i);
+            continue;
+        };
     }
 
     // TODO: Check package.install.hash conflicts
@@ -503,7 +500,7 @@ pub fn updateMany(pm: *PackageManager, package_names: []const []const u8) !void 
     var packages_to_uninstall = try pm.packagesToUninstall(package_names);
     defer packages_to_uninstall.deinit();
 
-    const packages_to_install = try pm.packagesToInstall(packages_to_uninstall.keys());
+    var packages_to_install = try pm.packagesToInstall(packages_to_uninstall.keys());
     defer packages_to_install.deinit();
 
     // TODO: Only update out of date packages
@@ -516,8 +513,8 @@ pub fn updateMany(pm: *PackageManager, package_names: []const []const u8) !void 
     var successfull_uninstalls = std.ArrayList(Package.Specific).init(pm.gpa);
     defer successfull_uninstalls.deinit();
 
-    try successfull_uninstalls.ensureTotalCapacity(packages_to_install.items.len);
-    for (packages_to_install.items) |package| {
+    try successfull_uninstalls.ensureTotalCapacity(packages_to_install.count());
+    for (packages_to_install.values()) |package| {
         const installed_package = packages_to_uninstall.get(package.name).?;
         try pm.uninstallOneUnchecked(package.name, installed_package);
         successfull_uninstalls.appendAssumeCapacity(package);
