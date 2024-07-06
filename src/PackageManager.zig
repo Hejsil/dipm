@@ -532,8 +532,6 @@ fn updatePackages(
             });
     }
 
-    // TODO: Only update out of date packages
-
     // TODO: The steps for this should be
     //       * Download and extract packages to install
     //       * Uninstall installed packages
