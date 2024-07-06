@@ -21,7 +21,6 @@ pub fn init(options: Options) !TestingPackageManager {
         .arch = .x86_64,
         .os = .linux,
         .pkgs_uri = pkgs_uri,
-        .update_frequecy = 0,
     });
     errdefer pm.deinit();
 

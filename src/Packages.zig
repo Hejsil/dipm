@@ -1,6 +1,13 @@
 arena: std.heap.ArenaAllocator,
 packages: std.StringArrayHashMapUnmanaged(Package),
 
+pub fn init(allocator: std.mem.Allocator) Packages {
+    return .{
+        .arena = std.heap.ArenaAllocator.init(allocator),
+        .packages = .{},
+    };
+}
+
 pub fn deinit(packages: *Packages) void {
     packages.arena.deinit();
     packages.* = undefined;

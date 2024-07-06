@@ -15,6 +15,7 @@ share_dir: std.fs.Dir,
 own_data_dir: std.fs.Dir,
 own_tmp_dir: std.fs.Dir,
 
+pkgs_uri: []const u8,
 pkgs_file: IniFile(Packages),
 installed_file: IniFile(InstalledPackages),
 
@@ -31,6 +32,7 @@ pub fn init(options: Options) !PackageManager {
     var prefix_dir = try cwd.makeOpenPath(options.prefix, .{});
     errdefer prefix_dir.close();
 
+    const pkgs_uri = try arena.dupe(u8, options.pkgs_uri);
     const prefix_path = try prefix_dir.realpathAlloc(arena, ".");
 
     var bin_dir = try prefix_dir.makeOpenPath(bin_subpath, .{});
@@ -50,11 +52,15 @@ pub fn init(options: Options) !PackageManager {
 
     var http_client = std.http.Client{ .allocator = allocator };
     errdefer http_client.deinit();
+    try http_client.initDefaultProxies(arena);
 
-    try http_client.initDefaultProxies(allocator);
-
-    if (try isPkgIniOutOfDate(own_data_dir, options.update_frequecy))
-        try downloadPkgsIni(&http_client, own_data_dir, options.pkgs_uri);
+    // TODO: Download pkgs.ini lazily only on operations that actually require it.
+    //       * `install` should only download if it doesn't exists (like here)
+    //       * `update` should download the newest pkgs.ini, but only on the first call
+    own_data_dir.access(pkgs_file_name, .{}) catch |err| switch (err) {
+        error.FileNotFound => try downloadPkgsIni(&http_client, own_data_dir, pkgs_uri),
+        else => |e| return e,
+    };
 
     var pkgs_file = try IniFile(Packages).open(allocator, own_data_dir, pkgs_file_name);
     errdefer pkgs_file.close();
@@ -75,6 +81,7 @@ pub fn init(options: Options) !PackageManager {
         .share_dir = share_dir,
         .own_data_dir = own_data_dir,
         .own_tmp_dir = own_tmp_dir,
+        .pkgs_uri = pkgs_uri,
         .pkgs_file = pkgs_file,
         .installed_file = installed_file,
         .diagnostics = options.diagnostics,
@@ -82,22 +89,11 @@ pub fn init(options: Options) !PackageManager {
 }
 
 fn downloadPkgsIni(client: *std.http.Client, dir: std.fs.Dir, uri: []const u8) !void {
-    const pkgs_file = try dir.createFile(pkgs_file_name, .{});
-    defer pkgs_file.close();
-    try download(client, uri, pkgs_file.writer());
-}
+    var pkgs_file = try dir.atomicFile(pkgs_file_name, .{});
+    defer pkgs_file.deinit();
 
-fn isPkgIniOutOfDate(dir: std.fs.Dir, update_frequency: i128) !bool {
-    const pkgs_file = dir.openFile(pkgs_file_name, .{}) catch |err| switch (err) {
-        error.FileNotFound => return true,
-        else => |e| return e,
-    };
-    defer pkgs_file.close();
-
-    const metadata = try pkgs_file.metadata();
-    const modified = metadata.modified();
-    const now = std.time.nanoTimestamp();
-    return modified + update_frequency < now;
+    try download(client, uri, pkgs_file.file.writer());
+    try pkgs_file.finish();
 }
 
 pub fn isInstalled(pm: PackageManager, package_name: []const u8) bool {
@@ -509,6 +505,20 @@ fn updatePackages(
     package_names: []const []const u8,
     opt: UpdatePackagesOptions,
 ) !void {
+    if (package_names.len == 0)
+        return;
+
+    // Update ensures that pkgs.ini is always up to date
+    if (downloadPkgsIni(&pm.http_client, pm.own_data_dir, pm.pkgs_uri)) |_| {
+        var pkgs_file = try IniFile(Packages).open(pm.gpa, pm.own_data_dir, pkgs_file_name);
+        errdefer pkgs_file.close();
+
+        pm.pkgs_file.close();
+        pm.pkgs_file = pkgs_file;
+    } else |_| {
+        // TODO: Diagnostics
+    }
+
     var packages_to_uninstall = try pm.packagesToUninstall(package_names);
     defer packages_to_uninstall.deinit();
 
@@ -637,7 +647,6 @@ const Options = struct {
 
     /// The URI where the package manager will download the pkgs.ini
     pkgs_uri: []const u8 = "https://github.com/Hejsil/dipm-pkgs/raw/master/pkgs.ini",
-    update_frequecy: i128 = std.time.ns_per_day,
 };
 
 pub fn IniFile(comptime T: type) type {
