@@ -489,7 +489,7 @@ pub fn updateAll(pm: *PackageManager) !void {
     const packages_to_update = try pm.gpa.dupe([]const u8, installed_packages);
     defer pm.gpa.free(packages_to_update);
 
-    return pm.updateMany(packages_to_update);
+    return pm.updatePackages(packages_to_update, .{ .up_to_date_diag = false });
 }
 
 pub fn updateOne(pm: *PackageManager, package_name: []const u8) !void {
@@ -497,11 +497,40 @@ pub fn updateOne(pm: *PackageManager, package_name: []const u8) !void {
 }
 
 pub fn updateMany(pm: *PackageManager, package_names: []const []const u8) !void {
+    return pm.updatePackages(package_names, .{ .up_to_date_diag = true });
+}
+
+const UpdatePackagesOptions = struct {
+    up_to_date_diag: bool,
+};
+
+fn updatePackages(
+    pm: *PackageManager,
+    package_names: []const []const u8,
+    opt: UpdatePackagesOptions,
+) !void {
     var packages_to_uninstall = try pm.packagesToUninstall(package_names);
     defer packages_to_uninstall.deinit();
 
     var packages_to_install = try pm.packagesToInstall(packages_to_uninstall.keys());
     defer packages_to_install.deinit();
+
+    // Remove up to date packages from the list
+    for (
+        packages_to_uninstall.keys(),
+        packages_to_uninstall.values(),
+    ) |package_name, installed_package| {
+        const updated_package = packages_to_install.get(package_name) orelse continue;
+        if (!std.mem.eql(u8, installed_package.version, updated_package.info.version))
+            continue;
+
+        _ = packages_to_install.swapRemove(package_name);
+        if (opt.up_to_date_diag) if (pm.diagnostics) |diag|
+            try diag.upToDate(.{
+                .name = package_name,
+                .version = installed_package.version,
+            });
+    }
 
     // TODO: Only update out of date packages
 

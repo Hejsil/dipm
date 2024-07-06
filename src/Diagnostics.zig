@@ -11,6 +11,7 @@ warnings: struct {
     already_installed: std.ArrayListUnmanaged(Package),
     not_installed: std.ArrayListUnmanaged(Package),
     not_found: std.ArrayListUnmanaged(NotFound),
+    up_to_date: std.ArrayListUnmanaged(PackageVersion),
 },
 
 failures: struct {
@@ -31,6 +32,7 @@ pub fn init(allocator: std.mem.Allocator) Diagnostics {
             .already_installed = .{},
             .not_installed = .{},
             .not_found = .{},
+            .up_to_date = .{},
         },
         .failures = .{
             .hash_mismatches = .{},
@@ -173,6 +175,16 @@ pub fn report(diagnostics: Diagnostics, writer: anytype, opt: ReportOptions) !vo
             @tagName(not_found.arch),
         });
     }
+    for (diagnostics.warnings.up_to_date.items) |up_to_date| {
+        try writer.print("{s} {s}{s} {s}{s}\n", .{
+            warning,
+            esc.bold,
+            up_to_date.name,
+            up_to_date.version,
+            esc.reset,
+        });
+        try writer.print("└── Package is up to date\n", .{});
+    }
 
     for (diagnostics.failures.downloads.items) |download| {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
@@ -254,6 +266,14 @@ pub fn notFound(diagnostics: *Diagnostics, not_found: NotFound) !void {
         .name = try arena.dupe(u8, not_found.name),
         .os = not_found.os,
         .arch = not_found.arch,
+    });
+}
+
+pub fn upToDate(diagnostics: *Diagnostics, package: PackageVersion) !void {
+    const arena = diagnostics.arena.allocator();
+    return diagnostics.warnings.up_to_date.append(diagnostics.gpa, .{
+        .name = try arena.dupe(u8, package.name),
+        .version = try arena.dupe(u8, package.version),
     });
 }
 

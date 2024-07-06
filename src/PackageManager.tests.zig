@@ -424,6 +424,42 @@ test "dedupe not found" {
     try pm.cleanup();
 }
 
+test "updateOne: dont update up to date packages" {
+    const repo = simple_repository_v1.get();
+    var pm = try TestingPackageManager.init(.{
+        .pkgs_ini_path = repo.pkgs_ini_path,
+    });
+    defer pm.deinit();
+
+    try pm.pm.installOne("test-xz");
+    pm.diag.reset();
+
+    try pm.pm.updateOne("test-xz");
+    try pm.expectDiagnostics(
+        \\<B><y>⚠<R> <B>test-xz 0.1.0<R>
+        \\└── Package is up to date
+        \\
+    );
+    try pm.cleanup();
+}
+
+test "updateAll: dont update up to date packages" {
+    const repo = simple_repository_v1.get();
+    var pm = try TestingPackageManager.init(.{
+        .pkgs_ini_path = repo.pkgs_ini_path,
+    });
+    defer pm.deinit();
+
+    try pm.pm.installOne("test-xz");
+    pm.diag.reset();
+
+    try pm.pm.updateAll();
+    try pm.expectDiagnostics(
+        \\
+    );
+    try pm.cleanup();
+}
+
 const simple_repository_v1 = struct {
     fn get() *const TestingPackageRepository {
         once.call();
