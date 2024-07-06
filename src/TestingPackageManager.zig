@@ -1,4 +1,5 @@
 pm: PackageManager,
+diag: *Diagnostics,
 
 pub fn init(options: Options) !TestingPackageManager {
     const allocator = options.allocator;
@@ -9,8 +10,13 @@ pub fn init(options: Options) !TestingPackageManager {
     const random_prefix_path = try testing.tmpDirPath(allocator);
     defer allocator.free(random_prefix_path);
 
+    const diag = try allocator.create(Diagnostics);
+    errdefer allocator.destroy(diag);
+    diag.* = Diagnostics.init(allocator);
+
     var pm = try PackageManager.init(.{
         .allocator = allocator,
+        .diagnostics = diag,
         .prefix = if (options.prefix) |prefix| prefix else random_prefix_path,
         .arch = .x86_64,
         .os = .linux,
@@ -19,7 +25,10 @@ pub fn init(options: Options) !TestingPackageManager {
     });
     errdefer pm.deinit();
 
-    return .{ .pm = pm };
+    return .{
+        .pm = pm,
+        .diag = diag,
+    };
 }
 
 pub fn expectFile(pm: TestingPackageManager, path: []const u8, expected_content: []const u8) !void {
@@ -47,12 +56,31 @@ pub fn expectNoDir(pm: TestingPackageManager, path: []const u8) !void {
     try std.testing.expectError(error.FileNotFound, err_dir);
 }
 
+pub fn expectDiagnostics(pm: TestingPackageManager, expected: []const u8) !void {
+    var actual = std.ArrayList(u8).init(std.testing.allocator);
+    defer actual.deinit();
+
+    try pm.diag.report(actual.writer(), .{
+        .escapes = .{
+            .green = "<g>",
+            .yellow = "<y>",
+            .red = "<r>",
+            .bold = "<B>",
+            .reset = "<R>",
+        },
+    });
+    try std.testing.expectEqualStrings(expected, actual.items);
+}
+
 pub fn cleanup(pm: *TestingPackageManager) !void {
     try std.fs.cwd().deleteTree(pm.pm.prefix_path);
 }
 
 pub fn deinit(pm: *TestingPackageManager) void {
+    const allocator = pm.pm.gpa;
+    pm.diag.deinit();
     pm.pm.deinit();
+    allocator.destroy(pm.diag);
     pm.* = undefined;
 }
 
@@ -64,6 +92,7 @@ const Options = struct {
 
 const TestingPackageManager = @This();
 
+const Diagnostics = @import("Diagnostics.zig");
 const PackageManager = @import("PackageManager.zig");
 const std = @import("std");
 const testing = @import("testing.zig");

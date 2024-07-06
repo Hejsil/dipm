@@ -1,4 +1,6 @@
-allocator: std.mem.Allocator,
+gpa: std.mem.Allocator,
+arena: std.heap.ArenaAllocator,
+
 http_client: std.http.Client,
 
 os: std.Target.Os.Tag,
@@ -16,15 +18,20 @@ own_tmp_dir: std.fs.Dir,
 pkgs_file: IniFile(Packages),
 installed_file: IniFile(InstalledPackages),
 
+diagnostics: ?*Diagnostics,
+
 pub fn init(options: Options) !PackageManager {
     const allocator = options.allocator;
-    const cwd = std.fs.cwd();
 
+    var arena_state = std.heap.ArenaAllocator.init(allocator);
+    const arena = arena_state.allocator();
+    errdefer arena_state.deinit();
+
+    const cwd = std.fs.cwd();
     var prefix_dir = try cwd.makeOpenPath(options.prefix, .{});
     errdefer prefix_dir.close();
 
-    const prefix_path = try prefix_dir.realpathAlloc(allocator, ".");
-    errdefer allocator.free(prefix_path);
+    const prefix_path = try prefix_dir.realpathAlloc(arena, ".");
 
     var bin_dir = try prefix_dir.makeOpenPath(bin_subpath, .{});
     errdefer bin_dir.close();
@@ -56,7 +63,8 @@ pub fn init(options: Options) !PackageManager {
     errdefer installed_file.close();
 
     return PackageManager{
-        .allocator = allocator,
+        .gpa = allocator,
+        .arena = arena_state,
         .http_client = http_client,
         .os = options.os,
         .arch = options.arch,
@@ -69,6 +77,7 @@ pub fn init(options: Options) !PackageManager {
         .own_tmp_dir = own_tmp_dir,
         .pkgs_file = pkgs_file,
         .installed_file = installed_file,
+        .diagnostics = options.diagnostics,
     };
 }
 
@@ -95,47 +104,78 @@ pub fn isInstalled(pm: PackageManager, package_name: []const u8) bool {
     return pm.installed_file.data.packages.contains(package_name);
 }
 
-pub fn find(pm: PackageManager, package_name: []const u8) ?Package {
-    return pm.pkgs_file.data.packages.get(package_name);
-}
-
 pub fn installOne(pm: *PackageManager, package_name: []const u8) !void {
     return pm.installMany(&.{package_name});
 }
 
 pub fn installMany(pm: *PackageManager, package_names: []const []const u8) !void {
-    const packages_to_install = try pm.packagesToInstall(package_names);
-    defer pm.allocator.free(packages_to_install);
+    var packages_to_install = try pm.packagesToInstall(package_names);
+    defer packages_to_install.deinit();
 
-    for (packages_to_install) |package| {
-        // TODO: Add to diagnostics and continue instead of failing
-        if (pm.isInstalled(package.name))
-            return error.PackageAlreadyInstalled;
+    const len = packages_to_install.items.len;
+    for (0..len) |i_forward| {
+        const i_backwards = len - (i_forward + 1);
+        const package = packages_to_install.items[i_backwards];
+
+        if (pm.isInstalled(package.name)) {
+            if (pm.diagnostics) |diag|
+                try diag.alreadyInstalled(.{ .name = package.name });
+            _ = packages_to_install.swapRemove(i_backwards);
+        }
     }
 
-    for (packages_to_install) |package|
-        try pm.installOneUnchecked(package);
+    for (packages_to_install.items) |package| {
+        pm.installOneUnchecked(package) catch |err| switch (err) {
+            error.DiagnosticsInvalidHash => continue,
+            error.DiagnosticsDownloadFailed => continue,
+            else => |e| return e,
+        };
+
+        if (pm.diagnostics) |diag|
+            try diag.installSucceeded(.{
+                .name = package.name,
+                .version = package.info.version,
+            });
+    }
 
     try pm.installed_file.flush();
 }
 
-fn packagesToInstall(pm: *PackageManager, package_names: []const []const u8) ![]Package.Specific {
-    var packages_to_install = std.ArrayList(Package.Specific).init(pm.allocator);
-    defer packages_to_install.deinit();
+fn packagesToInstall(
+    pm: *PackageManager,
+    package_names: []const []const u8,
+) !std.ArrayList(Package.Specific) {
+    var packages_to_install = std.ArrayList(Package.Specific).init(pm.gpa);
+    errdefer packages_to_install.deinit();
 
     try packages_to_install.ensureTotalCapacity(package_names.len);
     for (package_names) |package_name| {
         // TODO: Add to diagnostics and continue instead of failing
-        const package = pm.find(package_name) orelse return error.PackageNotFound;
-        const specific_package = package.specific(package_name, pm.os, pm.arch) orelse
-            return error.PackageNotAvailableForOsArch;
+        const package = pm.pkgs_file.data.packages.get(package_name) orelse {
+            if (pm.diagnostics) |diag|
+                try diag.notFound(.{
+                    .name = package_name,
+                    .os = pm.os,
+                    .arch = pm.arch,
+                });
+            continue;
+        };
+        const specific_package = package.specific(package_name, pm.os, pm.arch) orelse {
+            if (pm.diagnostics) |diag|
+                try diag.notFound(.{
+                    .name = package_name,
+                    .os = pm.os,
+                    .arch = pm.arch,
+                });
+            continue;
+        };
 
         packages_to_install.appendAssumeCapacity(specific_package);
     }
 
     // TODO: Check package.install.hash conflicts
 
-    return packages_to_install.toOwnedSlice();
+    return packages_to_install;
 }
 
 fn installOneUnchecked(pm: *PackageManager, package: Package.Specific) !void {
@@ -155,30 +195,43 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
     defer downloaded_file.close();
 
     // TODO: Get rid of this once we have support for bz2 compression
-    const downloaded_path = try dir.realpathAlloc(pm.allocator, downloaded_file_name);
-    defer pm.allocator.free(downloaded_path);
+    const downloaded_path = try dir.realpathAlloc(pm.gpa, downloaded_file_name);
+    defer pm.gpa.free(downloaded_path);
 
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     var hashing_writer = std.compress.hashedWriter(downloaded_file.writer(), &hasher);
-    try download(&pm.http_client, package.install.url, hashing_writer.writer());
+    download(&pm.http_client, package.install.url, hashing_writer.writer()) catch |err| {
+        if (pm.diagnostics) |diag| try diag.downloadFailed(.{
+            .name = package.name,
+            .version = package.info.version,
+            .url = package.install.url,
+            .err = err,
+        });
+        return error.DiagnosticsDownloadFailed;
+    };
 
     const digest_length = std.crypto.hash.sha2.Sha256.digest_length;
-    var actual_hash: [digest_length]u8 = undefined;
-    hasher.final(&actual_hash);
+    var actual_hash_bytes: [digest_length]u8 = undefined;
+    hasher.final(&actual_hash_bytes);
 
-    var expected_hash_buf: [digest_length * 2]u8 = undefined;
-    const expected_hash = try std.fmt.hexToBytes(&expected_hash_buf, package.install.hash);
+    const actual_hash = std.fmt.bytesToHex(actual_hash_bytes, .lower);
 
-    // TODO: Add to diagnostics
-    if (!std.mem.eql(u8, expected_hash, &actual_hash))
-        return error.InvalidHash;
+    if (!std.mem.eql(u8, package.install.hash, &actual_hash)) {
+        if (pm.diagnostics) |diag| try diag.hashMismatch(.{
+            .name = package.name,
+            .version = package.info.version,
+            .expected_hash = package.install.hash,
+            .actual_hash = &actual_hash,
+        });
+        return error.DiagnosticsInvalidHash;
+    }
 
     const file_type = FileType.fromPath(downloaded_file_name);
     if (file_type != .binary) {
         try downloaded_file.seekTo(0);
 
         const output_path = FileType.stripPath(downloaded_file_name);
-        try extract(pm.allocator, downloaded_path, downloaded_file, file_type, dir, output_path);
+        try extract(pm.gpa, downloaded_path, downloaded_file, file_type, dir, output_path);
     }
 }
 
@@ -259,7 +312,7 @@ fn installGeneric(the_install: Install, from_dir: std.fs.Dir, to_dir: std.fs.Dir
         .door,
         .event_port,
         .unknown,
-        => unreachable, // TODO: Error
+        => return error.Unknown,
     }
 }
 
@@ -287,7 +340,7 @@ fn copyTree(from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
         .door,
         .event_port,
         .unknown,
-        => unreachable, // TODO: Error
+        => return error.Unknown,
     };
 }
 
@@ -382,33 +435,62 @@ pub fn uninstallOne(pm: *PackageManager, package_name: []const u8) !void {
 }
 
 pub fn uninstallMany(pm: *PackageManager, package_names: []const []const u8) !void {
-    for (package_names) |package_name| {
-        // TODO: Add to diagnostics and continue instead of failing
-        if (!pm.isInstalled(package_name))
-            return error.PackageNotInstalled;
-    }
+    var packages_to_uninstall = try pm.packagesToUninstall(package_names);
+    defer packages_to_uninstall.deinit();
 
-    for (package_names) |package_name|
-        try pm.uninstallOneUnchecked(package_name);
+    for (packages_to_uninstall.keys(), packages_to_uninstall.values()) |package_name, package| {
+        try pm.uninstallOneUnchecked(package_name, package);
+        if (pm.diagnostics) |diag|
+            try diag.uninstallSucceeded(.{
+                .name = package_name,
+                .version = package.version,
+            });
+    }
 
     try pm.installed_file.flush();
 }
 
-fn uninstallOneUnchecked(pm: *PackageManager, package: []const u8) !void {
-    // Checked by caller
-    const pkgs = pm.installed_file.data.packages.get(package) orelse unreachable;
+fn packagesToUninstall(
+    pm: *PackageManager,
+    package_names: []const []const u8,
+) !std.StringArrayHashMap(InstalledPackage) {
+    var packages_to_uninstall = std.StringArrayHashMap(InstalledPackage).init(pm.gpa);
+    errdefer packages_to_uninstall.deinit();
 
+    try packages_to_uninstall.ensureTotalCapacity(package_names.len);
+    for (package_names) |package_name| {
+        const package = pm.installed_file.data.packages.get(package_name) orelse {
+            if (pm.diagnostics) |diag| try diag.notInstalled((.{
+                .name = package_name,
+            }));
+            continue;
+        };
+
+        packages_to_uninstall.putAssumeCapacity(package_name, .{
+            .version = package.version,
+            .locations = package.locations,
+        });
+    }
+
+    return packages_to_uninstall;
+}
+
+fn uninstallOneUnchecked(
+    pm: *PackageManager,
+    package_name: []const u8,
+    package: InstalledPackage,
+) !void {
     const cwd = std.fs.cwd();
-    for (pkgs.locations) |location|
+    for (package.locations) |location|
         try cwd.deleteTree(location);
 
-    _ = pm.installed_file.data.packages.orderedRemove(package);
+    _ = pm.installed_file.data.packages.orderedRemove(package_name);
 }
 
 pub fn updateAll(pm: *PackageManager) !void {
     const installed_packages = pm.installed_file.data.packages.keys();
-    const packages_to_update = try pm.allocator.dupe([]const u8, installed_packages);
-    defer pm.allocator.free(packages_to_update);
+    const packages_to_update = try pm.gpa.dupe([]const u8, installed_packages);
+    defer pm.gpa.free(packages_to_update);
 
     return pm.updateMany(packages_to_update);
 }
@@ -418,19 +500,45 @@ pub fn updateOne(pm: *PackageManager, package_name: []const u8) !void {
 }
 
 pub fn updateMany(pm: *PackageManager, package_names: []const []const u8) !void {
-    for (package_names) |package_name| {
-        // TODO: Add to diagnostics and continue instead of failing
-        if (!pm.isInstalled(package_name))
-            return error.PackageNotInstalled;
+    var packages_to_uninstall = try pm.packagesToUninstall(package_names);
+    defer packages_to_uninstall.deinit();
+
+    const packages_to_install = try pm.packagesToInstall(packages_to_uninstall.keys());
+    defer packages_to_install.deinit();
+
+    // TODO: Only update out of date packages
+
+    // TODO: The steps for this should be
+    //       * Download and extract packages to install
+    //       * Uninstall installed packages
+    //       * Install the updated packages
+
+    var successfull_uninstalls = std.ArrayList(Package.Specific).init(pm.gpa);
+    defer successfull_uninstalls.deinit();
+
+    try successfull_uninstalls.ensureTotalCapacity(packages_to_install.items.len);
+    for (packages_to_install.items) |package| {
+        const installed_package = packages_to_uninstall.get(package.name).?;
+        try pm.uninstallOneUnchecked(package.name, installed_package);
+        successfull_uninstalls.appendAssumeCapacity(package);
     }
 
-    const packages_to_install = try pm.packagesToInstall(package_names);
-    defer pm.allocator.free(packages_to_install);
+    for (successfull_uninstalls.items) |package| {
+        pm.installOneUnchecked(package) catch |err| switch (err) {
+            error.DiagnosticsInvalidHash => continue,
+            error.DiagnosticsDownloadFailed => continue,
+            else => |e| return e,
+        };
 
-    for (package_names) |package_name|
-        try pm.uninstallOneUnchecked(package_name);
-    for (packages_to_install) |package|
-        try pm.installOneUnchecked(package);
+        if (pm.diagnostics) |diag| {
+            const installed_package = packages_to_uninstall.get(package.name).?;
+            try diag.updateSucceeded(.{
+                .name = package.name,
+                .from_version = installed_package.version,
+                .to_version = package.info.version,
+            });
+        }
+    }
 
     try pm.installed_file.flush();
 }
@@ -440,10 +548,6 @@ pub fn cleanup(pm: PackageManager) !void {
 }
 
 pub fn deinit(pm: *PackageManager) void {
-    pm.http_client.deinit();
-
-    pm.allocator.free(pm.prefix_path);
-
     pm.bin_dir.close();
     pm.lib_dir.close();
     pm.share_dir.close();
@@ -453,6 +557,9 @@ pub fn deinit(pm: *PackageManager) void {
     pm.installed_file.close();
 
     pm.prefix_dir.close();
+
+    pm.http_client.deinit();
+    pm.arena.deinit();
 }
 
 fn download(client: *std.http.Client, uri_str: []const u8, writer: anytype) !void {
@@ -493,6 +600,10 @@ fn pipe(reader: anytype, writer: anytype) !void {
 
 const Options = struct {
     allocator: std.mem.Allocator,
+
+    /// Successes and failures are reported to the diagnostics. Set this for more details
+    /// about failures.
+    diagnostics: ?*Diagnostics = null,
 
     /// The prefix path where the package manager will work and install packages
     prefix: []const u8,
@@ -602,17 +713,20 @@ const installed_file_name = "installed.ini";
 const pkgs_file_name = "pkgs.ini";
 
 test {
-    _ = ini;
+    _ = Diagnostics;
     _ = InstalledPackage;
     _ = InstalledPackages;
     _ = Package;
     _ = Packages;
+
+    _ = ini;
 
     _ = @import("PackageManager.tests.zig");
 }
 
 const PackageManager = @This();
 
+const Diagnostics = @import("Diagnostics.zig");
 const InstalledPackage = @import("InstalledPackage.zig");
 const InstalledPackages = @import("InstalledPackages.zig");
 const Package = @import("Package.zig");

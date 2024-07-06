@@ -14,6 +14,10 @@ test "install test-file" {
         \\location = {[prefix]s}/bin/test-file
         \\
     , .{ .prefix = pm.pm.prefix_path }));
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-file 0.1.0<R>
+        \\
+    );
     try pm.cleanup();
 }
 
@@ -41,6 +45,10 @@ test "install test-xz" {
         \\location = {[prefix]s}/share/test-xz
         \\
     , .{ .prefix = pm.pm.prefix_path }));
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-xz 0.1.0<R>
+        \\
+    );
     try pm.cleanup();
 }
 
@@ -68,6 +76,10 @@ test "install test-gz" {
         \\location = {[prefix]s}/share/test-gz
         \\
     , .{ .prefix = pm.pm.prefix_path }));
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-gz 0.1.0<R>
+        \\
+    );
     try pm.cleanup();
 }
 
@@ -95,6 +107,10 @@ test "install test-zst" {
         \\location = {[prefix]s}/share/test-zst
         \\
     , .{ .prefix = pm.pm.prefix_path }));
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-zst 0.1.0<R>
+        \\
+    );
     try pm.cleanup();
 }
 
@@ -106,7 +122,14 @@ test "install already installed" {
     defer pm.deinit();
 
     try pm.pm.installOne("test-xz");
-    try std.testing.expectError(error.PackageAlreadyInstalled, pm.pm.installOne("test-xz"));
+    pm.diag.reset();
+
+    try pm.pm.installOne("test-xz");
+    try pm.expectDiagnostics(
+        \\<B><y>⚠<R> <B>test-xz<R>
+        \\└── Package already installed
+        \\
+    );
     try pm.cleanup();
 }
 
@@ -118,6 +141,8 @@ test "uninstall" {
     defer pm.deinit();
 
     try pm.pm.installOne("test-xz");
+    pm.diag.reset();
+
     try pm.pm.uninstallOne("test-xz");
     try pm.expectNoFile("bin/test-xz");
     try pm.expectNoFile("lib/test-xz");
@@ -125,6 +150,11 @@ test "uninstall" {
     try pm.expectNoFile("share/test-xz");
     try pm.expectNoFile("share/test-xz-dir/file");
     try pm.expectFile("share/dipm/installed.ini", "");
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-xz 0.1.0 -> ✗<R>
+        \\
+    );
+
     try pm.cleanup();
 }
 
@@ -135,7 +165,12 @@ test "uninstall not installed" {
     });
     defer pm.deinit();
 
-    try std.testing.expectError(error.PackageNotInstalled, pm.pm.uninstallOne("test-xz"));
+    try pm.pm.uninstallOne("test-xz");
+    try pm.expectDiagnostics(
+        \\<B><y>⚠<R> <B>test-xz<R>
+        \\└── Package is not installed
+        \\
+    );
     try pm.cleanup();
 }
 
@@ -147,8 +182,17 @@ test "uninstall already uninstalled" {
     defer pm.deinit();
 
     try pm.pm.installOne("test-xz");
+    pm.diag.reset();
+
     try pm.pm.uninstallOne("test-xz");
-    try std.testing.expectError(error.PackageNotInstalled, pm.pm.uninstallOne("test-xz"));
+    pm.diag.reset();
+
+    try pm.pm.uninstallOne("test-xz");
+    try pm.expectDiagnostics(
+        \\<B><y>⚠<R> <B>test-xz<R>
+        \\└── Package is not installed
+        \\
+    );
     try pm.cleanup();
 }
 
@@ -213,6 +257,10 @@ test "update" {
         \\location = {[prefix]s}/share/test-xz
         \\
     , .{ .prefix = pm_v2.pm.prefix_path }));
+    try pm_v2.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-xz 0.1.0 -> 0.2.0<R>
+        \\
+    );
 
     try pm_v2.cleanup();
 }
@@ -278,6 +326,11 @@ test "update all" {
         \\location = {[prefix]s}/share/test-zst
         \\
     , .{ .prefix = pm_v2.pm.prefix_path }));
+    try pm_v2.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-xz 0.1.0 -> 0.2.0<R>
+        \\<B><g>✓<R> <B>test-zst 0.1.0 -> 0.2.0<R>
+        \\
+    );
 
     try pm_v2.cleanup();
 }
@@ -297,6 +350,40 @@ test "cleanup" {
     try pm.cleanup();
 }
 
+test "hash mismatch" {
+    const repo = simple_repository_v1.get();
+    var pm = try TestingPackageManager.init(.{
+        .pkgs_ini_path = repo.pkgs_ini_path,
+    });
+    defer pm.deinit();
+
+    try pm.pm.installOne("wrong-hash");
+    try pm.expectDiagnostics(
+        \\<B><r>✗<R> <B>wrong-hash 0.1.0<R>
+        \\│   Hash mismatch
+        \\│     expected: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        \\└──   actual:   ee1c8277caf5fb9b9ac4168c73fc03d982e0859d58ab730b6e15a20c14059ff2
+        \\
+    );
+    try pm.cleanup();
+}
+
+test "not found" {
+    const repo = simple_repository_v1.get();
+    var pm = try TestingPackageManager.init(.{
+        .pkgs_ini_path = repo.pkgs_ini_path,
+    });
+    defer pm.deinit();
+
+    try pm.pm.installOne("not-found");
+    try pm.expectDiagnostics(
+        \\<B><y>⚠<R> <B>not-found<R>
+        \\└── Package not found for linux_x86_64
+        \\
+    );
+    try pm.cleanup();
+}
+
 const simple_repository_v1 = struct {
     fn get() *const TestingPackageRepository {
         once.call();
@@ -308,6 +395,7 @@ const simple_repository_v1 = struct {
         simple_tree_tar_xz,
         simple_tree_tar_gz,
         simple_tree_tar_zst,
+        wrong_hash,
     };
 
     var repository: TestingPackageRepository = undefined;
@@ -466,6 +554,18 @@ pub const simple_tree_tar_zst = TestingPackageRepository.Package{
     .install_bin = &.{"test-zst:bin/file"},
     .install_lib = &.{ "test-zst-dir:lib/dir", "test-zst:lib/dir/file" },
     .install_share = &.{ "test-zst-dir:share/dir", "test-zst:share/dir/file" },
+};
+
+pub const wrong_hash = TestingPackageRepository.Package{
+    .name = "wrong-hash",
+    .version = "0.1.0",
+    .github_update = "wrong-hash/wrong-hash",
+    .file = .{
+        .name = "wrong-hash",
+        .hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        .content = "Binary",
+    },
+    .install_bin = &.{"wrong-hash"},
 };
 
 const TestingPackageManager = @import("TestingPackageManager.zig");

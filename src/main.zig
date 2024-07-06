@@ -71,14 +71,18 @@ fn install(program: *Program) !void {
     while (!program.args.isDone())
         try packages_to_install.put(program.args.eat(), {});
 
+    var diag = Diagnostics.init(program.allocator);
+    defer diag.deinit();
+
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
         .prefix = program.options.prefix,
+        .diagnostics = &diag,
     });
     defer pm.deinit();
 
     try pm.installMany(packages_to_install.keys());
-
+    try diag.reportToFile(std.io.getStdErr());
     try pm.cleanup();
 }
 
@@ -89,14 +93,18 @@ fn uninstall(program: *Program) !void {
     while (!program.args.isDone())
         try packages_to_uninstall.put(program.args.eat(), {});
 
+    var diag = Diagnostics.init(program.allocator);
+    defer diag.deinit();
+
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
         .prefix = program.options.prefix,
+        .diagnostics = &diag,
     });
     defer pm.deinit();
 
     try pm.uninstallMany(packages_to_uninstall.keys());
-
+    try diag.reportToFile(std.io.getStdErr());
     try pm.cleanup();
 }
 
@@ -108,9 +116,13 @@ fn update(program: *Program) !void {
         try packages_to_update.put(program.args.eat(), {});
     }
 
+    var diag = Diagnostics.init(program.allocator);
+    defer diag.deinit();
+
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
         .prefix = program.options.prefix,
+        .diagnostics = &diag,
     });
     defer pm.deinit();
 
@@ -120,6 +132,7 @@ fn update(program: *Program) !void {
         try pm.updateMany(packages_to_update.keys());
     }
 
+    try diag.reportToFile(std.io.getStdErr());
     try pm.cleanup();
 }
 
@@ -239,12 +252,14 @@ fn usageToWriter(writer: anytype) !void {
 }
 
 test {
-    _ = PackageManager;
     _ = ArgParser;
+    _ = Diagnostics;
+    _ = PackageManager;
     _ = ini;
 }
 
 const ArgParser = @import("ArgParser.zig");
+const Diagnostics = @import("Diagnostics.zig");
 const PackageManager = @import("PackageManager.zig");
 
 const builtin = @import("builtin");
