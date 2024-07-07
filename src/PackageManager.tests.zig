@@ -1,12 +1,10 @@
 test "install test-file" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
     var buf: [std.mem.page_size]u8 = undefined;
-    try pm.pm.installOne("test-file");
+    try pm.pm.installOne(repo.packages, "test-file");
     try pm.expectFile("bin/test-file", "Binary");
     try pm.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
         \\[test-file]
@@ -23,13 +21,11 @@ test "install test-file" {
 
 test "install test-xz" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
     var buf: [std.mem.page_size]u8 = undefined;
-    try pm.pm.installOne("test-xz");
+    try pm.pm.installOne(repo.packages, "test-xz");
     try pm.expectFile("bin/test-xz", "");
     try pm.expectFile("lib/test-xz", "");
     try pm.expectFile("lib/test-xz-dir/file", "");
@@ -54,13 +50,11 @@ test "install test-xz" {
 
 test "install test-gz" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
     var buf: [std.mem.page_size]u8 = undefined;
-    try pm.pm.installOne("test-gz");
+    try pm.pm.installOne(repo.packages, "test-gz");
     try pm.expectFile("bin/test-gz", "");
     try pm.expectFile("lib/test-gz", "");
     try pm.expectFile("lib/test-gz-dir/file", "");
@@ -85,13 +79,11 @@ test "install test-gz" {
 
 test "install test-zst" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
     var buf: [std.mem.page_size]u8 = undefined;
-    try pm.pm.installOne("test-zst");
+    try pm.pm.installOne(repo.packages, "test-zst");
     try pm.expectFile("bin/test-zst", "");
     try pm.expectFile("lib/test-zst", "");
     try pm.expectFile("lib/test-zst-dir/file", "");
@@ -116,15 +108,13 @@ test "install test-zst" {
 
 test "install already installed" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
-    try pm.pm.installOne("test-xz");
+    try pm.pm.installOne(repo.packages, "test-xz");
     pm.diag.reset();
 
-    try pm.pm.installOne("test-xz");
+    try pm.pm.installOne(repo.packages, "test-xz");
     try pm.expectDiagnostics(
         \\<B><y>⚠<R> <B>test-xz<R>
         \\└── Package already installed
@@ -135,12 +125,10 @@ test "install already installed" {
 
 test "uninstall" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
-    try pm.pm.installOne("test-xz");
+    try pm.pm.installOne(repo.packages, "test-xz");
     pm.diag.reset();
 
     try pm.pm.uninstallOne("test-xz");
@@ -159,10 +147,7 @@ test "uninstall" {
 }
 
 test "uninstall not installed" {
-    const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
     try pm.pm.uninstallOne("test-xz");
@@ -176,12 +161,10 @@ test "uninstall not installed" {
 
 test "uninstall already uninstalled" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
-    try pm.pm.installOne("test-xz");
+    try pm.pm.installOne(repo.packages, "test-xz");
     pm.diag.reset();
 
     try pm.pm.uninstallOne("test-xz");
@@ -198,28 +181,18 @@ test "uninstall already uninstalled" {
 
 test "update" {
     const repo_v1 = simple_repository_v1.get();
-    var pm_v1 = try TestingPackageManager.init(.{
-        .packages = &repo_v1.packages,
-    });
-    defer pm_v1.deinit();
-
-    try pm_v1.pm.installOne("test-xz");
-    try pm_v1.pm.installOne("test-zst");
-
-    // TODO: Currently the package manager cannot install the same package again if the tmp dir
-    //       hasn't been cleaned. This needs to be fixed.
-    try pm_v1.pm.cleanup();
-
     const repo_v2 = simple_repository_v2.get();
-    var pm_v2 = try TestingPackageManager.init(.{
-        .packages = &repo_v2.packages,
-        .prefix = pm_v1.pm.prefix_path,
+    var pm = try TestingPackageManager.init(.{});
+    defer pm.deinit();
+
+    try pm.pm.installMany(repo_v1.packages, &.{
+        "test-xz",
+        "test-zst",
     });
-    defer pm_v2.deinit();
 
     // the package manager should still know about the installed v1
     var buf: [std.mem.page_size]u8 = undefined;
-    try pm_v2.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+    try pm.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
         \\[test-xz]
         \\version = 0.1.0
         \\location = {[prefix]s}/bin/test-xz
@@ -236,10 +209,13 @@ test "update" {
         \\location = {[prefix]s}/share/test-zst-dir
         \\location = {[prefix]s}/share/test-zst
         \\
-    , .{ .prefix = pm_v2.pm.prefix_path }));
+    , .{ .prefix = pm.pm.prefix_path }));
 
-    try pm_v2.pm.updateOne("test-xz");
-    try pm_v2.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+    try pm.pm.cleanup();
+    pm.diag.reset();
+
+    try pm.pm.updateOne(repo_v2.packages, "test-xz");
+    try pm.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
         \\[test-zst]
         \\version = 0.1.0
         \\location = {[prefix]s}/bin/test-zst
@@ -256,39 +232,29 @@ test "update" {
         \\location = {[prefix]s}/share/test-xz-dir
         \\location = {[prefix]s}/share/test-xz
         \\
-    , .{ .prefix = pm_v2.pm.prefix_path }));
-    try pm_v2.expectDiagnostics(
+    , .{ .prefix = pm.pm.prefix_path }));
+    try pm.expectDiagnostics(
         \\<B><g>✓<R> <B>test-xz 0.1.0 -> 0.2.0<R>
         \\
     );
 
-    try pm_v2.cleanup();
+    try pm.cleanup();
 }
 
 test "update all" {
     const repo_v1 = simple_repository_v1.get();
-    var pm_v1 = try TestingPackageManager.init(.{
-        .packages = &repo_v1.packages,
-    });
-    defer pm_v1.deinit();
-
-    try pm_v1.pm.installOne("test-xz");
-    try pm_v1.pm.installOne("test-zst");
-
-    // TODO: Currently the package manager cannot install the same package again if the tmp dir
-    //       hasn't been cleaned. This needs to be fixed.
-    try pm_v1.pm.cleanup();
-
     const repo_v2 = simple_repository_v2.get();
-    var pm_v2 = try TestingPackageManager.init(.{
-        .packages = &repo_v2.packages,
-        .prefix = pm_v1.pm.prefix_path,
+    var pm = try TestingPackageManager.init(.{});
+    defer pm.deinit();
+
+    try pm.pm.installMany(repo_v1.packages, &.{
+        "test-xz",
+        "test-zst",
     });
-    defer pm_v2.deinit();
 
     // the package manager should still know about the installed v1
     var buf: [std.mem.page_size]u8 = undefined;
-    try pm_v2.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+    try pm.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
         \\[test-xz]
         \\version = 0.1.0
         \\location = {[prefix]s}/bin/test-xz
@@ -305,10 +271,13 @@ test "update all" {
         \\location = {[prefix]s}/share/test-zst-dir
         \\location = {[prefix]s}/share/test-zst
         \\
-    , .{ .prefix = pm_v2.pm.prefix_path }));
+    , .{ .prefix = pm.pm.prefix_path }));
 
-    try pm_v2.pm.updateAll();
-    try pm_v2.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+    try pm.pm.cleanup();
+    pm.diag.reset();
+
+    try pm.pm.updateAll(repo_v2.packages);
+    try pm.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
         \\[test-xz]
         \\version = 0.2.0
         \\location = {[prefix]s}/bin/test-xz
@@ -325,39 +294,33 @@ test "update all" {
         \\location = {[prefix]s}/share/test-zst-dir
         \\location = {[prefix]s}/share/test-zst
         \\
-    , .{ .prefix = pm_v2.pm.prefix_path }));
-    try pm_v2.expectDiagnostics(
+    , .{ .prefix = pm.pm.prefix_path }));
+    try pm.expectDiagnostics(
         \\<B><g>✓<R> <B>test-xz 0.1.0 -> 0.2.0<R>
         \\<B><g>✓<R> <B>test-zst 0.1.0 -> 0.2.0<R>
         \\
     );
 
-    try pm_v2.cleanup();
+    try pm.cleanup();
 }
 
 test "cleanup" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
-    try pm.pm.installOne("test-xz");
-    try pm.expectDir("share/dipm/tmp");
+    try pm.pm.installOne(repo.packages, "test-xz");
     try pm.pm.cleanup();
-    try pm.expectNoDir("share/dipm/tmp");
-    try pm.expectDir("share/dipm");
+    try pm.expectEmptyDir("share/dipm/tmp");
     try pm.cleanup();
 }
 
 test "hash mismatch" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
-    try pm.pm.installOne("wrong-hash");
+    try pm.pm.installOne(repo.packages, "wrong-hash");
     try pm.expectDiagnostics(
         \\<B><r>✗<R> <B>wrong-hash 0.1.0<R>
         \\│   Hash mismatch
@@ -370,12 +333,10 @@ test "hash mismatch" {
 
 test "not found" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
-    try pm.pm.installOne("not-found");
+    try pm.pm.installOne(repo.packages, "not-found");
     try pm.expectDiagnostics(
         \\<B><y>⚠<R> <B>not-found<R>
         \\└── Package not found for linux_x86_64
@@ -386,12 +347,10 @@ test "not found" {
 
 test "dedupe install/uninstall" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
-    try pm.pm.installMany(&.{ "test-xz", "test-xz" });
+    try pm.pm.installMany(repo.packages, &.{ "test-xz", "test-xz" });
     try pm.expectDiagnostics(
         \\<B><g>✓<R> <B>test-xz 0.1.0<R>
         \\
@@ -410,12 +369,10 @@ test "dedupe install/uninstall" {
 
 test "dedupe not found" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
-    try pm.pm.installMany(&.{ "not-found", "not-found" });
+    try pm.pm.installMany(repo.packages, &.{ "not-found", "not-found" });
     try pm.expectDiagnostics(
         \\<B><y>⚠<R> <B>not-found<R>
         \\└── Package not found for linux_x86_64
@@ -426,15 +383,13 @@ test "dedupe not found" {
 
 test "updateOne: dont update up to date packages" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
-    try pm.pm.installOne("test-xz");
+    try pm.pm.installOne(repo.packages, "test-xz");
     pm.diag.reset();
 
-    try pm.pm.updateOne("test-xz");
+    try pm.pm.updateOne(repo.packages, "test-xz");
     try pm.expectDiagnostics(
         \\<B><y>⚠<R> <B>test-xz 0.1.0<R>
         \\└── Package is up to date
@@ -445,15 +400,13 @@ test "updateOne: dont update up to date packages" {
 
 test "updateAll: dont update up to date packages" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
-    try pm.pm.installOne("test-xz");
+    try pm.pm.installOne(repo.packages, "test-xz");
     pm.diag.reset();
 
-    try pm.pm.updateAll();
+    try pm.pm.updateAll(repo.packages);
     try pm.expectDiagnostics(
         \\
     );
@@ -462,13 +415,11 @@ test "updateAll: dont update up to date packages" {
 
 test "install: download fails" {
     const repo = simple_repository_v1.get();
-    var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
-    });
+    var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
     var buf: [std.mem.page_size]u8 = undefined;
-    try pm.pm.installOne("fails-download");
+    try pm.pm.installOne(repo.packages, "fails-download");
     try pm.expectDiagnostics(try std.fmt.bufPrint(&buf,
         \\<B><r>✗<R> <B>fails-download 0.1.0<R>
         \\│   Failed to download
@@ -482,7 +433,6 @@ test "install: download fails" {
 test "update: Do not leave package uninstalled on download fail" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .packages = &repo.packages,
         // There is no way to install the "fails-download" package, so just fake that we have
         // it installed.
         .installed_file_data =
@@ -492,7 +442,7 @@ test "update: Do not leave package uninstalled on download fail" {
     });
     defer pm.deinit();
 
-    try pm.pm.updateAll();
+    try pm.pm.updateAll(repo.packages);
     try pm.expectFile("share/dipm/installed.ini",
         \\[fails-download]
         \\version = 0.0.0

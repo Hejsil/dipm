@@ -94,13 +94,12 @@ fn install(program: *Program) !void {
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
-        .packages = &pkgs,
         .prefix = program.options.prefix,
         .diagnostics = program.diagnostics,
     });
     defer pm.deinit();
 
-    try pm.installMany(packages_to_install.keys());
+    try pm.installMany(pkgs, packages_to_install.keys());
     try program.diagnostics.reportToFile(std.io.getStdErr());
     try pm.cleanup();
 }
@@ -112,18 +111,9 @@ fn uninstall(program: *Program) !void {
     while (!program.args.isDone())
         try packages_to_uninstall.put(program.args.eat(), {});
 
-    var pkgs = try Packages.download(.{
-        .allocator = program.allocator,
-        .http_client = program.http_client,
-        .prefix = program.options.prefix,
-        .download = .always,
-    });
-    defer pkgs.deinit();
-
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
-        .packages = &pkgs,
         .prefix = program.options.prefix,
         .diagnostics = program.diagnostics,
     });
@@ -153,16 +143,15 @@ fn update(program: *Program) !void {
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
-        .packages = &pkgs,
         .prefix = program.options.prefix,
         .diagnostics = program.diagnostics,
     });
     defer pm.deinit();
 
     if (packages_to_update.count() == 0) {
-        try pm.updateAll();
+        try pm.updateAll(pkgs);
     } else {
-        try pm.updateMany(packages_to_update.keys());
+        try pm.updateMany(pkgs, packages_to_update.keys());
     }
 
     try program.diagnostics.reportToFile(std.io.getStdErr());
@@ -174,19 +163,9 @@ fn installed(program: *Program) !void {
         return error.InvalidArgument;
     }
 
-    // TODO: Remove. This is not needed for this command
-    var pkgs = try Packages.download(.{
-        .allocator = program.allocator,
-        .http_client = program.http_client,
-        .prefix = program.options.prefix,
-        .download = .only_if_required,
-    });
-    defer pkgs.deinit();
-
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
-        .packages = &pkgs,
         .prefix = program.options.prefix,
     });
     defer pm.deinit();

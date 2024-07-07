@@ -2,7 +2,6 @@ gpa: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 
 http_client: *std.http.Client,
-packages: *const Packages,
 installed_file: IniFile(InstalledPackages),
 diagnostics: ?*Diagnostics,
 
@@ -43,7 +42,9 @@ pub fn init(options: Options) !PackageManager {
     var own_data_dir = try prefix_dir.makeOpenPath(paths.own_data_subpath, .{});
     errdefer own_data_dir.close();
 
-    var own_tmp_dir = try prefix_dir.makeOpenPath(paths.own_tmp_subpath, .{});
+    var own_tmp_dir = try prefix_dir.makeOpenPath(paths.own_tmp_subpath, .{
+        .iterate = true,
+    });
     errdefer own_tmp_dir.close();
 
     var installed_file = try IniFile(InstalledPackages).create(allocator, own_data_dir, paths.installed_file_name);
@@ -62,30 +63,21 @@ pub fn init(options: Options) !PackageManager {
         .share_dir = share_dir,
         .own_data_dir = own_data_dir,
         .own_tmp_dir = own_tmp_dir,
-        .packages = options.packages,
         .installed_file = installed_file,
         .diagnostics = options.diagnostics,
     };
-}
-
-fn downloadPkgsIni(client: *std.http.Client, dir: std.fs.Dir, uri: []const u8) !void {
-    var pkgs_file = try dir.atomicFile(paths.pkgs_file_name, .{});
-    defer pkgs_file.deinit();
-
-    try download.download(client, uri, pkgs_file.file.writer());
-    try pkgs_file.finish();
 }
 
 pub fn isInstalled(pm: PackageManager, package_name: []const u8) bool {
     return pm.installed_file.data.packages.contains(package_name);
 }
 
-pub fn installOne(pm: *PackageManager, package_name: []const u8) !void {
-    return pm.installMany(&.{package_name});
+pub fn installOne(pm: *PackageManager, packages: Packages, package_name: []const u8) !void {
+    return pm.installMany(packages, &.{package_name});
 }
 
-pub fn installMany(pm: *PackageManager, package_names: []const []const u8) !void {
-    var packages_to_install = try pm.packagesToInstall(package_names);
+pub fn installMany(pm: *PackageManager, packages: Packages, package_names: []const []const u8) !void {
+    var packages_to_install = try pm.packagesToInstall(packages, package_names);
     defer packages_to_install.deinit();
 
     const len = packages_to_install.count();
@@ -119,6 +111,7 @@ pub fn installMany(pm: *PackageManager, package_names: []const []const u8) !void
 
 fn packagesToInstall(
     pm: *PackageManager,
+    packages: Packages,
     package_names: []const []const u8,
 ) !std.StringArrayHashMap(Package.Specific) {
     var packages_to_install = std.StringArrayHashMap(Package.Specific).init(pm.gpa);
@@ -132,7 +125,7 @@ fn packagesToInstall(
     // Now, populate. The packages that dont exist gets removed here.
     for (packages_to_install.keys(), packages_to_install.values(), 0..) |package_name, *entry, i| {
         entry.* = blk: {
-            const package = pm.packages.packages.get(package_name) orelse break :blk null;
+            const package = packages.packages.get(package_name) orelse break :blk null;
             break :blk package.specific(package_name, pm.os, pm.arch);
         } orelse {
             if (pm.diagnostics) |diag|
@@ -460,20 +453,24 @@ fn uninstallOneUnchecked(
     _ = pm.installed_file.data.packages.orderedRemove(package_name);
 }
 
-pub fn updateAll(pm: *PackageManager) !void {
+pub fn updateAll(pm: *PackageManager, packages: Packages) !void {
     const installed_packages = pm.installed_file.data.packages.keys();
     const packages_to_update = try pm.gpa.dupe([]const u8, installed_packages);
     defer pm.gpa.free(packages_to_update);
 
-    return pm.updatePackages(packages_to_update, .{ .up_to_date_diag = false });
+    return pm.updatePackages(packages, packages_to_update, .{
+        .up_to_date_diag = false,
+    });
 }
 
-pub fn updateOne(pm: *PackageManager, package_name: []const u8) !void {
-    return pm.updateMany(&.{package_name});
+pub fn updateOne(pm: *PackageManager, packages: Packages, package_name: []const u8) !void {
+    return pm.updateMany(packages, &.{package_name});
 }
 
-pub fn updateMany(pm: *PackageManager, package_names: []const []const u8) !void {
-    return pm.updatePackages(package_names, .{ .up_to_date_diag = true });
+pub fn updateMany(pm: *PackageManager, packages: Packages, package_names: []const []const u8) !void {
+    return pm.updatePackages(packages, package_names, .{
+        .up_to_date_diag = true,
+    });
 }
 
 const UpdatePackagesOptions = struct {
@@ -482,6 +479,7 @@ const UpdatePackagesOptions = struct {
 
 fn updatePackages(
     pm: *PackageManager,
+    packages: Packages,
     package_names: []const []const u8,
     opt: UpdatePackagesOptions,
 ) !void {
@@ -491,7 +489,7 @@ fn updatePackages(
     var packages_to_uninstall = try pm.packagesToUninstall(package_names);
     defer packages_to_uninstall.deinit();
 
-    var packages_to_install = try pm.packagesToInstall(packages_to_uninstall.keys());
+    var packages_to_install = try pm.packagesToInstall(packages, packages_to_uninstall.keys());
     defer packages_to_install.deinit();
 
     // Remove up to date packages from the list
@@ -539,7 +537,7 @@ fn updatePackages(
     // Step 3: Install the new version.
     //         If this fails, packages can be left in a partially updated state
     for (successfull_downloads.items) |package| {
-        var working_dir = try pm.own_tmp_dir.makeOpenPath(package.install.hash, .{});
+        var working_dir = try pm.own_tmp_dir.openDir(package.install.hash, .{});
         defer working_dir.close();
 
         try pm.installExtractedPackage(working_dir, package);
@@ -557,7 +555,9 @@ fn updatePackages(
 }
 
 pub fn cleanup(pm: PackageManager) !void {
-    try pm.prefix_dir.deleteTree(paths.own_tmp_subpath);
+    var iter = pm.own_tmp_dir.iterate();
+    while (try iter.next()) |entry|
+        try pm.own_tmp_dir.deleteTree(entry.name);
 }
 
 pub fn deinit(pm: *PackageManager) void {
@@ -575,7 +575,6 @@ pub fn deinit(pm: *PackageManager) void {
 const Options = struct {
     allocator: std.mem.Allocator,
     http_client: *std.http.Client,
-    packages: *const Packages,
 
     /// Successes and failures are reported to the diagnostics. Set this for more details
     /// about failures.

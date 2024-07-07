@@ -33,7 +33,6 @@ pub fn init(options: Options) !TestingPackageManager {
         .prefix = prefix,
         .arch = .x86_64,
         .os = .linux,
-        .packages = options.packages,
 
         // Will never download in tests
         .http_client = undefined,
@@ -71,6 +70,17 @@ pub fn expectNoDir(pm: TestingPackageManager, path: []const u8) !void {
     try std.testing.expectError(error.FileNotFound, err_dir);
 }
 
+pub fn expectEmptyDir(pm: TestingPackageManager, path: []const u8) !void {
+    var dir = pm.pm.prefix_dir.openDir(path, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => |e| return e,
+    };
+    defer dir.close();
+
+    var it = dir.iterate();
+    try std.testing.expect((try it.next()) == null);
+}
+
 pub fn expectDiagnostics(pm: TestingPackageManager, expected: []const u8) !void {
     var actual = std.ArrayList(u8).init(std.testing.allocator);
     defer actual.deinit();
@@ -103,7 +113,6 @@ const Options = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
     prefix: ?[]const u8 = null,
     installed_file_data: ?[]const u8 = null,
-    packages: *const Packages,
 };
 
 test {
