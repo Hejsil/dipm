@@ -21,9 +21,13 @@ pub fn mainWithArgs(allocator: std.mem.Allocator, args: []const []const u8) !voi
     defer http_client.deinit();
     // try http_client.initDefaultProxies(arena);
 
+    var diag = Diagnostics.init(allocator);
+    defer diag.deinit();
+
     var program = Program{
         .allocator = allocator,
         .http_client = &http_client,
+        .diagnostics = &diag,
         .args = .{ .args = args },
         .options = .{
             .prefix = local_home_path,
@@ -65,6 +69,7 @@ const Program = @This();
 
 allocator: std.mem.Allocator,
 http_client: *std.http.Client,
+diagnostics: *Diagnostics,
 
 args: ArgParser,
 options: struct {
@@ -78,9 +83,6 @@ fn install(program: *Program) !void {
     while (!program.args.isDone())
         try packages_to_install.put(program.args.eat(), {});
 
-    var diag = Diagnostics.init(program.allocator);
-    defer diag.deinit();
-
     var pkgs = try Packages.download(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
@@ -94,12 +96,12 @@ fn install(program: *Program) !void {
         .http_client = program.http_client,
         .packages = &pkgs,
         .prefix = program.options.prefix,
-        .diagnostics = &diag,
+        .diagnostics = program.diagnostics,
     });
     defer pm.deinit();
 
     try pm.installMany(packages_to_install.keys());
-    try diag.reportToFile(std.io.getStdErr());
+    try program.diagnostics.reportToFile(std.io.getStdErr());
     try pm.cleanup();
 }
 
@@ -110,9 +112,6 @@ fn uninstall(program: *Program) !void {
     while (!program.args.isDone())
         try packages_to_uninstall.put(program.args.eat(), {});
 
-    var diag = Diagnostics.init(program.allocator);
-    defer diag.deinit();
-
     var pkgs = try Packages.download(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
@@ -126,12 +125,12 @@ fn uninstall(program: *Program) !void {
         .http_client = program.http_client,
         .packages = &pkgs,
         .prefix = program.options.prefix,
-        .diagnostics = &diag,
+        .diagnostics = program.diagnostics,
     });
     defer pm.deinit();
 
     try pm.uninstallMany(packages_to_uninstall.keys());
-    try diag.reportToFile(std.io.getStdErr());
+    try program.diagnostics.reportToFile(std.io.getStdErr());
     try pm.cleanup();
 }
 
@@ -143,9 +142,6 @@ fn update(program: *Program) !void {
         try packages_to_update.put(program.args.eat(), {});
     }
 
-    var diag = Diagnostics.init(program.allocator);
-    defer diag.deinit();
-
     var pkgs = try Packages.download(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
@@ -159,7 +155,7 @@ fn update(program: *Program) !void {
         .http_client = program.http_client,
         .packages = &pkgs,
         .prefix = program.options.prefix,
-        .diagnostics = &diag,
+        .diagnostics = program.diagnostics,
     });
     defer pm.deinit();
 
@@ -169,7 +165,7 @@ fn update(program: *Program) !void {
         try pm.updateMany(packages_to_update.keys());
     }
 
-    try diag.reportToFile(std.io.getStdErr());
+    try program.diagnostics.reportToFile(std.io.getStdErr());
     try pm.cleanup();
 }
 
