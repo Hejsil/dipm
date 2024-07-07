@@ -92,7 +92,7 @@ fn downloadPkgsIni(client: *std.http.Client, dir: std.fs.Dir, uri: []const u8) !
     var pkgs_file = try dir.atomicFile(pkgs_file_name, .{});
     defer pkgs_file.deinit();
 
-    try download(client, uri, pkgs_file.file.writer());
+    try download.download(client, uri, pkgs_file.file.writer());
     try pkgs_file.finish();
 }
 
@@ -193,7 +193,7 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
 
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     var hashing_writer = std.compress.hashedWriter(downloaded_file.writer(), &hasher);
-    download(&pm.http_client, package.install.url, hashing_writer.writer()) catch |err| {
+    download.download(&pm.http_client, package.install.url, hashing_writer.writer()) catch |err| {
         if (pm.diagnostics) |diag| try diag.downloadFailed(.{
             .name = package.name,
             .version = package.info.version,
@@ -606,42 +606,6 @@ pub fn deinit(pm: *PackageManager) void {
     pm.arena.deinit();
 }
 
-fn download(client: *std.http.Client, uri_str: []const u8, writer: anytype) !void {
-    const uri = try std.Uri.parse(uri_str);
-    if (std.mem.eql(u8, uri.scheme, "file")) {
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const path = try std.fmt.bufPrint(&path_buf, "{raw}", .{uri.path});
-        const file = try std.fs.cwd().openFile(path, .{});
-        return pipe(file.reader(), writer);
-    }
-
-    var header_buffer: [std.mem.page_size]u8 = undefined;
-    var request = try client.open(.GET, uri, .{
-        .server_header_buffer = &header_buffer,
-        .keep_alive = false,
-    });
-    defer request.deinit();
-
-    try request.send();
-    try request.wait();
-
-    if (request.response.status != .ok)
-        return error.HttpServerRepliedWithUnsucessfulResponse;
-
-    return pipe(request.reader(), writer);
-}
-
-fn pipe(reader: anytype, writer: anytype) !void {
-    var buf: [std.mem.page_size]u8 = undefined;
-    while (true) {
-        const len = try reader.read(&buf);
-        if (len == 0)
-            break;
-
-        try writer.writeAll(buf[0..len]);
-    }
-}
-
 const Options = struct {
     allocator: std.mem.Allocator,
 
@@ -762,6 +726,7 @@ test {
     _ = Package;
     _ = Packages;
 
+    _ = download;
     _ = ini;
 
     _ = @import("PackageManager.tests.zig");
@@ -776,5 +741,6 @@ const Package = @import("Package.zig");
 const Packages = @import("Packages.zig");
 
 const builtin = @import("builtin");
+const download = @import("download.zig");
 const ini = @import("ini.zig");
 const std = @import("std");
