@@ -1,7 +1,10 @@
 gpa: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 
-http_client: std.http.Client,
+http_client: *std.http.Client,
+packages: *const Packages,
+installed_file: IniFile(InstalledPackages),
+diagnostics: ?*Diagnostics,
 
 os: std.Target.Os.Tag,
 arch: std.Target.Cpu.Arch,
@@ -15,12 +18,6 @@ share_dir: std.fs.Dir,
 own_data_dir: std.fs.Dir,
 own_tmp_dir: std.fs.Dir,
 
-pkgs_uri: []const u8,
-pkgs_file: IniFile(Packages),
-installed_file: IniFile(InstalledPackages),
-
-diagnostics: ?*Diagnostics,
-
 pub fn init(options: Options) !PackageManager {
     const allocator = options.allocator;
 
@@ -32,46 +29,30 @@ pub fn init(options: Options) !PackageManager {
     var prefix_dir = try cwd.makeOpenPath(options.prefix, .{});
     errdefer prefix_dir.close();
 
-    const pkgs_uri = try arena.dupe(u8, options.pkgs_uri);
     const prefix_path = try prefix_dir.realpathAlloc(arena, ".");
 
-    var bin_dir = try prefix_dir.makeOpenPath(bin_subpath, .{});
+    var bin_dir = try prefix_dir.makeOpenPath(paths.bin_subpath, .{});
     errdefer bin_dir.close();
 
-    var lib_dir = try prefix_dir.makeOpenPath(lib_subpath, .{});
+    var lib_dir = try prefix_dir.makeOpenPath(paths.lib_subpath, .{});
     errdefer lib_dir.close();
 
-    var share_dir = try prefix_dir.makeOpenPath(share_subpath, .{});
+    var share_dir = try prefix_dir.makeOpenPath(paths.share_subpath, .{});
     errdefer share_dir.close();
 
-    var own_data_dir = try prefix_dir.makeOpenPath(own_data_subpath, .{});
+    var own_data_dir = try prefix_dir.makeOpenPath(paths.own_data_subpath, .{});
     errdefer own_data_dir.close();
 
-    var own_tmp_dir = try prefix_dir.makeOpenPath(own_tmp_subpath, .{});
+    var own_tmp_dir = try prefix_dir.makeOpenPath(paths.own_tmp_subpath, .{});
     errdefer own_tmp_dir.close();
 
-    var http_client = std.http.Client{ .allocator = allocator };
-    errdefer http_client.deinit();
-    try http_client.initDefaultProxies(arena);
-
-    // TODO: Download pkgs.ini lazily only on operations that actually require it.
-    //       * `install` should only download if it doesn't exists (like here)
-    //       * `update` should download the newest pkgs.ini, but only on the first call
-    own_data_dir.access(pkgs_file_name, .{}) catch |err| switch (err) {
-        error.FileNotFound => try downloadPkgsIni(&http_client, own_data_dir, pkgs_uri),
-        else => |e| return e,
-    };
-
-    var pkgs_file = try IniFile(Packages).open(allocator, own_data_dir, pkgs_file_name);
-    errdefer pkgs_file.close();
-
-    var installed_file = try IniFile(InstalledPackages).create(allocator, own_data_dir, installed_file_name);
+    var installed_file = try IniFile(InstalledPackages).create(allocator, own_data_dir, paths.installed_file_name);
     errdefer installed_file.close();
 
     return PackageManager{
         .gpa = allocator,
         .arena = arena_state,
-        .http_client = http_client,
+        .http_client = options.http_client,
         .os = options.os,
         .arch = options.arch,
         .prefix_path = prefix_path,
@@ -81,15 +62,14 @@ pub fn init(options: Options) !PackageManager {
         .share_dir = share_dir,
         .own_data_dir = own_data_dir,
         .own_tmp_dir = own_tmp_dir,
-        .pkgs_uri = pkgs_uri,
-        .pkgs_file = pkgs_file,
+        .packages = options.packages,
         .installed_file = installed_file,
         .diagnostics = options.diagnostics,
     };
 }
 
 fn downloadPkgsIni(client: *std.http.Client, dir: std.fs.Dir, uri: []const u8) !void {
-    var pkgs_file = try dir.atomicFile(pkgs_file_name, .{});
+    var pkgs_file = try dir.atomicFile(paths.pkgs_file_name, .{});
     defer pkgs_file.deinit();
 
     try download.download(client, uri, pkgs_file.file.writer());
@@ -152,7 +132,7 @@ fn packagesToInstall(
     // Now, populate. The packages that dont exist gets removed here.
     for (packages_to_install.keys(), packages_to_install.values(), 0..) |package_name, *entry, i| {
         entry.* = blk: {
-            const package = pm.pkgs_file.data.packages.get(package_name) orelse break :blk null;
+            const package = pm.packages.packages.get(package_name) orelse break :blk null;
             break :blk package.specific(package_name, pm.os, pm.arch);
         } orelse {
             if (pm.diagnostics) |diag|
@@ -193,7 +173,7 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
 
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     var hashing_writer = std.compress.hashedWriter(downloaded_file.writer(), &hasher);
-    download.download(&pm.http_client, package.install.url, hashing_writer.writer()) catch |err| {
+    download.download(pm.http_client, package.install.url, hashing_writer.writer()) catch |err| {
         if (pm.diagnostics) |diag| try diag.downloadFailed(.{
             .name = package.name,
             .version = package.info.version,
@@ -238,7 +218,7 @@ fn installExtractedPackage(pm: *PackageManager, from_dir: std.fs.Dir, package: P
         try installBin(the_install, from_dir, pm.bin_dir);
         try locations.append(try std.fs.path.join(installed_arena, &.{
             pm.prefix_path,
-            bin_subpath,
+            paths.bin_subpath,
             the_install.to,
         }));
     }
@@ -247,7 +227,7 @@ fn installExtractedPackage(pm: *PackageManager, from_dir: std.fs.Dir, package: P
         try installGeneric(the_install, from_dir, pm.lib_dir);
         try locations.append(try std.fs.path.join(installed_arena, &.{
             pm.prefix_path,
-            lib_subpath,
+            paths.lib_subpath,
             the_install.to,
         }));
     }
@@ -256,7 +236,7 @@ fn installExtractedPackage(pm: *PackageManager, from_dir: std.fs.Dir, package: P
         try installGeneric(the_install, from_dir, pm.share_dir);
         try locations.append(try std.fs.path.join(installed_arena, &.{
             pm.prefix_path,
-            share_subpath,
+            paths.share_subpath,
             the_install.to,
         }));
     }
@@ -508,17 +488,6 @@ fn updatePackages(
     if (package_names.len == 0)
         return;
 
-    // Update ensures that pkgs.ini is always up to date
-    if (downloadPkgsIni(&pm.http_client, pm.own_data_dir, pm.pkgs_uri)) |_| {
-        var pkgs_file = try IniFile(Packages).open(pm.gpa, pm.own_data_dir, pkgs_file_name);
-        errdefer pkgs_file.close();
-
-        pm.pkgs_file.close();
-        pm.pkgs_file = pkgs_file;
-    } else |_| {
-        // TODO: Diagnostics
-    }
-
     var packages_to_uninstall = try pm.packagesToUninstall(package_names);
     defer packages_to_uninstall.deinit();
 
@@ -588,26 +557,25 @@ fn updatePackages(
 }
 
 pub fn cleanup(pm: PackageManager) !void {
-    try pm.prefix_dir.deleteTree(own_tmp_subpath);
+    try pm.prefix_dir.deleteTree(paths.own_tmp_subpath);
 }
 
 pub fn deinit(pm: *PackageManager) void {
     pm.bin_dir.close();
     pm.lib_dir.close();
-    pm.share_dir.close();
     pm.own_data_dir.close();
+    pm.prefix_dir.close();
+    pm.share_dir.close();
 
-    pm.pkgs_file.close();
     pm.installed_file.close();
 
-    pm.prefix_dir.close();
-
-    pm.http_client.deinit();
     pm.arena.deinit();
 }
 
 const Options = struct {
     allocator: std.mem.Allocator,
+    http_client: *std.http.Client,
+    packages: *const Packages,
 
     /// Successes and failures are reported to the diagnostics. Set this for more details
     /// about failures.
@@ -618,9 +586,6 @@ const Options = struct {
 
     arch: std.Target.Cpu.Arch = builtin.cpu.arch,
     os: std.Target.Os.Tag = builtin.os.tag,
-
-    /// The URI where the package manager will download the pkgs.ini
-    pkgs_uri: []const u8 = "https://github.com/Hejsil/dipm-pkgs/raw/master/pkgs.ini",
 };
 
 pub fn IniFile(comptime T: type) type {
@@ -710,15 +675,6 @@ const FileType = enum {
     }
 };
 
-pub const bin_subpath = "bin";
-pub const lib_subpath = "lib";
-pub const own_data_subpath = "share/dipm";
-pub const own_tmp_subpath = "share/dipm/tmp";
-pub const share_subpath = "share";
-
-pub const installed_file_name = "installed.ini";
-pub const pkgs_file_name = "pkgs.ini";
-
 test {
     _ = Diagnostics;
     _ = InstalledPackage;
@@ -728,6 +684,7 @@ test {
 
     _ = download;
     _ = ini;
+    _ = paths;
 
     _ = @import("PackageManager.tests.zig");
 }
@@ -743,4 +700,5 @@ const Packages = @import("Packages.zig");
 const builtin = @import("builtin");
 const download = @import("download.zig");
 const ini = @import("ini.zig");
+const paths = @import("paths.zig");
 const std = @import("std");

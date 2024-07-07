@@ -17,8 +17,13 @@ pub fn mainWithArgs(allocator: std.mem.Allocator, args: []const []const u8) !voi
     const local_home_path = try std.fs.path.join(allocator, &.{ home_path, ".local" });
     defer allocator.free(local_home_path);
 
+    var http_client = std.http.Client{ .allocator = allocator };
+    defer http_client.deinit();
+    // try http_client.initDefaultProxies(arena);
+
     var program = Program{
         .allocator = allocator,
+        .http_client = &http_client,
         .args = .{ .args = args },
         .options = .{
             .prefix = local_home_path,
@@ -59,6 +64,8 @@ pub fn run(program: *Program) !void {
 const Program = @This();
 
 allocator: std.mem.Allocator,
+http_client: *std.http.Client,
+
 args: ArgParser,
 options: struct {
     prefix: []const u8,
@@ -74,8 +81,18 @@ fn install(program: *Program) !void {
     var diag = Diagnostics.init(program.allocator);
     defer diag.deinit();
 
+    var pkgs = try Packages.download(.{
+        .allocator = program.allocator,
+        .http_client = program.http_client,
+        .prefix = program.options.prefix,
+        .download = .always,
+    });
+    defer pkgs.deinit();
+
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
+        .http_client = program.http_client,
+        .packages = &pkgs,
         .prefix = program.options.prefix,
         .diagnostics = &diag,
     });
@@ -96,8 +113,18 @@ fn uninstall(program: *Program) !void {
     var diag = Diagnostics.init(program.allocator);
     defer diag.deinit();
 
+    var pkgs = try Packages.download(.{
+        .allocator = program.allocator,
+        .http_client = program.http_client,
+        .prefix = program.options.prefix,
+        .download = .always,
+    });
+    defer pkgs.deinit();
+
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
+        .http_client = program.http_client,
+        .packages = &pkgs,
         .prefix = program.options.prefix,
         .diagnostics = &diag,
     });
@@ -119,8 +146,18 @@ fn update(program: *Program) !void {
     var diag = Diagnostics.init(program.allocator);
     defer diag.deinit();
 
+    var pkgs = try Packages.download(.{
+        .allocator = program.allocator,
+        .http_client = program.http_client,
+        .prefix = program.options.prefix,
+        .download = .always,
+    });
+    defer pkgs.deinit();
+
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
+        .http_client = program.http_client,
+        .packages = &pkgs,
         .prefix = program.options.prefix,
         .diagnostics = &diag,
     });
@@ -141,8 +178,19 @@ fn installed(program: *Program) !void {
         return error.InvalidArgument;
     }
 
+    // TODO: Remove. This is not needed for this command
+    var pkgs = try Packages.download(.{
+        .allocator = program.allocator,
+        .http_client = program.http_client,
+        .prefix = program.options.prefix,
+        .download = .only_if_required,
+    });
+    defer pkgs.deinit();
+
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
+        .http_client = program.http_client,
+        .packages = &pkgs,
         .prefix = program.options.prefix,
     });
     defer pm.deinit();
@@ -150,9 +198,10 @@ fn installed(program: *Program) !void {
     var stdout_buffered = std.io.bufferedWriter(std.io.getStdOut().writer());
     const writer = stdout_buffered.writer();
 
-    const pkg_names = pm.installed_file.data.packages.keys();
-    const pkgs = pm.installed_file.data.packages.values();
-    for (pkg_names, pkgs) |package_name, package| {
+    for (
+        pm.installed_file.data.packages.keys(),
+        pm.installed_file.data.packages.values(),
+    ) |package_name, package| {
         try writer.print("{s}\t{s}\n", .{ package_name, package.version });
     }
 
@@ -164,20 +213,19 @@ fn packages(program: *Program) !void {
         return error.InvalidArgument;
     }
 
-    var pm = try PackageManager.init(.{
+    var pkgs = try Packages.download(.{
         .allocator = program.allocator,
+        .http_client = program.http_client,
         .prefix = program.options.prefix,
+        .download = .only_if_required,
     });
-    defer pm.deinit();
+    defer pkgs.deinit();
 
     var stdout_buffered = std.io.bufferedWriter(std.io.getStdOut().writer());
     const writer = stdout_buffered.writer();
 
-    const pkg_names = pm.pkgs_file.data.packages.keys();
-    const pkgs = pm.pkgs_file.data.packages.values();
-    for (pkg_names, pkgs) |package_name, package| {
+    for (pkgs.packages.keys(), pkgs.packages.values()) |package_name, package|
         try writer.print("{s}\t{s}\n", .{ package_name, package.info.version });
-    }
 
     try stdout_buffered.flush();
 }
@@ -255,12 +303,15 @@ test {
     _ = ArgParser;
     _ = Diagnostics;
     _ = PackageManager;
+    _ = Packages;
+
     _ = ini;
 }
 
 const ArgParser = @import("ArgParser.zig");
 const Diagnostics = @import("Diagnostics.zig");
 const PackageManager = @import("PackageManager.zig");
+const Packages = @import("Packages.zig");
 
 const builtin = @import("builtin");
 const ini = @import("ini.zig");

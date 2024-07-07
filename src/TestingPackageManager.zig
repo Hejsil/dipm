@@ -4,9 +4,6 @@ diag: *Diagnostics,
 pub fn init(options: Options) !TestingPackageManager {
     const allocator = options.allocator;
 
-    const pkgs_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{options.pkgs_ini_path});
-    defer allocator.free(pkgs_uri);
-
     const random_prefix_path = try testing.tmpDirPath(allocator);
     defer allocator.free(random_prefix_path);
 
@@ -19,8 +16,8 @@ pub fn init(options: Options) !TestingPackageManager {
         var buf: [std.fs.max_path_bytes]u8 = undefined;
         const installed_path = try std.fmt.bufPrint(&buf, "{s}/{s}/{s}", .{
             prefix,
-            PackageManager.own_data_subpath,
-            PackageManager.installed_file_name,
+            paths.own_data_subpath,
+            paths.installed_file_name,
         });
 
         try std.fs.cwd().makePath(std.fs.path.dirname(installed_path) orelse ".");
@@ -36,7 +33,10 @@ pub fn init(options: Options) !TestingPackageManager {
         .prefix = prefix,
         .arch = .x86_64,
         .os = .linux,
-        .pkgs_uri = pkgs_uri,
+        .packages = options.packages,
+
+        // Will never download in tests
+        .http_client = undefined,
     });
     errdefer pm.deinit();
 
@@ -101,14 +101,26 @@ pub fn deinit(pm: *TestingPackageManager) void {
 
 const Options = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
-    pkgs_ini_path: []const u8,
     prefix: ?[]const u8 = null,
     installed_file_data: ?[]const u8 = null,
+    packages: *const Packages,
 };
+
+test {
+    _ = Diagnostics;
+    _ = PackageManager;
+    _ = Packages;
+
+    _ = paths;
+    _ = testing;
+}
 
 const TestingPackageManager = @This();
 
 const Diagnostics = @import("Diagnostics.zig");
 const PackageManager = @import("PackageManager.zig");
+const Packages = @import("Packages.zig");
+
+const paths = @import("paths.zig");
 const std = @import("std");
 const testing = @import("testing.zig");

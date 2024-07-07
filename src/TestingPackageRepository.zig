@@ -2,6 +2,7 @@ allocator: std.mem.Allocator,
 
 pkgs_ini_path: []const u8,
 pkgs_dir_path: []const u8,
+packages: Packages,
 
 pub fn init(options: Options) !TestingPackageRepository {
     const allocator = options.allocator;
@@ -9,7 +10,11 @@ pub fn init(options: Options) !TestingPackageRepository {
     const prefix_path = try testing.tmpDirPath(allocator);
     defer allocator.free(prefix_path);
 
-    const pkgs_ini_path = try std.fs.path.join(allocator, &.{ prefix_path, "pkgs.ini" });
+    const pkgs_ini_path = try std.fs.path.join(allocator, &.{
+        prefix_path,
+        paths.own_data_subpath,
+        paths.pkgs_file_name,
+    });
     errdefer allocator.free(pkgs_ini_path);
 
     const pkgs_dir_path = try std.fs.path.join(allocator, &.{ prefix_path, "pkgs" });
@@ -19,6 +24,8 @@ pub fn init(options: Options) !TestingPackageRepository {
     var pkgs_dir = try cwd.makeOpenPath(pkgs_dir_path, .{});
     defer pkgs_dir.close();
 
+    if (std.fs.path.dirname(pkgs_ini_path)) |dir_name|
+        try cwd.makePath(dir_name);
     const pkgs_ini_file = try cwd.createFile(pkgs_ini_path, .{ .exclusive = true });
     defer pkgs_ini_file.close();
 
@@ -56,17 +63,23 @@ pub fn init(options: Options) !TestingPackageRepository {
 
     try buffered_pkg_ini_file.flush();
 
+    var packages = try Packages.download(.{
+        .allocator = allocator,
+        .prefix = prefix_path,
+        .download = .only_if_required,
+
+        // Will never download in tests
+        .http_client = undefined,
+        .pkgs_uri = undefined,
+    });
+    errdefer packages.deinit();
+
     return .{
         .allocator = allocator,
         .pkgs_ini_path = pkgs_ini_path,
         .pkgs_dir_path = pkgs_dir_path,
+        .packages = packages,
     };
-}
-
-pub fn deinit(repo: *TestingPackageRepository) void {
-    repo.allocator.free(repo.pkgs_ini_path);
-    repo.allocator.free(repo.pkgs_dir_path);
-    repo.* = undefined;
 }
 
 pub const Options = struct {
@@ -90,7 +103,17 @@ pub const Package = struct {
     };
 };
 
+test {
+    _ = Packages;
+
+    _ = paths;
+    _ = testing;
+}
+
 const TestingPackageRepository = @This();
 
-const testing = @import("testing.zig");
+const Packages = @import("Packages.zig");
+
+const paths = @import("paths.zig");
 const std = @import("std");
+const testing = @import("testing.zig");

@@ -1,7 +1,7 @@
 test "install test-file" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -24,7 +24,7 @@ test "install test-file" {
 test "install test-xz" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -55,7 +55,7 @@ test "install test-xz" {
 test "install test-gz" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -86,7 +86,7 @@ test "install test-gz" {
 test "install test-zst" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -117,7 +117,7 @@ test "install test-zst" {
 test "install already installed" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -136,7 +136,7 @@ test "install already installed" {
 test "uninstall" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -161,7 +161,7 @@ test "uninstall" {
 test "uninstall not installed" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -177,7 +177,7 @@ test "uninstall not installed" {
 test "uninstall already uninstalled" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -199,7 +199,7 @@ test "uninstall already uninstalled" {
 test "update" {
     const repo_v1 = simple_repository_v1.get();
     var pm_v1 = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo_v1.pkgs_ini_path,
+        .packages = &repo_v1.packages,
     });
     defer pm_v1.deinit();
 
@@ -212,7 +212,7 @@ test "update" {
 
     const repo_v2 = simple_repository_v2.get();
     var pm_v2 = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo_v2.pkgs_ini_path,
+        .packages = &repo_v2.packages,
         .prefix = pm_v1.pm.prefix_path,
     });
     defer pm_v2.deinit();
@@ -268,7 +268,7 @@ test "update" {
 test "update all" {
     const repo_v1 = simple_repository_v1.get();
     var pm_v1 = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo_v1.pkgs_ini_path,
+        .packages = &repo_v1.packages,
     });
     defer pm_v1.deinit();
 
@@ -281,7 +281,7 @@ test "update all" {
 
     const repo_v2 = simple_repository_v2.get();
     var pm_v2 = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo_v2.pkgs_ini_path,
+        .packages = &repo_v2.packages,
         .prefix = pm_v1.pm.prefix_path,
     });
     defer pm_v2.deinit();
@@ -338,7 +338,7 @@ test "update all" {
 test "cleanup" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -353,7 +353,7 @@ test "cleanup" {
 test "hash mismatch" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -371,7 +371,7 @@ test "hash mismatch" {
 test "not found" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -387,7 +387,7 @@ test "not found" {
 test "dedupe install/uninstall" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -411,7 +411,7 @@ test "dedupe install/uninstall" {
 test "dedupe not found" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -427,7 +427,7 @@ test "dedupe not found" {
 test "updateOne: dont update up to date packages" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -446,7 +446,7 @@ test "updateOne: dont update up to date packages" {
 test "updateAll: dont update up to date packages" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -463,7 +463,7 @@ test "updateAll: dont update up to date packages" {
 test "install: download fails" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
     });
     defer pm.deinit();
 
@@ -482,7 +482,7 @@ test "install: download fails" {
 test "update: Do not leave package uninstalled on download fail" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{
-        .pkgs_ini_path = repo.pkgs_ini_path,
+        .packages = &repo.packages,
         // There is no way to install the "fails-download" package, so just fake that we have
         // it installed.
         .installed_file_data =
