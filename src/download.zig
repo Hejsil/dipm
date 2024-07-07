@@ -15,6 +15,7 @@ pub fn download(client: *std.http.Client, uri_str: []const u8, writer: anytype) 
     defer request.deinit();
 
     try request.send();
+    try request.finish();
     try request.wait();
 
     if (request.response.status != .ok)
