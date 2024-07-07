@@ -14,10 +14,26 @@ pub fn init(options: Options) !TestingPackageManager {
     errdefer allocator.destroy(diag);
     diag.* = Diagnostics.init(allocator);
 
+    const prefix = if (options.prefix) |prefix| prefix else random_prefix_path;
+    if (options.installed_file_data) |installed_file_data| {
+        var buf: [std.fs.max_path_bytes]u8 = undefined;
+        const installed_path = try std.fmt.bufPrint(&buf, "{s}/{s}/{s}", .{
+            prefix,
+            PackageManager.own_data_subpath,
+            PackageManager.installed_file_name,
+        });
+
+        try std.fs.cwd().makePath(std.fs.path.dirname(installed_path) orelse ".");
+        try std.fs.cwd().writeFile(.{
+            .sub_path = installed_path,
+            .data = installed_file_data,
+        });
+    }
+
     var pm = try PackageManager.init(.{
         .allocator = allocator,
         .diagnostics = diag,
-        .prefix = if (options.prefix) |prefix| prefix else random_prefix_path,
+        .prefix = prefix,
         .arch = .x86_64,
         .os = .linux,
         .pkgs_uri = pkgs_uri,
@@ -87,6 +103,7 @@ const Options = struct {
     allocator: std.mem.Allocator = std.testing.allocator,
     pkgs_ini_path: []const u8,
     prefix: ?[]const u8 = null,
+    installed_file_data: ?[]const u8 = null,
 };
 
 const TestingPackageManager = @This();

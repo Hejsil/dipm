@@ -542,28 +542,38 @@ fn updatePackages(
             });
     }
 
-    // TODO: The steps for this should be
-    //       * Download and extract packages to install
-    //       * Uninstall installed packages
-    //       * Install the updated packages
+    // Step 1: Download the packages that needs updating. This is the most likly step to fail, so
+    //         doing this before uninstalling the already installed package is preferred.
+    var successfull_downloads = std.ArrayList(Package.Specific).init(pm.gpa);
+    defer successfull_downloads.deinit();
 
-    var successfull_uninstalls = std.ArrayList(Package.Specific).init(pm.gpa);
-    defer successfull_uninstalls.deinit();
-
-    try successfull_uninstalls.ensureTotalCapacity(packages_to_install.count());
+    try successfull_downloads.ensureTotalCapacity(packages_to_install.count());
     for (packages_to_install.values()) |package| {
-        const installed_package = packages_to_uninstall.get(package.name).?;
-        try pm.uninstallOneUnchecked(package.name, installed_package);
-        successfull_uninstalls.appendAssumeCapacity(package);
-    }
+        var working_dir = try pm.own_tmp_dir.makeOpenPath(package.install.hash, .{});
+        defer working_dir.close();
 
-    for (successfull_uninstalls.items) |package| {
-        pm.installOneUnchecked(package) catch |err| switch (err) {
+        pm.downloadAndExtractPackage(working_dir, package) catch |err| switch (err) {
             error.DiagnosticsInvalidHash => continue,
             error.DiagnosticsDownloadFailed => continue,
             else => |e| return e,
         };
+        successfull_downloads.appendAssumeCapacity(package);
+    }
 
+    // Step 2: Uninstall the already installed packages.
+    //         If this fails, packages can be left in a partially updated state
+    for (successfull_downloads.items) |package| {
+        const installed_package = packages_to_uninstall.get(package.name).?;
+        try pm.uninstallOneUnchecked(package.name, installed_package);
+    }
+
+    // Step 3: Install the new version.
+    //         If this fails, packages can be left in a partially updated state
+    for (successfull_downloads.items) |package| {
+        var working_dir = try pm.own_tmp_dir.makeOpenPath(package.install.hash, .{});
+        defer working_dir.close();
+
+        try pm.installExtractedPackage(working_dir, package);
         if (pm.diagnostics) |diag| {
             const installed_package = packages_to_uninstall.get(package.name).?;
             try diag.updateSucceeded(.{
@@ -736,14 +746,14 @@ const FileType = enum {
     }
 };
 
-const bin_subpath = "bin";
-const lib_subpath = "lib";
-const own_data_subpath = "share/dipm";
-const own_tmp_subpath = "share/dipm/tmp";
-const share_subpath = "share";
+pub const bin_subpath = "bin";
+pub const lib_subpath = "lib";
+pub const own_data_subpath = "share/dipm";
+pub const own_tmp_subpath = "share/dipm/tmp";
+pub const share_subpath = "share";
 
-const installed_file_name = "installed.ini";
-const pkgs_file_name = "pkgs.ini";
+pub const installed_file_name = "installed.ini";
+pub const pkgs_file_name = "pkgs.ini";
 
 test {
     _ = Diagnostics;

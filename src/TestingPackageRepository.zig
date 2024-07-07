@@ -26,11 +26,12 @@ pub fn init(options: Options) !TestingPackageRepository {
     const pkgs_ini_writer = buffered_pkg_ini_file.writer();
 
     for (options.packages, 0..) |package, i| {
-        try pkgs_dir.writeFile(.{
-            .sub_path = package.file.name,
-            .data = package.file.content,
-            .flags = .{ .exclusive = true },
-        });
+        if (package.file.content) |content|
+            try pkgs_dir.writeFile(.{
+                .sub_path = package.file.name,
+                .data = content,
+                .flags = .{ .exclusive = true },
+            });
 
         if (i != 0) try pkgs_ini_writer.writeAll("\n");
 
@@ -85,7 +86,7 @@ pub const Package = struct {
     const File = struct {
         name: []const u8,
         hash: []const u8,
-        content: []const u8,
+        content: ?[]const u8,
     };
 };
 

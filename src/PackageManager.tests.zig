@@ -460,6 +460,57 @@ test "updateAll: dont update up to date packages" {
     try pm.cleanup();
 }
 
+test "install: download fails" {
+    const repo = simple_repository_v1.get();
+    var pm = try TestingPackageManager.init(.{
+        .pkgs_ini_path = repo.pkgs_ini_path,
+    });
+    defer pm.deinit();
+
+    var buf: [std.mem.page_size]u8 = undefined;
+    try pm.pm.installOne("fails-download");
+    try pm.expectDiagnostics(try std.fmt.bufPrint(&buf,
+        \\<B><r>✗<R> <B>fails-download 0.1.0<R>
+        \\│   Failed to download
+        \\│     url:   file://{s}/fails-download
+        \\└──   error: FileNotFound
+        \\
+    , .{repo.pkgs_dir_path}));
+    try pm.cleanup();
+}
+
+test "update: Do not leave package uninstalled on download fail" {
+    const repo = simple_repository_v1.get();
+    var pm = try TestingPackageManager.init(.{
+        .pkgs_ini_path = repo.pkgs_ini_path,
+        // There is no way to install the "fails-download" package, so just fake that we have
+        // it installed.
+        .installed_file_data =
+        \\[fails-download]
+        \\version = 0.0.0
+        \\
+    });
+    defer pm.deinit();
+
+    try pm.pm.updateAll();
+    try pm.expectFile("share/dipm/installed.ini",
+        \\[fails-download]
+        \\version = 0.0.0
+        \\
+    );
+
+    var buf: [std.mem.page_size]u8 = undefined;
+    try pm.expectDiagnostics(try std.fmt.bufPrint(&buf,
+        \\<B><r>✗<R> <B>fails-download 0.1.0<R>
+        \\│   Failed to download
+        \\│     url:   file://{s}/fails-download
+        \\└──   error: FileNotFound
+        \\
+    , .{repo.pkgs_dir_path}));
+
+    try pm.cleanup();
+}
+
 const simple_repository_v1 = struct {
     fn get() *const TestingPackageRepository {
         once.call();
@@ -472,6 +523,7 @@ const simple_repository_v1 = struct {
         simple_tree_tar_gz,
         simple_tree_tar_zst,
         wrong_hash,
+        fails_download,
     };
 
     var repository: TestingPackageRepository = undefined;
@@ -642,6 +694,18 @@ pub const wrong_hash = TestingPackageRepository.Package{
         .content = "Binary",
     },
     .install_bin = &.{"wrong-hash"},
+};
+
+pub const fails_download = TestingPackageRepository.Package{
+    .name = "fails-download",
+    .version = "0.1.0",
+    .github_update = "fails-download/fails-download",
+    .file = .{
+        .name = "fails-download",
+        .hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        .content = null,
+    },
+    .install_bin = &.{"fails-download"},
 };
 
 const TestingPackageManager = @import("TestingPackageManager.zig");
