@@ -87,7 +87,7 @@ fn install(program: *Program) !void {
         .allocator = program.allocator,
         .http_client = program.http_client,
         .prefix = program.options.prefix,
-        .download = .always,
+        .download = .only_if_required,
     });
     defer pkgs.deinit();
 
