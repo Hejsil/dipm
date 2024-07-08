@@ -24,9 +24,26 @@ pub fn mainWithArgs(allocator: std.mem.Allocator, args: []const []const u8) !voi
     var diag = Diagnostics.init(allocator);
     defer diag.deinit();
 
+    var progress = try Progress.init(.{
+        .allocator = allocator,
+        .maximum_node_name_len = 15,
+    });
+    defer progress.deinit(allocator);
+
+    var running = std.atomic.Value(bool).init(true);
+    const render_thread = std.Thread.spawn(
+        .{},
+        renderThread,
+        .{ &progress, &running },
+    ) catch |err| blk: {
+        std.log.warn("failed to spawn rendering thread: {}", .{err});
+        break :blk null;
+    };
+
     var program = Program{
         .allocator = allocator,
         .http_client = &http_client,
+        .progress = &progress,
         .diagnostics = &diag,
         .args = .{ .args = args },
         .options = .{
@@ -34,7 +51,33 @@ pub fn mainWithArgs(allocator: std.mem.Allocator, args: []const []const u8) !voi
         },
     };
 
-    return program.run();
+    const res = program.run();
+
+    if (render_thread) |t| {
+        running.store(false, .unordered);
+        t.join();
+    }
+
+    try program.diagnostics.reportToFile(std.io.getStdErr());
+    return res;
+}
+
+fn renderThread(progress: *Progress, running: *std.atomic.Value(bool)) void {
+    const fps = 15;
+    const delay = std.time.ns_per_s / fps;
+    const initial_delay = std.time.ns_per_s / 4;
+
+    const stderr = std.io.getStdErr();
+    if (!stderr.supportsAnsiEscapeCodes())
+        return;
+
+    std.time.sleep(initial_delay);
+    while (running.load(.unordered)) {
+        progress.renderToTty(stderr) catch {};
+        std.time.sleep(delay);
+    }
+
+    progress.cleanupTty(stderr) catch {};
 }
 
 pub fn run(program: *Program) !void {
@@ -69,6 +112,7 @@ const Program = @This();
 
 allocator: std.mem.Allocator,
 http_client: *std.http.Client,
+progress: *Progress,
 diagnostics: *Diagnostics,
 
 args: ArgParser,
@@ -86,6 +130,8 @@ fn install(program: *Program) !void {
     var pkgs = try Packages.download(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
+        .diagnostics = program.diagnostics,
+        .progress = program.progress,
         .prefix = program.options.prefix,
         .download = .only_if_required,
     });
@@ -94,13 +140,13 @@ fn install(program: *Program) !void {
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
-        .prefix = program.options.prefix,
         .diagnostics = program.diagnostics,
+        .progress = program.progress,
+        .prefix = program.options.prefix,
     });
     defer pm.deinit();
 
     try pm.installMany(pkgs, packages_to_install.keys());
-    try program.diagnostics.reportToFile(std.io.getStdErr());
     try pm.cleanup();
 }
 
@@ -114,13 +160,13 @@ fn uninstall(program: *Program) !void {
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
-        .prefix = program.options.prefix,
         .diagnostics = program.diagnostics,
+        .progress = program.progress,
+        .prefix = program.options.prefix,
     });
     defer pm.deinit();
 
     try pm.uninstallMany(packages_to_uninstall.keys());
-    try program.diagnostics.reportToFile(std.io.getStdErr());
     try pm.cleanup();
 }
 
@@ -135,6 +181,8 @@ fn update(program: *Program) !void {
     var pkgs = try Packages.download(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
+        .diagnostics = program.diagnostics,
+        .progress = program.progress,
         .prefix = program.options.prefix,
         .download = .always,
     });
@@ -143,8 +191,9 @@ fn update(program: *Program) !void {
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
-        .prefix = program.options.prefix,
         .diagnostics = program.diagnostics,
+        .progress = program.progress,
+        .prefix = program.options.prefix,
     });
     defer pm.deinit();
 
@@ -154,7 +203,6 @@ fn update(program: *Program) !void {
         try pm.updateMany(pkgs, packages_to_update.keys());
     }
 
-    try program.diagnostics.reportToFile(std.io.getStdErr());
     try pm.cleanup();
 }
 
@@ -166,6 +214,8 @@ fn installed(program: *Program) !void {
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
+        .diagnostics = program.diagnostics,
+        .progress = program.progress,
         .prefix = program.options.prefix,
     });
     defer pm.deinit();
@@ -191,6 +241,8 @@ fn packages(program: *Program) !void {
     var pkgs = try Packages.download(.{
         .allocator = program.allocator,
         .http_client = program.http_client,
+        .diagnostics = program.diagnostics,
+        .progress = program.progress,
         .prefix = program.options.prefix,
         .download = .only_if_required,
     });
@@ -279,6 +331,7 @@ test {
     _ = Diagnostics;
     _ = PackageManager;
     _ = Packages;
+    _ = Progress;
 
     _ = ini;
 }
@@ -287,6 +340,7 @@ const ArgParser = @import("ArgParser.zig");
 const Diagnostics = @import("Diagnostics.zig");
 const PackageManager = @import("PackageManager.zig");
 const Packages = @import("Packages.zig");
+const Progress = @import("Progress.zig");
 
 const builtin = @import("builtin");
 const ini = @import("ini.zig");

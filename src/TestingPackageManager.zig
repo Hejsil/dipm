@@ -1,5 +1,6 @@
 pm: PackageManager,
 diag: *Diagnostics,
+progress: *Progress,
 
 pub fn init(options: Options) !TestingPackageManager {
     const allocator = options.allocator;
@@ -10,6 +11,16 @@ pub fn init(options: Options) !TestingPackageManager {
     const diag = try allocator.create(Diagnostics);
     errdefer allocator.destroy(diag);
     diag.* = Diagnostics.init(allocator);
+
+    // Progress is required, but these tests don't test it. Just set maximum_node to 0, so that
+    // nothing is allocatated or progressed on.
+    const progress = try allocator.create(Progress);
+    errdefer allocator.destroy(progress);
+    progress.* = try Progress.init(.{
+        .allocator = allocator,
+        .maximum_node_name_len = 0,
+        .maximum_nodes = 0,
+    });
 
     const prefix = if (options.prefix) |prefix| prefix else random_prefix_path;
     if (options.installed_file_data) |installed_file_data| {
@@ -30,6 +41,7 @@ pub fn init(options: Options) !TestingPackageManager {
     var pm = try PackageManager.init(.{
         .allocator = allocator,
         .diagnostics = diag,
+        .progress = progress,
         .prefix = prefix,
         .arch = .x86_64,
         .os = .linux,
@@ -42,7 +54,28 @@ pub fn init(options: Options) !TestingPackageManager {
     return .{
         .pm = pm,
         .diag = diag,
+        .progress = progress,
     };
+}
+
+pub const Options = struct {
+    allocator: std.mem.Allocator = std.testing.allocator,
+    prefix: ?[]const u8 = null,
+    installed_file_data: ?[]const u8 = null,
+};
+
+pub fn deinit(pm: *TestingPackageManager) void {
+    const allocator = pm.pm.gpa;
+    pm.pm.deinit();
+    pm.diag.deinit();
+    pm.progress.deinit(allocator);
+    allocator.destroy(pm.diag);
+    allocator.destroy(pm.progress);
+    pm.* = undefined;
+}
+
+pub fn cleanup(pm: *TestingPackageManager) !void {
+    try std.fs.cwd().deleteTree(pm.pm.prefix_path);
 }
 
 pub fn expectFile(pm: TestingPackageManager, path: []const u8, expected_content: []const u8) !void {
@@ -97,24 +130,6 @@ pub fn expectDiagnostics(pm: TestingPackageManager, expected: []const u8) !void 
     try std.testing.expectEqualStrings(expected, actual.items);
 }
 
-pub fn cleanup(pm: *TestingPackageManager) !void {
-    try std.fs.cwd().deleteTree(pm.pm.prefix_path);
-}
-
-pub fn deinit(pm: *TestingPackageManager) void {
-    const allocator = pm.pm.gpa;
-    pm.diag.deinit();
-    pm.pm.deinit();
-    allocator.destroy(pm.diag);
-    pm.* = undefined;
-}
-
-const Options = struct {
-    allocator: std.mem.Allocator = std.testing.allocator,
-    prefix: ?[]const u8 = null,
-    installed_file_data: ?[]const u8 = null,
-};
-
 test {
     _ = Diagnostics;
     _ = PackageManager;
@@ -129,6 +144,7 @@ const TestingPackageManager = @This();
 const Diagnostics = @import("Diagnostics.zig");
 const PackageManager = @import("PackageManager.zig");
 const Packages = @import("Packages.zig");
+const Progress = @import("Progress.zig");
 
 const paths = @import("paths.zig");
 const std = @import("std");
