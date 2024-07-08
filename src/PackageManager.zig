@@ -3,7 +3,9 @@ arena: std.heap.ArenaAllocator,
 
 http_client: *std.http.Client,
 installed_file: IniFile(InstalledPackages),
-diagnostics: ?*Diagnostics,
+
+diagnostics: *Diagnostics,
+progress: *Progress,
 
 os: std.Target.Os.Tag,
 arch: std.Target.Cpu.Arch,
@@ -54,6 +56,8 @@ pub fn init(options: Options) !PackageManager {
         .gpa = allocator,
         .arena = arena_state,
         .http_client = options.http_client,
+        .diagnostics = options.diagnostics,
+        .progress = options.progress,
         .os = options.os,
         .arch = options.arch,
         .prefix_path = prefix_path,
@@ -64,8 +68,41 @@ pub fn init(options: Options) !PackageManager {
         .own_data_dir = own_data_dir,
         .own_tmp_dir = own_tmp_dir,
         .installed_file = installed_file,
-        .diagnostics = options.diagnostics,
     };
+}
+
+pub const Options = struct {
+    allocator: std.mem.Allocator,
+    http_client: *std.http.Client,
+
+    /// Successes and failures are reported to the diagnostics. Set this for more details
+    /// about failures.
+    diagnostics: *Diagnostics,
+    progress: *Progress,
+
+    /// The prefix path where the package manager will work and install packages
+    prefix: []const u8,
+
+    arch: std.Target.Cpu.Arch = builtin.cpu.arch,
+    os: std.Target.Os.Tag = builtin.os.tag,
+};
+
+pub fn cleanup(pm: PackageManager) !void {
+    var iter = pm.own_tmp_dir.iterate();
+    while (try iter.next()) |entry|
+        try pm.own_tmp_dir.deleteTree(entry.name);
+}
+
+pub fn deinit(pm: *PackageManager) void {
+    pm.bin_dir.close();
+    pm.lib_dir.close();
+    pm.own_data_dir.close();
+    pm.prefix_dir.close();
+    pm.share_dir.close();
+
+    pm.installed_file.close();
+
+    pm.arena.deinit();
 }
 
 pub fn isInstalled(pm: PackageManager, package_name: []const u8) bool {
@@ -86,8 +123,7 @@ pub fn installMany(pm: *PackageManager, packages: Packages, package_names: []con
         const package = packages_to_install.values()[i_backwards];
 
         if (pm.isInstalled(package.name)) {
-            if (pm.diagnostics) |diag|
-                try diag.alreadyInstalled(.{ .name = package.name });
+            try pm.diagnostics.alreadyInstalled(.{ .name = package.name });
             _ = packages_to_install.swapRemoveAt(i_backwards);
         }
     }
@@ -99,11 +135,10 @@ pub fn installMany(pm: *PackageManager, packages: Packages, package_names: []con
             else => |e| return e,
         };
 
-        if (pm.diagnostics) |diag|
-            try diag.installSucceeded(.{
-                .name = package.name,
-                .version = package.info.version,
-            });
+        try pm.diagnostics.installSucceeded(.{
+            .name = package.name,
+            .version = package.info.version,
+        });
     }
 
     try pm.installed_file.flush();
@@ -128,12 +163,11 @@ fn packagesToInstall(
             const package = packages.packages.get(package_name) orelse break :blk null;
             break :blk package.specific(package_name, pm.os, pm.arch);
         } orelse {
-            if (pm.diagnostics) |diag|
-                try diag.notFound(.{
-                    .name = package_name,
-                    .os = pm.os,
-                    .arch = pm.arch,
-                });
+            try pm.diagnostics.notFound(.{
+                .name = package_name,
+                .os = pm.os,
+                .arch = pm.arch,
+            });
             packages_to_install.swapRemoveAt(i);
             continue;
         };
@@ -153,6 +187,9 @@ fn installOneUnchecked(pm: *PackageManager, package: Package.Specific) !void {
 }
 
 fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Package.Specific) !void {
+    const progress = pm.progress.start(package.name, 1);
+    defer pm.progress.end(progress);
+
     const downloaded_file_name = std.fs.path.basename(package.install.url);
 
     const downloaded_file = try dir.createFile(downloaded_file_name, .{
@@ -166,8 +203,14 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
 
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     var hashing_writer = std.compress.hashedWriter(downloaded_file.writer(), &hasher);
-    download.download(pm.http_client, package.install.url, hashing_writer.writer()) catch |err| {
-        if (pm.diagnostics) |diag| try diag.downloadFailed(.{
+
+    const status = download.download(
+        pm.http_client,
+        package.install.url,
+        progress,
+        hashing_writer.writer(),
+    ) catch |err| {
+        try pm.diagnostics.downloadFailed(.{
             .name = package.name,
             .version = package.info.version,
             .url = package.install.url,
@@ -175,6 +218,15 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
         });
         return error.DiagnosticsDownloadFailed;
     };
+    if (status != .ok) {
+        try pm.diagnostics.downloadFailedWithStatus(.{
+            .name = package.name,
+            .version = package.info.version,
+            .url = package.install.url,
+            .status = status,
+        });
+        return error.DiagnosticsDownloadFailed;
+    }
 
     const digest_length = std.crypto.hash.sha2.Sha256.digest_length;
     var actual_hash_bytes: [digest_length]u8 = undefined;
@@ -183,7 +235,7 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
     const actual_hash = std.fmt.bytesToHex(actual_hash_bytes, .lower);
 
     if (!std.mem.eql(u8, package.install.hash, &actual_hash)) {
-        if (pm.diagnostics) |diag| try diag.hashMismatch(.{
+        try pm.diagnostics.hashMismatch(.{
             .name = package.name,
             .version = package.info.version,
             .expected_hash = package.install.hash,
@@ -194,10 +246,21 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
 
     const file_type = FileType.fromPath(downloaded_file_name);
     if (file_type != .binary) {
+        const output_path = FileType.stripPath(downloaded_file_name);
         try downloaded_file.seekTo(0);
 
-        const output_path = FileType.stripPath(downloaded_file_name);
-        try extract(pm.gpa, downloaded_path, downloaded_file, file_type, dir, output_path);
+        if (progress) |p|
+            p.setCurr(0);
+
+        try extract(
+            pm.gpa,
+            progress,
+            downloaded_path,
+            downloaded_file,
+            file_type,
+            dir,
+            output_path,
+        );
     }
 }
 
@@ -312,6 +375,7 @@ fn copyTree(from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
 
 fn extract(
     allocator: std.mem.Allocator,
+    node: ?*Progress.Node,
     file_path: []const u8,
     file: std.fs.File,
     file_type: FileType,
@@ -335,20 +399,23 @@ fn extract(
         },
         .tar_gz => {
             var buffered_reader = std.io.bufferedReader(file.reader());
-            var decomp = std.compress.gzip.decompressor(buffered_reader.reader());
+            var node_reader = Progress.nodeReader(buffered_reader.reader(), node);
+            var decomp = std.compress.gzip.decompressor(node_reader.reader());
             try std.tar.pipeToFileSystem(out_dir, decomp.reader(), tar_pipe_options);
         },
         .tar_zst => {
             var buffered_reader = std.io.bufferedReader(file.reader());
+            var node_reader = Progress.nodeReader(buffered_reader.reader(), node);
             var window_buffer: [std.compress.zstd.DecompressorOptions.default_window_buffer_len]u8 = undefined;
-            var decomp = std.compress.zstd.decompressor(buffered_reader.reader(), .{
+            var decomp = std.compress.zstd.decompressor(node_reader.reader(), .{
                 .window_buffer = &window_buffer,
             });
             try std.tar.pipeToFileSystem(out_dir, decomp.reader(), tar_pipe_options);
         },
         .tar_xz => {
             var buffered_reader = std.io.bufferedReader(file.reader());
-            var decomp = try std.compress.xz.decompress(allocator, buffered_reader.reader());
+            var node_reader = Progress.nodeReader(buffered_reader.reader(), node);
+            var decomp = try std.compress.xz.decompress(allocator, node_reader.reader());
             defer decomp.deinit();
             try std.tar.pipeToFileSystem(out_dir, decomp.reader(), tar_pipe_options);
         },
@@ -357,7 +424,8 @@ fn extract(
             defer out_file.close();
 
             var buffered_reader = std.io.bufferedReader(file.reader());
-            var decomp = std.compress.gzip.decompressor(buffered_reader.reader());
+            var node_reader = Progress.nodeReader(buffered_reader.reader(), node);
+            var decomp = std.compress.gzip.decompressor(node_reader.reader());
             var buf: [std.mem.page_size]u8 = undefined;
             while (true) {
                 const len = try decomp.reader().read(&buf);
@@ -368,7 +436,8 @@ fn extract(
         },
         .tar => {
             var buffered_reader = std.io.bufferedReader(file.reader());
-            try std.tar.pipeToFileSystem(out_dir, buffered_reader.reader(), tar_pipe_options);
+            var node_reader = Progress.nodeReader(buffered_reader.reader(), node);
+            try std.tar.pipeToFileSystem(out_dir, node_reader.reader(), tar_pipe_options);
         },
         .zip => {
             try std.zip.extract(out_dir, file.seekableStream(), .{});
@@ -406,11 +475,10 @@ pub fn uninstallMany(pm: *PackageManager, package_names: []const []const u8) !vo
 
     for (packages_to_uninstall.keys(), packages_to_uninstall.values()) |package_name, package| {
         try pm.uninstallOneUnchecked(package_name, package);
-        if (pm.diagnostics) |diag|
-            try diag.uninstallSucceeded(.{
-                .name = package_name,
-                .version = package.version,
-            });
+        try pm.diagnostics.uninstallSucceeded(.{
+            .name = package_name,
+            .version = package.version,
+        });
     }
 
     try pm.installed_file.flush();
@@ -426,7 +494,7 @@ fn packagesToUninstall(
     try packages_to_uninstall.ensureTotalCapacity(package_names.len);
     for (package_names) |package_name| {
         const package = pm.installed_file.data.packages.get(package_name) orelse {
-            if (pm.diagnostics) |diag| try diag.notInstalled((.{
+            try pm.diagnostics.notInstalled((.{
                 .name = package_name,
             }));
             continue;
@@ -502,8 +570,8 @@ fn updatePackages(
             continue;
 
         _ = packages_to_install.swapRemove(package_name);
-        if (opt.up_to_date_diag) if (pm.diagnostics) |diag|
-            try diag.upToDate(.{
+        if (opt.up_to_date_diag)
+            try pm.diagnostics.upToDate(.{
                 .name = package_name,
                 .version = installed_package.version,
             });
@@ -541,52 +609,17 @@ fn updatePackages(
         defer working_dir.close();
 
         try pm.installExtractedPackage(working_dir, package);
-        if (pm.diagnostics) |diag| {
-            const installed_package = packages_to_uninstall.get(package.name).?;
-            try diag.updateSucceeded(.{
-                .name = package.name,
-                .from_version = installed_package.version,
-                .to_version = package.info.version,
-            });
-        }
+
+        const installed_package = packages_to_uninstall.get(package.name).?;
+        try pm.diagnostics.updateSucceeded(.{
+            .name = package.name,
+            .from_version = installed_package.version,
+            .to_version = package.info.version,
+        });
     }
 
     try pm.installed_file.flush();
 }
-
-pub fn cleanup(pm: PackageManager) !void {
-    var iter = pm.own_tmp_dir.iterate();
-    while (try iter.next()) |entry|
-        try pm.own_tmp_dir.deleteTree(entry.name);
-}
-
-pub fn deinit(pm: *PackageManager) void {
-    pm.bin_dir.close();
-    pm.lib_dir.close();
-    pm.own_data_dir.close();
-    pm.prefix_dir.close();
-    pm.share_dir.close();
-
-    pm.installed_file.close();
-
-    pm.arena.deinit();
-}
-
-const Options = struct {
-    allocator: std.mem.Allocator,
-    http_client: *std.http.Client,
-
-    /// Successes and failures are reported to the diagnostics. Set this for more details
-    /// about failures.
-    diagnostics: ?*Diagnostics = null,
-
-    /// The prefix path where the package manager will work and install packages
-    prefix: []const u8,
-
-    arch: std.Target.Cpu.Arch = builtin.cpu.arch,
-    os: std.Target.Os.Tag = builtin.os.tag,
-};
-
 pub fn IniFile(comptime T: type) type {
     return struct {
         file: std.fs.File,
@@ -680,6 +713,7 @@ test {
     _ = InstalledPackages;
     _ = Package;
     _ = Packages;
+    _ = Progress;
 
     _ = download;
     _ = ini;
@@ -695,6 +729,7 @@ const InstalledPackage = @import("InstalledPackage.zig");
 const InstalledPackages = @import("InstalledPackages.zig");
 const Package = @import("Package.zig");
 const Packages = @import("Packages.zig");
+const Progress = @import("Progress.zig");
 
 const builtin = @import("builtin");
 const download = @import("download.zig");

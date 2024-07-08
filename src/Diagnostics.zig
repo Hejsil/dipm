@@ -17,6 +17,7 @@ warnings: struct {
 failures: struct {
     hash_mismatches: std.ArrayListUnmanaged(HashMismatch),
     downloads: std.ArrayListUnmanaged(DownloadFailed),
+    downloads_with_status: std.ArrayListUnmanaged(DownloadFailedWithStatus),
 },
 
 pub fn init(allocator: std.mem.Allocator) Diagnostics {
@@ -37,6 +38,7 @@ pub fn init(allocator: std.mem.Allocator) Diagnostics {
         .failures = .{
             .hash_mismatches = .{},
             .downloads = .{},
+            .downloads_with_status = .{},
         },
     };
 }
@@ -70,30 +72,6 @@ pub fn reportToFile(diagnostics: Diagnostics, file: std.fs.File) !void {
 
 pub const ReportOptions = struct {
     escapes: Escapes = Escapes.none,
-};
-
-pub const Escapes = struct {
-    green: []const u8,
-    yellow: []const u8,
-    red: []const u8,
-    bold: []const u8,
-    reset: []const u8,
-
-    const none = Escapes{
-        .red = "",
-        .green = "",
-        .yellow = "",
-        .bold = "",
-        .reset = "",
-    };
-
-    const ansi = Escapes{
-        .reset = "\x1b[0m",
-        .bold = "\x1b[1m",
-        .red = "\x1b[31m",
-        .green = "\x1b[32m",
-        .yellow = "\x1b[33m",
-    };
 };
 
 pub fn report(diagnostics: Diagnostics, writer: anytype, opt: ReportOptions) !void {
@@ -297,6 +275,19 @@ pub fn downloadFailed(diagnostics: *Diagnostics, failure: DownloadFailed) !void 
     });
 }
 
+pub fn downloadFailedWithStatus(
+    diagnostics: *Diagnostics,
+    failure: DownloadFailedWithStatus,
+) !void {
+    const arena = diagnostics.arena.allocator();
+    return diagnostics.failures.downloads_with_status.append(diagnostics.gpa, .{
+        .name = try arena.dupe(u8, failure.name),
+        .version = try arena.dupe(u8, failure.version),
+        .url = try arena.dupe(u8, failure.url),
+        .status = failure.status,
+    });
+}
+
 pub const Package = struct {
     name: []const u8,
 };
@@ -332,6 +323,19 @@ pub const DownloadFailed = struct {
     err: anyerror,
 };
 
+pub const DownloadFailedWithStatus = struct {
+    name: []const u8,
+    version: []const u8,
+    url: []const u8,
+    status: std.http.Status,
+};
+
+test {
+    _ = Escapes;
+}
+
 const Diagnostics = @This();
+
+const Escapes = @import("Escapes.zig");
 
 const std = @import("std");

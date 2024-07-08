@@ -13,6 +13,11 @@ const DownloadOptions = struct {
 
     http_client: *std.http.Client,
 
+    /// Successes and failures are reported to the diagnostics. Set this for more details
+    /// about failures.
+    diagnostics: *Diagnostics,
+    progress: *Progress,
+
     /// The prefix path where the package manager will work and install packages
     prefix: []const u8,
 
@@ -51,11 +56,19 @@ pub fn download(options: DownloadOptions) !Packages {
         .only_if_required => (try pkgs_file.getEndPos()) == 0,
     };
     if (needs_download) {
-        try @import("download.zig").download(
+        const download_node = options.progress.start("pkgs.ini", 1);
+        defer options.progress.end(download_node);
+
+        const status = try @import("download.zig").download(
             options.http_client,
             options.pkgs_uri,
+            download_node,
             pkgs_file.writer(),
         );
+
+        if (status != .ok)
+            return error.DownloadGotNoneOkStatusCode; // TODO: Diagnostics
+
         try pkgs_file.setEndPos(try pkgs_file.getEndPos());
         try pkgs_file.seekTo(0);
     }
@@ -205,7 +218,9 @@ test "parse" {
 }
 
 test {
+    _ = Diagnostics;
     _ = Package;
+    _ = Progress;
 
     _ = ini;
     _ = paths;
@@ -213,7 +228,9 @@ test {
 
 const Packages = @This();
 
+const Diagnostics = @import("Diagnostics.zig");
 const Package = @import("Package.zig");
+const Progress = @import("Progress.zig");
 
 const ini = @import("ini.zig");
 const paths = @import("paths.zig");
