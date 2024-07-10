@@ -51,7 +51,7 @@ pub fn mainWithArgs(allocator: std.mem.Allocator, args: []const []const u8) !voi
         },
     };
 
-    const res = program.run();
+    const res = program.mainCommand();
 
     if (render_thread) |t| {
         running.store(false, .unordered);
@@ -80,31 +80,47 @@ fn renderThread(progress: *Progress, running: *std.atomic.Value(bool)) void {
     progress.cleanupTty(stderr) catch {};
 }
 
-pub fn run(program: *Program) !void {
+const main_usage =
+    \\Usage: dipm [command] [options]
+    \\
+    \\Commands:
+    \\  install [pkg]...    Install packages
+    \\  uninstall [pkg]...  Uninstall packages
+    \\  update [pkg]...     Update packages
+    \\  update              Update all packages
+    \\  installed           List installed packages
+    \\  packages            List available packages
+    \\  help                Display this message
+    \\
+    \\  inifmt [file]...    Format INI files
+    \\  inifmt              Format INI from stdin and output to stdout
+    \\
+;
+
+pub fn mainCommand(program: *Program) !void {
     while (!program.args.isDone()) {
         if (program.args.option(&.{ "-p", "--prefix" })) |prefix| {
             program.options.prefix = prefix;
         } else if (program.args.flag(&.{"install"})) {
-            return program.install();
+            return program.installCommand();
         } else if (program.args.flag(&.{"uninstall"})) {
-            return program.uninstall();
+            return program.uninstallCommand();
         } else if (program.args.flag(&.{"update"})) {
-            return program.update();
+            return program.updateCommand();
         } else if (program.args.flag(&.{"installed"})) {
-            return program.installed();
+            return program.installedCommand();
         } else if (program.args.flag(&.{"packages"})) {
-            return program.packages();
+            return program.packagesCommand();
         } else if (program.args.flag(&.{"inifmt"})) {
-            return program.inifmt();
+            return program.inifmtCommand();
         } else if (program.args.flag(&.{ "-h", "--help", "help" })) {
-            return program.help();
+            return std.io.getStdOut().writeAll(main_usage);
         } else {
-            try usageToFile(std.io.getStdErr());
-            return error.InvalidArgument;
+            break;
         }
     }
 
-    try usageToFile(std.io.getStdErr());
+    try std.io.getStdErr().writeAll(main_usage);
     return error.InvalidArgument;
 }
 
@@ -120,12 +136,25 @@ options: struct {
     prefix: []const u8,
 },
 
-fn install(program: *Program) !void {
+const install_usage =
+    \\Usage: dipm install [options] [pkg]...
+    \\
+    \\Options:
+    \\  -h, --help          Display this message
+    \\
+;
+
+fn installCommand(program: *Program) !void {
     var packages_to_install = std.StringArrayHashMap(void).init(program.allocator);
     defer packages_to_install.deinit();
 
-    while (!program.args.isDone())
-        try packages_to_install.put(program.args.eat(), {});
+    while (!program.args.isDone()) {
+        if (program.args.flag(&.{ "-h", "--help" })) {
+            return std.io.getStdOut().writeAll(install_usage);
+        } else {
+            try packages_to_install.put(program.args.eat(), {});
+        }
+    }
 
     var pkgs = try Packages.download(.{
         .allocator = program.allocator,
@@ -150,12 +179,25 @@ fn install(program: *Program) !void {
     try pm.cleanup();
 }
 
-fn uninstall(program: *Program) !void {
+const uninstall_usage =
+    \\Usage: dipm uninstall [options] [pkg]...
+    \\
+    \\Options:
+    \\  -h, --help          Display this message
+    \\
+;
+
+fn uninstallCommand(program: *Program) !void {
     var packages_to_uninstall = std.StringArrayHashMap(void).init(program.allocator);
     defer packages_to_uninstall.deinit();
 
-    while (!program.args.isDone())
-        try packages_to_uninstall.put(program.args.eat(), {});
+    while (!program.args.isDone()) {
+        if (program.args.flag(&.{ "-h", "--help" })) {
+            return std.io.getStdOut().writeAll(uninstall_usage);
+        } else {
+            try packages_to_uninstall.put(program.args.eat(), {});
+        }
+    }
 
     var pm = try PackageManager.init(.{
         .allocator = program.allocator,
@@ -170,12 +212,26 @@ fn uninstall(program: *Program) !void {
     try pm.cleanup();
 }
 
-fn update(program: *Program) !void {
+const update_usage =
+    \\Usage:
+    \\  dipm update [options] [pkg]...
+    \\  dipm update [options]
+    \\
+    \\Options:
+    \\  -h, --help          Display this message
+    \\
+;
+
+fn updateCommand(program: *Program) !void {
     var packages_to_update = std.StringArrayHashMap(void).init(program.allocator);
     defer packages_to_update.deinit();
 
     while (!program.args.isDone()) {
-        try packages_to_update.put(program.args.eat(), {});
+        if (program.args.flag(&.{ "-h", "--help" })) {
+            return std.io.getStdOut().writeAll(update_usage);
+        } else {
+            try packages_to_update.put(program.args.eat(), {});
+        }
     }
 
     var pkgs = try Packages.download(.{
@@ -206,9 +262,22 @@ fn update(program: *Program) !void {
     try pm.cleanup();
 }
 
-fn installed(program: *Program) !void {
+const installed_usage =
+    \\Usage: dipm installed [options]
+    \\
+    \\Options:
+    \\  -h, --help          Display this message
+    \\
+;
+
+fn installedCommand(program: *Program) !void {
     while (!program.args.isDone()) {
-        return error.InvalidArgument;
+        if (program.args.flag(&.{ "-h", "--help" })) {
+            return std.io.getStdOut().writeAll(installed_usage);
+        } else {
+            try std.io.getStdErr().writeAll(installed_usage);
+            return error.InvalidArgument;
+        }
     }
 
     var pm = try PackageManager.init(.{
@@ -233,9 +302,22 @@ fn installed(program: *Program) !void {
     try stdout_buffered.flush();
 }
 
-fn packages(program: *Program) !void {
+const packages_usage =
+    \\Usage: dipm packages [options]
+    \\
+    \\Options:
+    \\  -h, --help          Display this message
+    \\
+;
+
+fn packagesCommand(program: *Program) !void {
     while (!program.args.isDone()) {
-        return error.InvalidArgument;
+        if (program.args.flag(&.{ "-h", "--help" })) {
+            return std.io.getStdOut().writeAll(packages_usage);
+        } else {
+            try std.io.getStdErr().writeAll(packages_usage);
+            return error.InvalidArgument;
+        }
     }
 
     var pkgs = try Packages.download(.{
@@ -257,17 +339,37 @@ fn packages(program: *Program) !void {
     try stdout_buffered.flush();
 }
 
-fn inifmt(program: *Program) !void {
-    if (program.args.isDone())
+const inifmt_usage =
+    \\Usage:
+    \\  dipm inifmt [options] [file]..
+    \\  dipm inifmt [options]
+    \\
+    \\Options:
+    \\  -h, --help          Display this message
+    \\
+;
+
+fn inifmtCommand(program: *Program) !void {
+    var files_to_format = std.StringArrayHashMap(void).init(program.allocator);
+    defer files_to_format.deinit();
+
+    while (!program.args.isDone()) {
+        if (program.args.flag(&.{ "-h", "--help" })) {
+            return std.io.getStdOut().writeAll(inifmt_usage);
+        } else {
+            try files_to_format.put(program.args.eat(), {});
+        }
+    }
+
+    if (files_to_format.count() == 0)
         return inifmtFiles(program.allocator, std.io.getStdIn(), std.io.getStdOut());
 
     const cwd = std.fs.cwd();
-    while (!program.args.isDone()) {
-        const arg = program.args.eat();
-        var out = try cwd.atomicFile(arg, .{});
+    for (files_to_format.keys()) |file| {
+        var out = try cwd.atomicFile(file, .{});
         defer out.deinit();
         {
-            const in = try cwd.openFile(arg, .{});
+            const in = try cwd.openFile(file, .{});
             defer in.close();
             try inifmtFiles(program.allocator, in, out.file);
         }
@@ -294,36 +396,6 @@ fn inifmtData(allocator: std.mem.Allocator, data: []const u8, writer: anytype) !
     });
     defer i.deinit();
     try i.write(writer);
-}
-
-fn help(program: *Program) !void {
-    _ = program;
-    return usageToFile(std.io.getStdOut());
-}
-
-fn usageToFile(file: std.fs.File) !void {
-    var buffered = std.io.bufferedWriter(file.writer());
-    try usageToWriter(buffered.writer());
-    try buffered.flush();
-}
-
-fn usageToWriter(writer: anytype) !void {
-    try writer.writeAll(
-        \\Usage: dipm [command] [args]
-        \\
-        \\Commands:
-        \\  install [pkg]...    Install packages
-        \\  uninstall [pkg]...  Uninstall packages
-        \\  update [pkg]...     Update packages
-        \\  update              Update all packages
-        \\  installed           List installed packages
-        \\  packages            List available packages
-        \\  help                Display this message
-        \\
-        \\  inifmt [file]...    Format INI files
-        \\  inifmt              Format INI from stdin and output to stdout
-        \\
-    );
 }
 
 test {
