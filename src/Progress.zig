@@ -100,9 +100,8 @@ pub fn end(progress: Progress, node: ?*Node) void {
 
 const clear = "\x1b[J";
 const finish_sync = "\x1b[?2026l";
-const restore = "\x1b8";
-const save = "\x1b7";
 const start_sync = "\x1b[?2026h";
+const up_one_line = "\x1bM";
 
 pub fn renderToTty(progress: Progress, tty: std.fs.File) !void {
     if (!tty.supportsAnsiEscapeCodes())
@@ -126,13 +125,20 @@ pub fn renderToTty(progress: Progress, tty: std.fs.File) !void {
 
     var buffered_tty = std.io.bufferedWriter(tty.writer());
     const writer = buffered_tty.writer();
-    try writer.writeAll(save ++ clear);
-    try progress.render(writer, .{
+
+    try writer.writeAll(start_sync ++ clear);
+    const nodes_printed = try progress.render(writer, .{
         .width = winsize.ws_col,
         .height = height,
         .escapes = Escapes.ansi,
     });
-    try writer.writeAll(restore);
+
+    if (nodes_printed != 0) {
+        try writer.writeAll("\r");
+        try writer.writeBytesNTimes(up_one_line, nodes_printed);
+    }
+
+    try writer.writeAll(finish_sync);
     return buffered_tty.flush();
 }
 
@@ -149,7 +155,7 @@ pub const RenderOptions = struct {
     escapes: Escapes = Escapes.none,
 };
 
-pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !void {
+pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usize {
     var counting_writer = std.io.countingWriter(writer);
 
     var nodes_printed: usize = 0;
@@ -206,6 +212,8 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !void
         try writer.writeAll(options.escapes.reset);
         try writer.writeAll("\n");
     }
+
+    return nodes_printed;
 }
 
 // TODO: Bad name, but what is a better one? :thinking:
@@ -281,7 +289,7 @@ fn expectRender(
     var actual = std.ArrayList(u8).init(options.allocator);
     defer actual.deinit();
 
-    try progress.render(actual.writer(), render_options);
+    _ = try progress.render(actual.writer(), render_options);
     try std.testing.expectEqualStrings(expected, actual.items);
 }
 
