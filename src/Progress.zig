@@ -105,6 +105,9 @@ const save = "\x1b7";
 const start_sync = "\x1b[?2026h";
 
 pub fn renderToTty(progress: Progress, tty: std.fs.File) !void {
+    if (!tty.supportsAnsiEscapeCodes())
+        return;
+
     var winsize: std.posix.winsize = .{
         .ws_row = 0,
         .ws_col = 0,
@@ -135,7 +138,9 @@ pub fn renderToTty(progress: Progress, tty: std.fs.File) !void {
 
 pub fn cleanupTty(progress: Progress, tty: std.fs.File) !void {
     _ = progress;
-    try tty.writeAll(clear);
+
+    if (tty.supportsAnsiEscapeCodes())
+        try tty.writeAll(clear);
 }
 
 pub const RenderOptions = struct {
