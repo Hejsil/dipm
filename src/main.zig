@@ -30,12 +30,8 @@ pub fn mainWithArgs(allocator: std.mem.Allocator, args: []const []const u8) !voi
     });
     defer progress.deinit(allocator);
 
-    var running = std.atomic.Value(bool).init(true);
-    const render_thread = std.Thread.spawn(
-        .{},
-        renderThread,
-        .{ &progress, &running },
-    ) catch |err| blk: {
+    // We don't really care to store the thread. Just let the os clean it up
+    _ = std.Thread.spawn(.{}, renderThread, .{&progress}) catch |err| blk: {
         std.log.warn("failed to spawn rendering thread: {}", .{err});
         break :blk null;
     };
@@ -53,16 +49,15 @@ pub fn mainWithArgs(allocator: std.mem.Allocator, args: []const []const u8) !voi
 
     const res = program.mainCommand();
 
-    if (render_thread) |t| {
-        running.store(false, .unordered);
-        t.join();
-    }
-
-    try program.diagnostics.reportToFile(std.io.getStdErr());
+    // Stop `renderThread` from rendering by locking stderr for the rest of the programs execution.
+    std.debug.lockStdErr();
+    const stderr = std.io.getStdErr();
+    try progress.cleanupTty(stderr);
+    try diag.reportToFile(stderr);
     return res;
 }
 
-fn renderThread(progress: *Progress, running: *std.atomic.Value(bool)) void {
+fn renderThread(progress: *Progress) void {
     const fps = 15;
     const delay = std.time.ns_per_s / fps;
     const initial_delay = std.time.ns_per_s / 4;
@@ -72,12 +67,12 @@ fn renderThread(progress: *Progress, running: *std.atomic.Value(bool)) void {
         return;
 
     std.time.sleep(initial_delay);
-    while (running.load(.unordered)) {
+    while (true) {
+        std.debug.lockStdErr();
         progress.renderToTty(stderr) catch {};
+        std.debug.unlockStdErr();
         std.time.sleep(delay);
     }
-
-    progress.cleanupTty(stderr) catch {};
 }
 
 const main_usage =
