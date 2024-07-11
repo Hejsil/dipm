@@ -23,7 +23,7 @@ pub fn init(options: Options) !TestingPackageRepository {
         .maximum_nodes = 0,
     });
 
-    const prefix_path = try testing.tmpDirPath(allocator);
+    const prefix_path = try fs.zigCacheTmpDirPath(allocator);
     defer allocator.free(prefix_path);
 
     const pkgs_ini_path = try std.fs.path.join(allocator, &.{
@@ -128,8 +128,8 @@ test {
     _ = Packages;
     _ = Progress;
 
+    _ = fs;
     _ = paths;
-    _ = testing;
 }
 
 const TestingPackageRepository = @This();
@@ -138,6 +138,6 @@ const Diagnostics = @import("Diagnostics.zig");
 const Packages = @import("Packages.zig");
 const Progress = @import("Progress.zig");
 
+const fs = @import("fs.zig");
 const paths = @import("paths.zig");
 const std = @import("std");
-const testing = @import("testing.zig");

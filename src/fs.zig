@@ -1,4 +1,4 @@
-pub fn tmpDirPath(allocator: std.mem.Allocator) ![]u8 {
+pub fn zigCacheTmpDirPath(allocator: std.mem.Allocator) ![]u8 {
     const tmp_dir_path = try zigCacheTmpPath(allocator);
     defer allocator.free(tmp_dir_path);
 
@@ -7,6 +7,8 @@ pub fn tmpDirPath(allocator: std.mem.Allocator) ![]u8 {
 }
 
 pub fn zigCacheTmpPath(allocator: std.mem.Allocator) ![]u8 {
+    comptime std.debug.assert(builtin.is_test);
+
     var self_exe_dir_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const self_exe_dir_path = try std.fs.selfExeDirPath(&self_exe_dir_path_buf);
 
@@ -29,4 +31,10 @@ pub fn tmpDirName() [tmp_dir_name_len]u8 {
     return res;
 }
 
+pub fn tmpDir(dir: std.fs.Dir, open_dir_options: std.fs.Dir.OpenOptions) !std.fs.Dir {
+    const name = tmpDirName();
+    return dir.makeOpenPath(&name, open_dir_options);
+}
+
+const builtin = @import("builtin");
 const std = @import("std");

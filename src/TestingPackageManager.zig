@@ -5,7 +5,7 @@ progress: *Progress,
 pub fn init(options: Options) !TestingPackageManager {
     const allocator = options.allocator;
 
-    const random_prefix_path = try testing.tmpDirPath(allocator);
+    const random_prefix_path = try fs.zigCacheTmpDirPath(allocator);
     defer allocator.free(random_prefix_path);
 
     const diag = try allocator.create(Diagnostics);
@@ -135,8 +135,8 @@ test {
     _ = PackageManager;
     _ = Packages;
 
+    _ = fs;
     _ = paths;
-    _ = testing;
 }
 
 const TestingPackageManager = @This();
@@ -146,6 +146,6 @@ const PackageManager = @import("PackageManager.zig");
 const Packages = @import("Packages.zig");
 const Progress = @import("Progress.zig");
 
+const fs = @import("fs.zig");
 const paths = @import("paths.zig");
 const std = @import("std");
-const testing = @import("testing.zig");

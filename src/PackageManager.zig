@@ -179,7 +179,7 @@ fn packagesToInstall(
 }
 
 fn installOneUnchecked(pm: *PackageManager, package: Package.Specific) !void {
-    var working_dir = try pm.own_tmp_dir.makeOpenPath(package.install.hash, .{});
+    var working_dir = try fs.tmpDir(pm.own_tmp_dir, .{});
     defer working_dir.close();
 
     try pm.downloadAndExtractPackage(working_dir, package);
@@ -579,35 +579,45 @@ fn updatePackages(
 
     // Step 1: Download the packages that needs updating. This is the most likly step to fail, so
     //         doing this before uninstalling the already installed package is preferred.
-    var successfull_downloads = std.ArrayList(Package.Specific).init(pm.gpa);
-    defer successfull_downloads.deinit();
+    var successfull_downloads = std.ArrayList(struct {
+        working_dir: std.fs.Dir,
+        package: Package.Specific,
+    }).init(pm.gpa);
+    defer {
+        for (successfull_downloads.items) |*item|
+            item.working_dir.close();
+        successfull_downloads.deinit();
+    }
 
     try successfull_downloads.ensureTotalCapacity(packages_to_install.count());
     for (packages_to_install.values()) |package| {
-        var working_dir = try pm.own_tmp_dir.makeOpenPath(package.install.hash, .{});
-        defer working_dir.close();
+        var working_dir = try fs.tmpDir(pm.own_tmp_dir, .{});
+        errdefer working_dir.close();
 
         pm.downloadAndExtractPackage(working_dir, package) catch |err| switch (err) {
             error.DiagnosticsInvalidHash => continue,
             error.DiagnosticsDownloadFailed => continue,
             else => |e| return e,
         };
-        successfull_downloads.appendAssumeCapacity(package);
+        successfull_downloads.appendAssumeCapacity(.{
+            .working_dir = working_dir,
+            .package = package,
+        });
     }
 
     // Step 2: Uninstall the already installed packages.
     //         If this fails, packages can be left in a partially updated state
-    for (successfull_downloads.items) |package| {
+    for (successfull_downloads.items) |downloaded| {
+        const package = downloaded.package;
         const installed_package = packages_to_uninstall.get(package.name).?;
         try pm.uninstallOneUnchecked(package.name, installed_package);
     }
 
     // Step 3: Install the new version.
     //         If this fails, packages can be left in a partially updated state
-    for (successfull_downloads.items) |package| {
-        var working_dir = try pm.own_tmp_dir.openDir(package.install.hash, .{});
-        defer working_dir.close();
-
+    for (successfull_downloads.items) |downloaded| {
+        const package = downloaded.package;
+        const working_dir = downloaded.working_dir;
         try pm.installExtractedPackage(working_dir, package);
 
         const installed_package = packages_to_uninstall.get(package.name).?;
@@ -620,6 +630,7 @@ fn updatePackages(
 
     try pm.installed_file.flush();
 }
+
 pub fn IniFile(comptime T: type) type {
     return struct {
         file: std.fs.File,
@@ -733,6 +744,7 @@ const Progress = @import("Progress.zig");
 
 const builtin = @import("builtin");
 const download = @import("download.zig");
+const fs = @import("fs.zig");
 const ini = @import("ini.zig");
 const paths = @import("paths.zig");
 const std = @import("std");
