@@ -81,15 +81,14 @@ fn renderThread(progress: *Progress, running: *std.atomic.Value(bool)) void {
 }
 
 const main_usage =
-    \\Usage: dipm [command] [options]
+    \\Usage: dipm [options] [command]
     \\
     \\Commands:
     \\  install [pkg]...    Install packages
     \\  uninstall [pkg]...  Uninstall packages
     \\  update [pkg]...     Update packages
     \\  update              Update all packages
-    \\  installed           List installed packages
-    \\  packages            List available packages
+    \\  list                List packages
     \\  help                Display this message
     \\
     \\  inifmt [file]...    Format INI files
@@ -107,10 +106,8 @@ pub fn mainCommand(program: *Program) !void {
             return program.uninstallCommand();
         } else if (program.args.flag(&.{"update"})) {
             return program.updateCommand();
-        } else if (program.args.flag(&.{"installed"})) {
-            return program.installedCommand();
-        } else if (program.args.flag(&.{"packages"})) {
-            return program.packagesCommand();
+        } else if (program.args.flag(&.{"list"})) {
+            return program.listCommand();
         } else if (program.args.flag(&.{"inifmt"})) {
             return program.inifmtCommand();
         } else if (program.args.flag(&.{ "-h", "--help", "help" })) {
@@ -262,20 +259,47 @@ fn updateCommand(program: *Program) !void {
     try pm.cleanup();
 }
 
-const installed_usage =
-    \\Usage: dipm installed [options]
+const list_usage =
+    \\Usage: dipm list [options] [command]
+    \\
+    \\Commands:
+    \\  all                 List all known packages
+    \\  installed           List installed packages
+    \\  help                Display this message
+    \\
+;
+
+fn listCommand(program: *Program) !void {
+    while (!program.args.isDone()) {
+        if (program.args.flag(&.{"all"})) {
+            return program.installCommand();
+        } else if (program.args.flag(&.{"installed"})) {
+            return program.uninstallCommand();
+        } else if (program.args.flag(&.{ "-h", "--help", "help" })) {
+            return std.io.getStdOut().writeAll(list_usage);
+        } else {
+            break;
+        }
+    }
+
+    try std.io.getStdErr().writeAll(list_usage);
+    return error.InvalidArgument;
+}
+
+const list_installed_usage =
+    \\Usage: dipm list installed [options]
     \\
     \\Options:
     \\  -h, --help          Display this message
     \\
 ;
 
-fn installedCommand(program: *Program) !void {
+fn listInstalledCommand(program: *Program) !void {
     while (!program.args.isDone()) {
         if (program.args.flag(&.{ "-h", "--help" })) {
-            return std.io.getStdOut().writeAll(installed_usage);
+            return std.io.getStdOut().writeAll(list_installed_usage);
         } else {
-            try std.io.getStdErr().writeAll(installed_usage);
+            try std.io.getStdErr().writeAll(list_installed_usage);
             return error.InvalidArgument;
         }
     }
@@ -302,20 +326,20 @@ fn installedCommand(program: *Program) !void {
     try stdout_buffered.flush();
 }
 
-const packages_usage =
-    \\Usage: dipm packages [options]
+const list_all_usage =
+    \\Usage: dipm list all [options]
     \\
     \\Options:
     \\  -h, --help          Display this message
     \\
 ;
 
-fn packagesCommand(program: *Program) !void {
+fn listAllCommand(program: *Program) !void {
     while (!program.args.isDone()) {
         if (program.args.flag(&.{ "-h", "--help" })) {
-            return std.io.getStdOut().writeAll(packages_usage);
+            return std.io.getStdOut().writeAll(list_all_usage);
         } else {
-            try std.io.getStdErr().writeAll(packages_usage);
+            try std.io.getStdErr().writeAll(list_all_usage);
             return error.InvalidArgument;
         }
     }
