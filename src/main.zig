@@ -267,9 +267,9 @@ const list_usage =
 fn listCommand(program: *Program) !void {
     while (!program.args.isDone()) {
         if (program.args.flag(&.{"all"})) {
-            return program.installCommand();
+            return program.listAllCommand();
         } else if (program.args.flag(&.{"installed"})) {
-            return program.uninstallCommand();
+            return program.listInstalledCommand();
         } else if (program.args.flag(&.{ "-h", "--help", "help" })) {
             return std.io.getStdOut().writeAll(list_usage);
         } else {
