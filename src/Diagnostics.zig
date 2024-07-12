@@ -176,6 +176,21 @@ pub fn report(diagnostics: Diagnostics, writer: anytype, opt: ReportOptions) !vo
         try writer.print("│     url:   {s}\n", .{download.url});
         try writer.print("└──   error: {s}\n", .{@errorName(download.err)});
     }
+    for (diagnostics.failures.downloads_with_status.items) |download| {
+        try writer.print("{s} {s}{s} {s}{s}\n", .{
+            failure,
+            esc.bold,
+            download.name,
+            download.version,
+            esc.reset,
+        });
+        try writer.print("│   Failed to download\n", .{});
+        try writer.print("│     url:   {s}\n", .{download.url});
+        try writer.print("└──   status: {} {s}\n", .{
+            @intFromEnum(download.status),
+            download.status.phrase() orelse "",
+        });
+    }
     for (diagnostics.failures.hash_mismatches.items) |hash_mismatch| {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             failure,
