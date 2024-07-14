@@ -59,14 +59,14 @@ pub fn download(options: DownloadOptions) !Packages {
         const download_node = options.progress.start("pkgs.ini", 1);
         defer options.progress.end(download_node);
 
-        const status = try @import("download.zig").download(
+        const result = try @import("download.zig").download(
             options.http_client,
             options.pkgs_uri,
             download_node,
             pkgs_file.writer(),
         );
 
-        if (status != .ok)
+        if (result.status != .ok)
             return error.DownloadGotNoneOkStatusCode; // TODO: Diagnostics
 
         try pkgs_file.setEndPos(try pkgs_file.getEndPos());
