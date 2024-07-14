@@ -36,5 +36,134 @@ pub fn tmpDir(dir: std.fs.Dir, open_dir_options: std.fs.Dir.OpenOptions) !std.fs
     return dir.makeOpenPath(&name, open_dir_options);
 }
 
+pub const FileType = enum {
+    tar_bz2,
+    tar_gz,
+    tar_xz,
+    tar_zst,
+    gz,
+    tar,
+    zip,
+    binary,
+
+    pub const extensions = [_]struct { ext: []const u8, file_type: FileType }{
+        .{ .ext = ".tar.bz2", .file_type = .tar_bz2 },
+        .{ .ext = ".tar.gz", .file_type = .tar_gz },
+        .{ .ext = ".tar.xz", .file_type = .tar_xz },
+        .{ .ext = ".tar.zst", .file_type = .tar_zst },
+        .{ .ext = ".tbz", .file_type = .tar_bz2 },
+        .{ .ext = ".tgz", .file_type = .tar_gz },
+        .{ .ext = ".tar", .file_type = .tar },
+        .{ .ext = ".zip", .file_type = .zip },
+        .{ .ext = ".gz", .file_type = .gz },
+        .{ .ext = "", .file_type = .binary },
+    };
+
+    pub fn fromPath(path: []const u8) FileType {
+        for (extensions) |entry| {
+            if (std.mem.endsWith(u8, path, entry.ext))
+                return entry.file_type;
+        }
+
+        return .binary;
+    }
+
+    pub fn stripPath(path: []const u8) []const u8 {
+        for (extensions) |entry| {
+            if (std.mem.endsWith(u8, path, entry.ext))
+                return path[0 .. path.len - entry.ext.len];
+        }
+
+        return path;
+    }
+};
+
+pub const ExtractOptions = struct {
+    allocator: std.mem.Allocator,
+
+    input_name: []const u8,
+    input_file: std.fs.File,
+
+    output_dir: std.fs.Dir,
+
+    node: ?*Progress.Node = null,
+};
+
+pub fn extract(options: ExtractOptions) !void {
+    const allocator = options.allocator;
+    const tar_pipe_options = std.tar.PipeOptions{ .exclude_empty_directories = true };
+
+    var buffered_reader = std.io.bufferedReader(options.input_file.reader());
+    var node_reader_state = Progress.nodeReader(buffered_reader.reader(), options.node);
+    const node_reader = node_reader_state.reader();
+
+    if (options.node) |p| {
+        p.setMax(@min(std.math.maxInt(u32), try options.input_file.getEndPos()));
+        p.setCurr(0);
+    }
+
+    switch (FileType.fromPath(options.input_name)) {
+        .tar_bz2 => {
+            // TODO: For now we bail out to an external program for tar.bz2 files.
+            //       This makes dipm not self contained, which kinda defeats the points
+            const out_path = try options.output_dir.realpathAlloc(allocator, ".");
+            defer allocator.free(out_path);
+
+            const result = try std.process.Child.run(.{
+                .allocator = allocator,
+                .argv = &.{ "tar", "-xvf", options.input_name, "-C", out_path },
+            });
+            allocator.free(result.stdout);
+            allocator.free(result.stderr);
+        },
+        .tar_gz => {
+            var decomp = std.compress.gzip.decompressor(node_reader);
+            try std.tar.pipeToFileSystem(options.output_dir, decomp.reader(), tar_pipe_options);
+        },
+        .tar_zst => {
+            const window_len = std.compress.zstd.DecompressorOptions.default_window_buffer_len;
+            var window_buffer: [window_len]u8 = undefined;
+            var decomp = std.compress.zstd.decompressor(node_reader, .{
+                .window_buffer = &window_buffer,
+            });
+            try std.tar.pipeToFileSystem(options.output_dir, decomp.reader(), tar_pipe_options);
+        },
+        .tar_xz => {
+            var decomp = try std.compress.xz.decompress(allocator, node_reader);
+            defer decomp.deinit();
+            try std.tar.pipeToFileSystem(options.output_dir, decomp.reader(), tar_pipe_options);
+        },
+        .gz => {
+            const file_base_name = std.fs.path.basename(options.input_name);
+            const file_base_name_no_ext = FileType.stripPath(file_base_name);
+
+            const out_file = try options.output_dir.createFile(file_base_name_no_ext, .{});
+            defer out_file.close();
+
+            var decomp = std.compress.gzip.decompressor(node_reader);
+            var buf: [std.mem.page_size]u8 = undefined;
+            while (true) {
+                const len = try decomp.reader().read(&buf);
+                if (len == 0)
+                    break;
+                try out_file.writeAll(buf[0..len]);
+            }
+        },
+        .tar => {
+            try std.tar.pipeToFileSystem(
+                options.output_dir,
+                node_reader,
+                tar_pipe_options,
+            );
+        },
+        .zip => {
+            try std.zip.extract(options.output_dir, options.input_file.seekableStream(), .{});
+        },
+        .binary => {},
+    }
+}
+
+const Progress = @import("Progress.zig");
+
 const builtin = @import("builtin");
 const std = @import("std");

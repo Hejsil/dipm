@@ -191,10 +191,7 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
     defer pm.progress.end(progress);
 
     const downloaded_file_name = std.fs.path.basename(package.install.url);
-
-    const downloaded_file = try dir.createFile(downloaded_file_name, .{
-        .read = true,
-    });
+    const downloaded_file = try dir.createFile(downloaded_file_name, .{ .read = true });
     defer downloaded_file.close();
 
     // TODO: Get rid of this once we have support for bz2 compression
@@ -244,24 +241,14 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
         return error.DiagnosticsInvalidHash;
     }
 
-    const file_type = FileType.fromPath(downloaded_file_name);
-    if (file_type != .binary) {
-        const output_path = FileType.stripPath(downloaded_file_name);
-        try downloaded_file.seekTo(0);
-
-        if (progress) |p|
-            p.setCurr(0);
-
-        try extract(
-            pm.gpa,
-            progress,
-            downloaded_path,
-            downloaded_file,
-            file_type,
-            dir,
-            output_path,
-        );
-    }
+    try downloaded_file.seekTo(0);
+    try fs.extract(.{
+        .allocator = pm.gpa,
+        .node = progress,
+        .input_name = downloaded_path,
+        .input_file = downloaded_file,
+        .output_dir = dir,
+    });
 }
 
 fn installExtractedPackage(pm: *PackageManager, from_dir: std.fs.Dir, package: Package.Specific) !void {
@@ -371,79 +358,6 @@ fn copyTree(from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
         .unknown,
         => return error.Unknown,
     };
-}
-
-fn extract(
-    allocator: std.mem.Allocator,
-    node: ?*Progress.Node,
-    file_path: []const u8,
-    file: std.fs.File,
-    file_type: FileType,
-    out_dir: std.fs.Dir,
-    out_name: []const u8,
-) !void {
-    const tar_pipe_options = std.tar.PipeOptions{ .exclude_empty_directories = true };
-    switch (file_type) {
-        .tar_bz2 => {
-            // TODO: For now we bail out to an external program for tar.bz2 files.
-            //       This makes dipm not self contained, which kinda defeats the points
-            const out_path = try out_dir.realpathAlloc(allocator, ".");
-            defer allocator.free(out_path);
-
-            const result = try std.process.Child.run(.{
-                .allocator = allocator,
-                .argv = &.{ "tar", "-xvf", file_path, "-C", out_path },
-            });
-            allocator.free(result.stdout);
-            allocator.free(result.stderr);
-        },
-        .tar_gz => {
-            var buffered_reader = std.io.bufferedReader(file.reader());
-            var node_reader = Progress.nodeReader(buffered_reader.reader(), node);
-            var decomp = std.compress.gzip.decompressor(node_reader.reader());
-            try std.tar.pipeToFileSystem(out_dir, decomp.reader(), tar_pipe_options);
-        },
-        .tar_zst => {
-            var buffered_reader = std.io.bufferedReader(file.reader());
-            var node_reader = Progress.nodeReader(buffered_reader.reader(), node);
-            var window_buffer: [std.compress.zstd.DecompressorOptions.default_window_buffer_len]u8 = undefined;
-            var decomp = std.compress.zstd.decompressor(node_reader.reader(), .{
-                .window_buffer = &window_buffer,
-            });
-            try std.tar.pipeToFileSystem(out_dir, decomp.reader(), tar_pipe_options);
-        },
-        .tar_xz => {
-            var buffered_reader = std.io.bufferedReader(file.reader());
-            var node_reader = Progress.nodeReader(buffered_reader.reader(), node);
-            var decomp = try std.compress.xz.decompress(allocator, node_reader.reader());
-            defer decomp.deinit();
-            try std.tar.pipeToFileSystem(out_dir, decomp.reader(), tar_pipe_options);
-        },
-        .gz => {
-            const out_file = try out_dir.createFile(out_name, .{});
-            defer out_file.close();
-
-            var buffered_reader = std.io.bufferedReader(file.reader());
-            var node_reader = Progress.nodeReader(buffered_reader.reader(), node);
-            var decomp = std.compress.gzip.decompressor(node_reader.reader());
-            var buf: [std.mem.page_size]u8 = undefined;
-            while (true) {
-                const len = try decomp.reader().read(&buf);
-                if (len == 0)
-                    break;
-                try out_file.writeAll(buf[0..len]);
-            }
-        },
-        .tar => {
-            var buffered_reader = std.io.bufferedReader(file.reader());
-            var node_reader = Progress.nodeReader(buffered_reader.reader(), node);
-            try std.tar.pipeToFileSystem(out_dir, node_reader.reader(), tar_pipe_options);
-        },
-        .zip => {
-            try std.zip.extract(out_dir, file.seekableStream(), .{});
-        },
-        .binary => {},
-    }
 }
 
 const Install = struct {
@@ -676,47 +590,6 @@ pub fn IniFile(comptime T: type) type {
         }
     };
 }
-
-const FileType = enum {
-    tar_bz2,
-    tar_gz,
-    tar_xz,
-    tar_zst,
-    gz,
-    tar,
-    zip,
-    binary,
-
-    pub const extension_filetype_map = [_]struct { ext: []const u8, file_type: FileType }{
-        .{ .ext = ".tar.bz2", .file_type = .tar_bz2 },
-        .{ .ext = ".tar.gz", .file_type = .tar_gz },
-        .{ .ext = ".tar.xz", .file_type = .tar_xz },
-        .{ .ext = ".tar.zst", .file_type = .tar_zst },
-        .{ .ext = ".tbz", .file_type = .tar_bz2 },
-        .{ .ext = ".tgz", .file_type = .tar_gz },
-        .{ .ext = ".tar", .file_type = .tar },
-        .{ .ext = ".zip", .file_type = .zip },
-        .{ .ext = ".gz", .file_type = .gz },
-    };
-
-    pub fn fromPath(path: []const u8) FileType {
-        for (extension_filetype_map) |entry| {
-            if (std.mem.endsWith(u8, path, entry.ext))
-                return entry.file_type;
-        }
-
-        return .binary;
-    }
-
-    pub fn stripPath(path: []const u8) []const u8 {
-        for (extension_filetype_map) |entry| {
-            if (std.mem.endsWith(u8, path, entry.ext))
-                return path[0 .. path.len - entry.ext.len];
-        }
-
-        return path;
-    }
-};
 
 test {
     _ = Diagnostics;

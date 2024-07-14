@@ -84,18 +84,21 @@ const main_usage =
     \\  update [pkg]...     Update packages
     \\  update              Update all packages
     \\  list                List packages
+    \\  pkgs                Manipulate and work pkgs.ini file
     \\  help                Display this message
     \\
-    \\  inifmt [file]...    Format INI files
-    \\  inifmt              Format INI from stdin and output to stdout
+    \\Options:
+    \\  -p, --prefix        Set the prefix dipm will work and install things in.
+    \\                      The following folders will be created in the prefix:
+    \\                        {prefix}/bin/
+    \\                        {prefix}/lib/
+    \\                        {prefix}/share/dipm/
     \\
 ;
 
 pub fn mainCommand(program: *Program) !void {
     while (!program.args.isDone()) {
-        if (program.args.option(&.{ "-p", "--prefix" })) |prefix| {
-            program.options.prefix = prefix;
-        } else if (program.args.flag(&.{"install"})) {
+        if (program.args.flag(&.{"install"})) {
             return program.installCommand();
         } else if (program.args.flag(&.{"uninstall"})) {
             return program.uninstallCommand();
@@ -103,10 +106,12 @@ pub fn mainCommand(program: *Program) !void {
             return program.updateCommand();
         } else if (program.args.flag(&.{"list"})) {
             return program.listCommand();
-        } else if (program.args.flag(&.{"inifmt"})) {
-            return program.inifmtCommand();
+        } else if (program.args.flag(&.{"pkgs"})) {
+            return program.pkgsCommand();
         } else if (program.args.flag(&.{ "-h", "--help", "help" })) {
             return std.io.getStdOut().writeAll(main_usage);
+        } else if (program.args.option(&.{ "-p", "--prefix" })) |prefix| {
+            program.options.prefix = prefix;
         } else {
             break;
         }
@@ -358,23 +363,379 @@ fn listAllCommand(program: *Program) !void {
     try stdout_buffered.flush();
 }
 
-const inifmt_usage =
-    \\Usage:
-    \\  dipm inifmt [options] [file]..
-    \\  dipm inifmt [options]
+const pkgs_usage =
+    \\Usage: dipm pkgs [options] [command]
+    \\
+    \\Commands:
+    \\  add                 Make packages and add them to pkgs.ini
+    \\  make                Make packages
+    \\  fmt                 Format pkgs file
+    \\  help                Display this message
+    \\
+;
+
+fn pkgsCommand(program: *Program) !void {
+    while (!program.args.isDone()) {
+        if (program.args.flag(&.{"add"})) {
+            return program.pkgsAddCommand();
+        } else if (program.args.flag(&.{"make"})) {
+            return program.pkgsMakeCommand();
+        } else if (program.args.flag(&.{"fmt"})) {
+            return program.pkgsInifmtCommand();
+        } else if (program.args.flag(&.{ "-h", "--help", "help" })) {
+            return std.io.getStdOut().writeAll(pkgs_usage);
+        } else {
+            break;
+        }
+    }
+
+    try std.io.getStdErr().writeAll(pkgs_usage);
+    return error.InvalidArgument;
+}
+
+const pkgs_add_usage =
+    \\Usage: dipm pkgs add [options] [url]...
+    \\
+    \\Options:
+    \\  -f, --pkgs-file     Path to pkgs.ini (default: ./pkgs.ini)
+    \\  -c, --commit        Commit each package added to pkgs.ini
+    \\  -h, --help          Display this message
+    \\
+;
+
+fn pkgsAddCommand(program: *Program) !void {
+    var commit = false;
+    var pkgs_ini_path: []const u8 = "./pkgs.ini";
+    var urls = std.StringArrayHashMap(void).init(program.allocator);
+    defer urls.deinit();
+
+    while (!program.args.isDone()) {
+        if (program.args.option(&.{ "-f", "--file" })) |file| {
+            pkgs_ini_path = file;
+        } else if (program.args.flag(&.{ "-c", "--commit" })) {
+            commit = true;
+        } else if (program.args.flag(&.{ "-h", "--help" })) {
+            return std.io.getStdOut().writeAll(pkgs_add_usage);
+        } else {
+            try urls.put(program.args.eat(), {});
+        }
+    }
+
+    const cwd = std.fs.cwd();
+    const pkgs_ini_base_name = std.fs.path.basename(pkgs_ini_path);
+    const pkgs_ini_dir_path = std.fs.path.dirname(pkgs_ini_path) orelse ".";
+    var pkgs_ini_dir = try cwd.openDir(pkgs_ini_dir_path, .{});
+    defer pkgs_ini_dir.close();
+
+    const pkgs_ini_file = try cwd.createFile(pkgs_ini_path, .{
+        .truncate = false,
+        .read = true,
+    });
+    defer pkgs_ini_file.close();
+
+    try pkgs_ini_file.seekFromEnd(0);
+
+    var file_buffered = std.io.bufferedWriter(pkgs_ini_file.writer());
+    const writer = file_buffered.writer();
+
+    for (urls.keys()) |url| {
+        const package = try program.makePkgFromUrl(url, writer);
+        defer package.deinit(program.allocator);
+
+        if (commit) {
+            try file_buffered.flush();
+            try pkgs_ini_file.sync();
+
+            const msg = try std.fmt.allocPrint(program.allocator, "{s}: Add {s}", .{
+                package.name,
+                package.version,
+            });
+            defer program.allocator.free(msg);
+
+            var child = std.process.Child.init(
+                &.{ "git", "commit", "-i", pkgs_ini_base_name, "-m", msg },
+                program.allocator,
+            );
+            child.stdin_behavior = .Ignore;
+            child.stdout_behavior = .Pipe;
+            child.stderr_behavior = .Pipe;
+            child.cwd_dir = pkgs_ini_dir;
+
+            try child.spawn();
+            _ = try child.wait();
+        }
+    }
+
+    try file_buffered.flush();
+
+    try pkgs_ini_file.seekTo(0);
+    try inifmtFiles(program.allocator, pkgs_ini_file, pkgs_ini_file);
+}
+
+const pkgs_make_usage =
+    \\Usage: dipm pkgs make [options] [url]...
     \\
     \\Options:
     \\  -h, --help          Display this message
     \\
 ;
 
-fn inifmtCommand(program: *Program) !void {
+fn pkgsMakeCommand(program: *Program) !void {
+    var urls = std.StringArrayHashMap(void).init(program.allocator);
+    defer urls.deinit();
+
+    while (!program.args.isDone()) {
+        if (program.args.flag(&.{ "-h", "--help" })) {
+            return std.io.getStdOut().writeAll(pkgs_make_usage);
+        } else {
+            try urls.put(program.args.eat(), {});
+        }
+    }
+
+    var stdout_buffered = std.io.bufferedWriter(std.io.getStdOut().writer());
+    const writer = stdout_buffered.writer();
+
+    for (urls.keys()) |url| {
+        const package = try program.makePkgFromUrl(url, writer);
+        defer package.deinit(program.allocator);
+    }
+
+    try stdout_buffered.flush();
+}
+
+const NameAndVersion = struct {
+    name: []const u8,
+    version: []const u8,
+
+    pub fn deinit(nv: NameAndVersion, allocator: std.mem.Allocator) void {
+        allocator.free(nv.name);
+        allocator.free(nv.version);
+    }
+};
+
+fn makePkgFromUrl(program: *Program, url: []const u8, writer: anytype) !NameAndVersion {
+    const github_url = "https://github.com/";
+    if (std.mem.startsWith(u8, url, github_url)) {
+        const repo = url[github_url.len..];
+        var repo_split = std.mem.splitScalar(u8, repo, '/');
+        return program.makePkgFromGithubRepo(
+            repo_split.first(),
+            repo_split.next() orelse "",
+            writer,
+        );
+    } else {
+        return error.InvalidUrl;
+    }
+}
+
+fn makePkgFromGithubRepo(
+    program: *Program,
+    user: []const u8,
+    repo: []const u8,
+    writer: anytype,
+) !NameAndVersion {
+    const latest_release_url = try std.fmt.allocPrint(
+        program.allocator,
+        "https://api.github.com/repos/{s}/{s}/releases/latest",
+        .{ user, repo },
+    );
+    defer program.allocator.free(latest_release_url);
+
+    var latest_release_json = std.ArrayList(u8).init(program.allocator);
+    defer latest_release_json.deinit();
+
+    const release_status = try download.download(
+        program.http_client,
+        latest_release_url,
+        null,
+        latest_release_json.writer(),
+    );
+    if (release_status != .ok)
+        return error.DownloadFailed;
+
+    const latest_release_value = try std.json.parseFromSlice(
+        LatestRelease,
+        program.allocator,
+        latest_release_json.items,
+        .{ .ignore_unknown_fields = true },
+    );
+    const latest_release = latest_release_value.value;
+    defer latest_release_value.deinit();
+
+    const os = builtin.os.tag;
+    const arch = builtin.cpu.arch;
+    const download_url = try findDownloadUrl(
+        program.allocator,
+        latest_release,
+        repo,
+        os,
+        arch,
+    );
+
+    var global_tmp_dir = try std.fs.cwd().makeOpenPath("/tmp/dipm/", .{});
+    defer global_tmp_dir.close();
+
+    var tmp_dir = try fs.tmpDir(global_tmp_dir, .{});
+    defer tmp_dir.close();
+
+    const downloaded_file_name = std.fs.path.basename(download_url);
+    const downloaded_file = try tmp_dir.createFile(downloaded_file_name, .{ .read = true });
+    defer downloaded_file.close();
+
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    var hashing_writer = std.compress.hashedWriter(downloaded_file.writer(), &hasher);
+
+    const status = try download.download(
+        program.http_client,
+        download_url,
+        null,
+        hashing_writer.writer(),
+    );
+    if (status != .ok)
+        return error.DownloadFailed;
+
+    const digest_length = std.crypto.hash.sha2.Sha256.digest_length;
+    var actual_hash_bytes: [digest_length]u8 = undefined;
+    hasher.final(&actual_hash_bytes);
+
+    try downloaded_file.seekTo(0);
+    try fs.extract(.{
+        .allocator = program.allocator,
+        .input_name = downloaded_file_name,
+        .input_file = downloaded_file,
+        .output_dir = tmp_dir,
+    });
+
+    // TODO: Can this be ported to pure zig easily?
+    const static_files_result = try std.process.Child.run(.{
+        .allocator = program.allocator,
+        .argv = &.{
+            "sh", "-c",
+            \\find -type f -exec file '{}' '+' |
+            \\    grep -E 'statically linked|static-pie linked' |
+            \\    cut -d: -f1 |
+            \\    sed "s#^./#install_bin = #" |
+            \\    sort
+            \\
+        },
+        .cwd_dir = tmp_dir,
+    });
+    defer program.allocator.free(static_files_result.stdout);
+    defer program.allocator.free(static_files_result.stderr);
+
+    if (static_files_result.stdout.len < "install_bin".len)
+        return error.NoStaticallyLinkedFiles;
+
+    try writer.print("[{s}.info]\n", .{repo});
+    try writer.print("version = {s}\n", .{latest_release.version()});
+    try writer.print("\n", .{});
+    try writer.print("[{s}.update]\n", .{repo});
+    try writer.print("github = {s}/{s}\n", .{ user, repo });
+    try writer.print("\n", .{});
+    try writer.print("[{s}.{s}_{s}]\n", .{ repo, @tagName(os), @tagName(arch) });
+    try writer.print("{s}", .{static_files_result.stdout});
+    try writer.print("url = {s}\n", .{download_url});
+    try writer.print("hash = {s}\n", .{&std.fmt.bytesToHex(actual_hash_bytes, .lower)});
+    try writer.print("\n", .{});
+
+    const name = try program.allocator.dupe(u8, repo);
+    errdefer program.allocator.free(name);
+
+    const version = try program.allocator.dupe(u8, latest_release.version());
+    errdefer program.allocator.free(version);
+
+    return .{ .name = name, .version = version };
+}
+
+const LatestRelease = struct {
+    tag_name: []const u8,
+    assets: []const struct {
+        browser_download_url: []const u8,
+    },
+
+    fn version(release: LatestRelease) []const u8 {
+        return std.mem.trimLeft(u8, release.tag_name, "v");
+    }
+};
+
+fn findDownloadUrl(
+    allocator: std.mem.Allocator,
+    release: LatestRelease,
+    name: []const u8,
+    os: std.Target.Os.Tag,
+    arch: std.Target.Cpu.Arch,
+) ![]const u8 {
+    // To find the download url, a trim list is constructed. It contains only things that are
+    // expected to be in file name. Each url is the continuesly trimmed until either:
+    // * `/` is reach. This means it is the download url
+    // * Nothing was trimmed. The file name contains something unwanted
+
+    var trim_list = std.ArrayList([]const u8).init(allocator);
+    defer trim_list.deinit();
+
+    try trim_list.append("_");
+    try trim_list.append("-");
+    try trim_list.append("unknown");
+    try trim_list.append("musl");
+    try trim_list.append("static");
+    try trim_list.append(release.tag_name);
+    try trim_list.append(release.version());
+    try trim_list.append(name);
+    try trim_list.append(@tagName(arch));
+    try trim_list.append(@tagName(os));
+
+    switch (arch) {
+        .x86_64 => try trim_list.append("amd64"),
+        else => {},
+    }
+
+    for (fs.FileType.extensions) |ext| {
+        if (ext.ext.len == 0)
+            continue;
+        try trim_list.append(ext.ext);
+    }
+
+    std.sort.insertion([]const u8, trim_list.items, {}, struct {
+        fn lenGt(_: void, a: []const u8, b: []const u8) bool {
+            return a.len > b.len;
+        }
+    }.lenGt);
+
+    outer: for (release.assets) |asset| {
+        var download_url = asset.browser_download_url;
+        inner: while (!std.mem.endsWith(u8, download_url, "/")) {
+            for (trim_list.items) |trim| {
+                std.debug.assert(trim.len != 0);
+                if (std.ascii.endsWithIgnoreCase(download_url, trim)) {
+                    download_url.len -= trim.len;
+                    continue :inner;
+                }
+            }
+
+            continue :outer;
+        }
+
+        return asset.browser_download_url;
+    }
+
+    return error.DownloadUrlNotFound;
+}
+
+const pkgs_inifmt_usage =
+    \\Usage: dipm pkgs fmt [options] [file]...
+    \\
+    \\Options:
+    \\  -h, --help          Display this message
+    \\
+;
+
+fn pkgsInifmtCommand(program: *Program) !void {
     var files_to_format = std.StringArrayHashMap(void).init(program.allocator);
     defer files_to_format.deinit();
 
     while (!program.args.isDone()) {
         if (program.args.flag(&.{ "-h", "--help" })) {
-            return std.io.getStdOut().writeAll(inifmt_usage);
+            return std.io.getStdOut().writeAll(pkgs_inifmt_usage);
         } else {
             try files_to_format.put(program.args.eat(), {});
         }
@@ -397,15 +758,15 @@ fn inifmtCommand(program: *Program) !void {
 }
 
 fn inifmtFiles(allocator: std.mem.Allocator, file: std.fs.File, out: std.fs.File) !void {
-    var buffered_writer = std.io.bufferedWriter(out.writer());
-    try inifmtFile(allocator, file, buffered_writer.writer());
-    try buffered_writer.flush();
-}
-
-fn inifmtFile(allocator: std.mem.Allocator, file: std.fs.File, writer: anytype) !void {
     const data = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(data);
-    return inifmtData(allocator, data, writer);
+
+    try out.seekTo(0);
+    var buffered_writer = std.io.bufferedWriter(out.writer());
+    try inifmtData(allocator, data, buffered_writer.writer());
+
+    try buffered_writer.flush();
+    try out.setEndPos(try out.getPos());
 }
 
 fn inifmtData(allocator: std.mem.Allocator, data: []const u8, writer: anytype) !void {
@@ -424,6 +785,8 @@ test {
     _ = Packages;
     _ = Progress;
 
+    _ = download;
+    _ = fs;
     _ = ini;
 }
 
@@ -434,5 +797,7 @@ const Packages = @import("Packages.zig");
 const Progress = @import("Progress.zig");
 
 const builtin = @import("builtin");
+const download = @import("download.zig");
+const fs = @import("fs.zig");
 const ini = @import("ini.zig");
 const std = @import("std");
