@@ -1,15 +1,22 @@
 args: []const []const u8,
 index: usize = 0,
 
-pub fn isDone(parser: ArgParser) bool {
-    return parser.index >= parser.args.len;
+consumed: bool = false,
+
+pub fn next(parser: *ArgParser) bool {
+    parser.consumed = parser.index >= parser.args.len;
+    return !parser.consumed;
 }
 
 pub fn flag(parser: *ArgParser, names: []const []const u8) bool {
+    if (parser.consumed)
+        return false;
+
     for (names) |name| {
         if (!std.mem.eql(u8, parser.args[parser.index], name))
             continue;
 
+        parser.consumed = true;
         parser.index += 1;
         return true;
     }
@@ -18,6 +25,9 @@ pub fn flag(parser: *ArgParser, names: []const []const u8) bool {
 }
 
 pub fn option(parser: *ArgParser, names: []const []const u8) ?[]const u8 {
+    if (parser.consumed)
+        return null;
+
     const arg = parser.args[parser.index];
     for (names) |name| {
         if (!std.mem.startsWith(u8, arg, name))
@@ -25,6 +35,7 @@ pub fn option(parser: *ArgParser, names: []const []const u8) ?[]const u8 {
         if (!std.mem.startsWith(u8, arg[name.len..], "="))
             continue;
 
+        parser.consumed = true;
         parser.index += 1;
         return arg[name.len + 1 ..];
     }
@@ -37,7 +48,14 @@ pub fn option(parser: *ArgParser, names: []const []const u8) ?[]const u8 {
     return null;
 }
 
-pub fn eat(parser: *ArgParser) []const u8 {
+pub fn positional(parser: *ArgParser) ?[]const u8 {
+    if (parser.consumed)
+        return null;
+
+    return parser.eat();
+}
+
+fn eat(parser: *ArgParser) []const u8 {
     defer parser.index += 1;
     return parser.args[parser.index];
 }
@@ -47,16 +65,24 @@ test flag {
         "-a", "--beta", "command",
     } };
 
-    try std.testing.expect(!parser.flag(&.{"command"}));
-    try std.testing.expect(!parser.flag(&.{ "-b", "--beta" }));
     try std.testing.expect(parser.flag(&.{ "-a", "--alpha" }));
-    try std.testing.expect(!parser.isDone());
+    try std.testing.expect(!parser.flag(&.{ "-b", "--beta" }));
     try std.testing.expect(!parser.flag(&.{"command"}));
-    try std.testing.expect(parser.flag(&.{ "-b", "--beta" }));
-    try std.testing.expect(!parser.isDone());
+
+    try std.testing.expect(parser.next());
     try std.testing.expect(!parser.flag(&.{ "-a", "--alpha" }));
+    try std.testing.expect(parser.flag(&.{ "-b", "--beta" }));
+    try std.testing.expect(!parser.flag(&.{"command"}));
+
+    try std.testing.expect(parser.next());
+    try std.testing.expect(!parser.flag(&.{ "-a", "--alpha" }));
+    try std.testing.expect(!parser.flag(&.{ "-b", "--beta" }));
     try std.testing.expect(parser.flag(&.{"command"}));
-    try std.testing.expect(parser.isDone());
+
+    try std.testing.expect(!parser.next());
+    try std.testing.expect(!parser.flag(&.{ "-a", "--alpha" }));
+    try std.testing.expect(!parser.flag(&.{ "-b", "--beta" }));
+    try std.testing.expect(!parser.flag(&.{"command"}));
 }
 
 fn expectEqualOptionalString(m_expect: ?[]const u8, m_actual: ?[]const u8) !void {
@@ -77,31 +103,40 @@ test option {
         "command_value",
     } };
 
-    try expectEqualOptionalString(null, parser.option(&.{"command"}));
-    try expectEqualOptionalString(null, parser.option(&.{ "-b", "--beta" }));
     try expectEqualOptionalString("a_value", parser.option(&.{ "-a", "--alpha" }));
-    try std.testing.expect(!parser.isDone());
+    try expectEqualOptionalString(null, parser.option(&.{ "-b", "--beta" }));
     try expectEqualOptionalString(null, parser.option(&.{"command"}));
-    try expectEqualOptionalString("b_value", parser.option(&.{ "-b", "--beta" }));
+
+    try std.testing.expect(parser.next());
     try expectEqualOptionalString(null, parser.option(&.{ "-a", "--alpha" }));
-    try std.testing.expect(!parser.isDone());
+    try expectEqualOptionalString("b_value", parser.option(&.{ "-b", "--beta" }));
+    try expectEqualOptionalString(null, parser.option(&.{"command"}));
+
+    try std.testing.expect(parser.next());
+    try expectEqualOptionalString(null, parser.option(&.{ "-a", "--alpha" }));
+    try expectEqualOptionalString(null, parser.option(&.{ "-b", "--beta" }));
     try expectEqualOptionalString("command_value", parser.option(&.{"command"}));
-    try std.testing.expect(parser.isDone());
+
+    try std.testing.expect(!parser.next());
+    try expectEqualOptionalString(null, parser.option(&.{ "-a", "--alpha" }));
+    try expectEqualOptionalString(null, parser.option(&.{ "-b", "--beta" }));
+    try expectEqualOptionalString(null, parser.option(&.{"command"}));
 }
 
-test eat {
+test positional {
     var parser = ArgParser{ .args = &.{
         "-a",
         "--beta",
         "command",
     } };
 
-    try std.testing.expectEqualStrings("-a", parser.eat());
-    try std.testing.expect(!parser.isDone());
-    try std.testing.expectEqualStrings("--beta", parser.eat());
-    try std.testing.expect(!parser.isDone());
-    try std.testing.expectEqualStrings("command", parser.eat());
-    try std.testing.expect(parser.isDone());
+    try expectEqualOptionalString("-a", parser.positional());
+    try std.testing.expect(parser.next());
+    try expectEqualOptionalString("--beta", parser.positional());
+    try std.testing.expect(parser.next());
+    try expectEqualOptionalString("command", parser.positional());
+    try std.testing.expect(!parser.next());
+    try expectEqualOptionalString(null, parser.positional());
 }
 
 test "all" {
@@ -113,24 +148,34 @@ test "all" {
         "command",
     } };
 
-    try expectEqualOptionalString(null, parser.option(&.{ "-c", "--center" }));
-    try expectEqualOptionalString(null, parser.option(&.{ "-b", "--beta" }));
     try std.testing.expect(parser.flag(&.{ "-a", "--alpha" }));
-    try std.testing.expect(!parser.isDone());
+    try expectEqualOptionalString(null, parser.option(&.{ "-b", "--beta" }));
     try expectEqualOptionalString(null, parser.option(&.{ "-c", "--center" }));
+    try expectEqualOptionalString(null, parser.positional());
+
+    try std.testing.expect(parser.next());
+    try std.testing.expect(!parser.flag(&.{ "-a", "--alpha" }));
     try expectEqualOptionalString("b_value", parser.option(&.{ "-b", "--beta" }));
-    try std.testing.expect(!parser.flag(&.{ "-a", "--alpha" }));
-    try std.testing.expect(!parser.isDone());
-    try expectEqualOptionalString("c_value", parser.option(&.{ "-c", "--center" }));
-    try expectEqualOptionalString(null, parser.option(&.{ "-b", "--beta" }));
-    try std.testing.expect(!parser.flag(&.{ "-a", "--alpha" }));
-    try std.testing.expect(!parser.isDone());
     try expectEqualOptionalString(null, parser.option(&.{ "-c", "--center" }));
-    try expectEqualOptionalString(null, parser.option(&.{ "-b", "--beta" }));
+    try expectEqualOptionalString(null, parser.positional());
+
+    try std.testing.expect(parser.next());
     try std.testing.expect(!parser.flag(&.{ "-a", "--alpha" }));
-    try std.testing.expect(!parser.isDone());
-    try std.testing.expectEqualStrings("command", parser.eat());
-    try std.testing.expect(parser.isDone());
+    try expectEqualOptionalString(null, parser.option(&.{ "-b", "--beta" }));
+    try expectEqualOptionalString("c_value", parser.option(&.{ "-c", "--center" }));
+    try expectEqualOptionalString(null, parser.positional());
+
+    try std.testing.expect(parser.next());
+    try std.testing.expect(!parser.flag(&.{ "-a", "--alpha" }));
+    try expectEqualOptionalString(null, parser.option(&.{ "-b", "--beta" }));
+    try expectEqualOptionalString(null, parser.option(&.{ "-c", "--center" }));
+    try expectEqualOptionalString("command", parser.positional());
+
+    try std.testing.expect(!parser.next());
+    try std.testing.expect(!parser.flag(&.{ "-a", "--alpha" }));
+    try expectEqualOptionalString(null, parser.option(&.{ "-b", "--beta" }));
+    try expectEqualOptionalString(null, parser.option(&.{ "-c", "--center" }));
+    try expectEqualOptionalString(null, parser.positional());
 }
 
 const ArgParser = @This();

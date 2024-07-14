@@ -97,24 +97,23 @@ const main_usage =
 ;
 
 pub fn mainCommand(program: *Program) !void {
-    while (!program.args.isDone()) {
-        if (program.args.flag(&.{"install"})) {
-            return program.installCommand();
-        } else if (program.args.flag(&.{"uninstall"})) {
-            return program.uninstallCommand();
-        } else if (program.args.flag(&.{"update"})) {
-            return program.updateCommand();
-        } else if (program.args.flag(&.{"list"})) {
-            return program.listCommand();
-        } else if (program.args.flag(&.{"pkgs"})) {
-            return program.pkgsCommand();
-        } else if (program.args.flag(&.{ "-h", "--help", "help" })) {
-            return std.io.getStdOut().writeAll(main_usage);
-        } else if (program.args.option(&.{ "-p", "--prefix" })) |prefix| {
+    while (program.args.next()) {
+        if (program.args.option(&.{ "-p", "--prefix" })) |prefix|
             program.options.prefix = prefix;
-        } else {
+        if (program.args.flag(&.{"install"}))
+            return program.installCommand();
+        if (program.args.flag(&.{"uninstall"}))
+            return program.uninstallCommand();
+        if (program.args.flag(&.{"update"}))
+            return program.updateCommand();
+        if (program.args.flag(&.{"list"}))
+            return program.listCommand();
+        if (program.args.flag(&.{"pkgs"}))
+            return program.pkgsCommand();
+        if (program.args.flag(&.{ "-h", "--help", "help" }))
+            return std.io.getStdOut().writeAll(main_usage);
+        if (program.args.positional()) |_|
             break;
-        }
     }
 
     try std.io.getStdErr().writeAll(main_usage);
@@ -145,12 +144,11 @@ fn installCommand(program: *Program) !void {
     var packages_to_install = std.StringArrayHashMap(void).init(program.allocator);
     defer packages_to_install.deinit();
 
-    while (!program.args.isDone()) {
-        if (program.args.flag(&.{ "-h", "--help" })) {
+    while (program.args.next()) {
+        if (program.args.flag(&.{ "-h", "--help" }))
             return std.io.getStdOut().writeAll(install_usage);
-        } else {
-            try packages_to_install.put(program.args.eat(), {});
-        }
+        if (program.args.positional()) |name|
+            try packages_to_install.put(name, {});
     }
 
     var pkgs = try Packages.download(.{
@@ -188,12 +186,11 @@ fn uninstallCommand(program: *Program) !void {
     var packages_to_uninstall = std.StringArrayHashMap(void).init(program.allocator);
     defer packages_to_uninstall.deinit();
 
-    while (!program.args.isDone()) {
-        if (program.args.flag(&.{ "-h", "--help" })) {
+    while (program.args.next()) {
+        if (program.args.flag(&.{ "-h", "--help" }))
             return std.io.getStdOut().writeAll(uninstall_usage);
-        } else {
-            try packages_to_uninstall.put(program.args.eat(), {});
-        }
+        if (program.args.positional()) |name|
+            try packages_to_uninstall.put(name, {});
     }
 
     var pm = try PackageManager.init(.{
@@ -223,12 +220,11 @@ fn updateCommand(program: *Program) !void {
     var packages_to_update = std.StringArrayHashMap(void).init(program.allocator);
     defer packages_to_update.deinit();
 
-    while (!program.args.isDone()) {
-        if (program.args.flag(&.{ "-h", "--help" })) {
+    while (program.args.next()) {
+        if (program.args.flag(&.{ "-h", "--help" }))
             return std.io.getStdOut().writeAll(update_usage);
-        } else {
-            try packages_to_update.put(program.args.eat(), {});
-        }
+        if (program.args.positional()) |name|
+            try packages_to_update.put(name, {});
     }
 
     var pkgs = try Packages.download(.{
@@ -270,16 +266,15 @@ const list_usage =
 ;
 
 fn listCommand(program: *Program) !void {
-    while (!program.args.isDone()) {
-        if (program.args.flag(&.{"all"})) {
+    while (program.args.next()) {
+        if (program.args.flag(&.{"all"}))
             return program.listAllCommand();
-        } else if (program.args.flag(&.{"installed"})) {
+        if (program.args.flag(&.{"installed"}))
             return program.listInstalledCommand();
-        } else if (program.args.flag(&.{ "-h", "--help", "help" })) {
+        if (program.args.flag(&.{ "-h", "--help", "help" }))
             return std.io.getStdOut().writeAll(list_usage);
-        } else {
+        if (program.args.positional()) |_|
             break;
-        }
     }
 
     try std.io.getStdErr().writeAll(list_usage);
@@ -295,10 +290,10 @@ const list_installed_usage =
 ;
 
 fn listInstalledCommand(program: *Program) !void {
-    while (!program.args.isDone()) {
-        if (program.args.flag(&.{ "-h", "--help" })) {
+    while (program.args.next()) {
+        if (program.args.flag(&.{ "-h", "--help" }))
             return std.io.getStdOut().writeAll(list_installed_usage);
-        } else {
+        if (program.args.positional()) |_| {
             try std.io.getStdErr().writeAll(list_installed_usage);
             return error.InvalidArgument;
         }
@@ -335,10 +330,10 @@ const list_all_usage =
 ;
 
 fn listAllCommand(program: *Program) !void {
-    while (!program.args.isDone()) {
-        if (program.args.flag(&.{ "-h", "--help" })) {
+    while (program.args.next()) {
+        if (program.args.flag(&.{ "-h", "--help" }))
             return std.io.getStdOut().writeAll(list_all_usage);
-        } else {
+        if (program.args.positional()) |_| {
             try std.io.getStdErr().writeAll(list_all_usage);
             return error.InvalidArgument;
         }
@@ -376,18 +371,17 @@ const pkgs_usage =
 ;
 
 fn pkgsCommand(program: *Program) !void {
-    while (!program.args.isDone()) {
-        if (program.args.flag(&.{"add"})) {
+    while (program.args.next()) {
+        if (program.args.flag(&.{"add"}))
             return program.pkgsAddCommand();
-        } else if (program.args.flag(&.{"make"})) {
+        if (program.args.flag(&.{"make"}))
             return program.pkgsMakeCommand();
-        } else if (program.args.flag(&.{"fmt"})) {
+        if (program.args.flag(&.{"fmt"}))
             return program.pkgsInifmtCommand();
-        } else if (program.args.flag(&.{ "-h", "--help", "help" })) {
+        if (program.args.flag(&.{ "-h", "--help", "help" }))
             return std.io.getStdOut().writeAll(pkgs_usage);
-        } else {
+        if (program.args.positional()) |_|
             break;
-        }
     }
 
     try std.io.getStdErr().writeAll(pkgs_usage);
@@ -410,16 +404,15 @@ fn pkgsAddCommand(program: *Program) !void {
     var urls = std.StringArrayHashMap(void).init(program.allocator);
     defer urls.deinit();
 
-    while (!program.args.isDone()) {
-        if (program.args.option(&.{ "-f", "--file" })) |file| {
+    while (program.args.next()) {
+        if (program.args.option(&.{ "-f", "--file" })) |file|
             pkgs_ini_path = file;
-        } else if (program.args.flag(&.{ "-c", "--commit" })) {
+        if (program.args.flag(&.{ "-c", "--commit" }))
             commit = true;
-        } else if (program.args.flag(&.{ "-h", "--help" })) {
+        if (program.args.flag(&.{ "-h", "--help" }))
             return std.io.getStdOut().writeAll(pkgs_add_usage);
-        } else {
-            try urls.put(program.args.eat(), {});
-        }
+        if (program.args.positional()) |url|
+            try urls.put(url, {});
     }
 
     const cwd = std.fs.cwd();
@@ -485,12 +478,11 @@ fn pkgsMakeCommand(program: *Program) !void {
     var urls = std.StringArrayHashMap(void).init(program.allocator);
     defer urls.deinit();
 
-    while (!program.args.isDone()) {
-        if (program.args.flag(&.{ "-h", "--help" })) {
+    while (program.args.next()) {
+        if (program.args.flag(&.{ "-h", "--help" }))
             return std.io.getStdOut().writeAll(pkgs_make_usage);
-        } else {
-            try urls.put(program.args.eat(), {});
-        }
+        if (program.args.positional()) |url|
+            try urls.put(url, {});
     }
 
     var stdout_buffered = std.io.bufferedWriter(std.io.getStdOut().writer());
@@ -727,12 +719,11 @@ fn pkgsInifmtCommand(program: *Program) !void {
     var files_to_format = std.StringArrayHashMap(void).init(program.allocator);
     defer files_to_format.deinit();
 
-    while (!program.args.isDone()) {
-        if (program.args.flag(&.{ "-h", "--help" })) {
+    while (program.args.next()) {
+        if (program.args.flag(&.{ "-h", "--help" }))
             return std.io.getStdOut().writeAll(pkgs_inifmt_usage);
-        } else {
-            try files_to_format.put(program.args.eat(), {});
-        }
+        if (program.args.positional()) |file|
+            try files_to_format.put(file, {});
     }
 
     if (files_to_format.count() == 0)
