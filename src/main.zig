@@ -369,6 +369,7 @@ const pkgs_usage =
     \\Commands:
     \\  add                 Make packages and add them to pkgs.ini
     \\  make                Make packages
+    \\  check               Check packages for new versions
     \\  fmt                 Format pkgs file
     \\  help                Display this message
     \\
@@ -544,13 +545,13 @@ fn makePkgFromGithubRepo(
     var latest_release_json = std.ArrayList(u8).init(program.allocator);
     defer latest_release_json.deinit();
 
-    const release_status = try download.download(
+    const release_download_result = try download.download(
         program.http_client,
         latest_release_url,
         null,
         latest_release_json.writer(),
     );
-    if (release_status != .ok)
+    if (release_download_result.status != .ok)
         return error.DownloadFailed;
 
     const latest_release_value = try std.json.parseFromSlice(
@@ -582,21 +583,14 @@ fn makePkgFromGithubRepo(
     const downloaded_file = try tmp_dir.createFile(downloaded_file_name, .{ .read = true });
     defer downloaded_file.close();
 
-    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
-    var hashing_writer = std.compress.hashedWriter(downloaded_file.writer(), &hasher);
-
-    const status = try download.download(
+    const package_download_result = try download.download(
         program.http_client,
         download_url,
         null,
-        hashing_writer.writer(),
+        downloaded_file.writer(),
     );
-    if (status != .ok)
+    if (package_download_result.status != .ok)
         return error.DownloadFailed;
-
-    const digest_length = std.crypto.hash.sha2.Sha256.digest_length;
-    var actual_hash_bytes: [digest_length]u8 = undefined;
-    hasher.final(&actual_hash_bytes);
 
     try downloaded_file.seekTo(0);
     try fs.extract(.{
@@ -635,7 +629,7 @@ fn makePkgFromGithubRepo(
     try writer.print("[{s}.{s}_{s}]\n", .{ repo, @tagName(os), @tagName(arch) });
     try writer.print("{s}", .{static_files_result.stdout});
     try writer.print("url = {s}\n", .{download_url});
-    try writer.print("hash = {s}\n", .{&std.fmt.bytesToHex(actual_hash_bytes, .lower)});
+    try writer.print("hash = {s}\n", .{&std.fmt.bytesToHex(package_download_result.hash, .lower)});
     try writer.print("\n", .{});
 
     const name = try program.allocator.dupe(u8, repo);

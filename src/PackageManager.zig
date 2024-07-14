@@ -198,14 +198,11 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
     const downloaded_path = try dir.realpathAlloc(pm.gpa, downloaded_file_name);
     defer pm.gpa.free(downloaded_path);
 
-    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
-    var hashing_writer = std.compress.hashedWriter(downloaded_file.writer(), &hasher);
-
-    const status = download.download(
+    const download_result = download.download(
         pm.http_client,
         package.install.url,
         progress,
-        hashing_writer.writer(),
+        downloaded_file.writer(),
     ) catch |err| {
         try pm.diagnostics.downloadFailed(.{
             .name = package.name,
@@ -215,22 +212,17 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
         });
         return error.DiagnosticsDownloadFailed;
     };
-    if (status != .ok) {
+    if (download_result.status != .ok) {
         try pm.diagnostics.downloadFailedWithStatus(.{
             .name = package.name,
             .version = package.info.version,
             .url = package.install.url,
-            .status = status,
+            .status = download_result.status,
         });
         return error.DiagnosticsDownloadFailed;
     }
 
-    const digest_length = std.crypto.hash.sha2.Sha256.digest_length;
-    var actual_hash_bytes: [digest_length]u8 = undefined;
-    hasher.final(&actual_hash_bytes);
-
-    const actual_hash = std.fmt.bytesToHex(actual_hash_bytes, .lower);
-
+    const actual_hash = std.fmt.bytesToHex(download_result.hash, .lower);
     if (!std.mem.eql(u8, package.install.hash, &actual_hash)) {
         try pm.diagnostics.hashMismatch(.{
             .name = package.name,
