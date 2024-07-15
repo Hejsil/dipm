@@ -10,25 +10,24 @@ pub fn main() !void {
 }
 
 pub fn mainWithArgs(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const home_path = std.process.getEnvVarOwned(allocator, "HOME") catch
-        try allocator.dupe(u8, "/");
-    defer allocator.free(home_path);
+    var arena_state = std.heap.ArenaAllocator.init(allocator);
+    const arena = arena_state.allocator();
+    defer arena_state.deinit();
 
-    const local_home_path = try std.fs.path.join(allocator, &.{ home_path, ".local" });
-    defer allocator.free(local_home_path);
+    const home_path = std.process.getEnvVarOwned(arena, "HOME") catch "/";
+    const local_home_path = try std.fs.path.join(arena, &.{ home_path, ".local" });
 
     var http_client = std.http.Client{ .allocator = allocator };
     defer http_client.deinit();
-    // try http_client.initDefaultProxies(arena);
+    try http_client.initDefaultProxies(arena);
 
     var diag = Diagnostics.init(allocator);
     defer diag.deinit();
 
     var progress = try Progress.init(.{
-        .allocator = allocator,
+        .allocator = arena,
         .maximum_node_name_len = 15,
     });
-    defer progress.deinit(allocator);
 
     // We don't really care to store the thread. Just let the os clean it up
     _ = std.Thread.spawn(.{}, renderThread, .{&progress}) catch |err| blk: {
@@ -37,7 +36,8 @@ pub fn mainWithArgs(allocator: std.mem.Allocator, args: []const []const u8) !voi
     };
 
     var program = Program{
-        .allocator = allocator,
+        .gpa = allocator,
+        .arena = arena,
         .http_client = &http_client,
         .progress = &progress,
         .diagnostics = &diag,
@@ -122,7 +122,8 @@ pub fn mainCommand(program: *Program) !void {
 
 const Program = @This();
 
-allocator: std.mem.Allocator,
+gpa: std.mem.Allocator,
+arena: std.mem.Allocator,
 http_client: *std.http.Client,
 progress: *Progress,
 diagnostics: *Diagnostics,
@@ -141,8 +142,7 @@ const install_usage =
 ;
 
 fn installCommand(program: *Program) !void {
-    var packages_to_install = std.StringArrayHashMap(void).init(program.allocator);
-    defer packages_to_install.deinit();
+    var packages_to_install = std.StringArrayHashMap(void).init(program.gpa);
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
@@ -152,7 +152,7 @@ fn installCommand(program: *Program) !void {
     }
 
     var pkgs = try Packages.download(.{
-        .allocator = program.allocator,
+        .allocator = program.gpa,
         .http_client = program.http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -162,7 +162,7 @@ fn installCommand(program: *Program) !void {
     defer pkgs.deinit();
 
     var pm = try PackageManager.init(.{
-        .allocator = program.allocator,
+        .allocator = program.gpa,
         .http_client = program.http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -183,8 +183,7 @@ const uninstall_usage =
 ;
 
 fn uninstallCommand(program: *Program) !void {
-    var packages_to_uninstall = std.StringArrayHashMap(void).init(program.allocator);
-    defer packages_to_uninstall.deinit();
+    var packages_to_uninstall = std.StringArrayHashMap(void).init(program.arena);
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
@@ -194,7 +193,7 @@ fn uninstallCommand(program: *Program) !void {
     }
 
     var pm = try PackageManager.init(.{
-        .allocator = program.allocator,
+        .allocator = program.gpa,
         .http_client = program.http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -217,8 +216,7 @@ const update_usage =
 ;
 
 fn updateCommand(program: *Program) !void {
-    var packages_to_update = std.StringArrayHashMap(void).init(program.allocator);
-    defer packages_to_update.deinit();
+    var packages_to_update = std.StringArrayHashMap(void).init(program.arena);
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
@@ -228,7 +226,7 @@ fn updateCommand(program: *Program) !void {
     }
 
     var pkgs = try Packages.download(.{
-        .allocator = program.allocator,
+        .allocator = program.gpa,
         .http_client = program.http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -238,7 +236,7 @@ fn updateCommand(program: *Program) !void {
     defer pkgs.deinit();
 
     var pm = try PackageManager.init(.{
-        .allocator = program.allocator,
+        .allocator = program.gpa,
         .http_client = program.http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -300,7 +298,7 @@ fn listInstalledCommand(program: *Program) !void {
     }
 
     var pm = try PackageManager.init(.{
-        .allocator = program.allocator,
+        .allocator = program.gpa,
         .http_client = program.http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -340,7 +338,7 @@ fn listAllCommand(program: *Program) !void {
     }
 
     var pkgs = try Packages.download(.{
-        .allocator = program.allocator,
+        .allocator = program.gpa,
         .http_client = program.http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -403,8 +401,7 @@ const pkgs_add_usage =
 fn pkgsAddCommand(program: *Program) !void {
     var commit = false;
     var pkgs_ini_path: []const u8 = "./pkgs.ini";
-    var urls = std.StringArrayHashMap(void).init(program.allocator);
-    defer urls.deinit();
+    var urls = std.StringArrayHashMap(void).init(program.arena);
 
     while (program.args.next()) {
         if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
@@ -436,25 +433,23 @@ fn pkgsAddCommand(program: *Program) !void {
 
     for (urls.keys()) |url| {
         const package = try program.makePkgFromUrl(url, writer);
-        defer package.deinit(program.allocator);
 
         if (commit) {
             try file_buffered.flush();
             try pkgs_ini_file.seekTo(0);
 
             // Quite inefficient, but format the file before each commit
-            try inifmtFiles(program.allocator, pkgs_ini_file, pkgs_ini_file);
+            try inifmtFiles(program.gpa, pkgs_ini_file, pkgs_ini_file);
             try pkgs_ini_file.sync();
 
-            const msg = try std.fmt.allocPrint(program.allocator, "{s}: Add {s}", .{
+            const msg = try std.fmt.allocPrint(program.arena, "{s}: Add {s}", .{
                 package.name,
                 package.version,
             });
-            defer program.allocator.free(msg);
 
             var child = std.process.Child.init(
                 &.{ "git", "commit", "-i", pkgs_ini_base_name, "-m", msg },
-                program.allocator,
+                program.gpa,
             );
             child.stdin_behavior = .Ignore;
             child.stdout_behavior = .Pipe;
@@ -469,7 +464,7 @@ fn pkgsAddCommand(program: *Program) !void {
     try file_buffered.flush();
 
     try pkgs_ini_file.seekTo(0);
-    try inifmtFiles(program.allocator, pkgs_ini_file, pkgs_ini_file);
+    try inifmtFiles(program.gpa, pkgs_ini_file, pkgs_ini_file);
 }
 
 const pkgs_make_usage =
@@ -481,8 +476,7 @@ const pkgs_make_usage =
 ;
 
 fn pkgsMakeCommand(program: *Program) !void {
-    var urls = std.StringArrayHashMap(void).init(program.allocator);
-    defer urls.deinit();
+    var urls = std.StringArrayHashMap(void).init(program.arena);
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
@@ -494,10 +488,8 @@ fn pkgsMakeCommand(program: *Program) !void {
     var stdout_buffered = std.io.bufferedWriter(std.io.getStdOut().writer());
     const writer = stdout_buffered.writer();
 
-    for (urls.keys()) |url| {
-        const package = try program.makePkgFromUrl(url, writer);
-        defer package.deinit(program.allocator);
-    }
+    for (urls.keys()) |url|
+        _ = try program.makePkgFromUrl(url, writer);
 
     try stdout_buffered.flush();
 }
@@ -505,11 +497,6 @@ fn pkgsMakeCommand(program: *Program) !void {
 const NameAndVersion = struct {
     name: []const u8,
     version: []const u8,
-
-    pub fn deinit(nv: NameAndVersion, allocator: std.mem.Allocator) void {
-        allocator.free(nv.name);
-        allocator.free(nv.version);
-    }
 };
 
 fn makePkgFromUrl(program: *Program, url: []const u8, writer: anytype) !NameAndVersion {
@@ -533,15 +520,12 @@ fn makePkgFromGithubRepo(
     repo: []const u8,
     writer: anytype,
 ) !NameAndVersion {
+    var latest_release_json = std.ArrayList(u8).init(program.arena);
     const latest_release_url = try std.fmt.allocPrint(
-        program.allocator,
+        program.arena,
         "https://api.github.com/repos/{s}/{s}/releases/latest",
         .{ user, repo },
     );
-    defer program.allocator.free(latest_release_url);
-
-    var latest_release_json = std.ArrayList(u8).init(program.allocator);
-    defer latest_release_json.deinit();
 
     const release_download_result = try download.download(
         program.http_client,
@@ -554,7 +538,7 @@ fn makePkgFromGithubRepo(
 
     const latest_release_value = try std.json.parseFromSlice(
         LatestRelease,
-        program.allocator,
+        program.gpa,
         latest_release_json.items,
         .{ .ignore_unknown_fields = true },
     );
@@ -564,7 +548,7 @@ fn makePkgFromGithubRepo(
     const os = builtin.os.tag;
     const arch = builtin.cpu.arch;
     const download_url = try findDownloadUrl(
-        program.allocator,
+        program.gpa,
         latest_release,
         repo,
         os,
@@ -592,7 +576,7 @@ fn makePkgFromGithubRepo(
 
     try downloaded_file.seekTo(0);
     try fs.extract(.{
-        .allocator = program.allocator,
+        .allocator = program.gpa,
         .input_name = downloaded_file_name,
         .input_file = downloaded_file,
         .output_dir = tmp_dir,
@@ -600,7 +584,7 @@ fn makePkgFromGithubRepo(
 
     // TODO: Can this be ported to pure zig easily?
     const static_files_result = try std.process.Child.run(.{
-        .allocator = program.allocator,
+        .allocator = program.arena,
         .argv = &.{
             "sh", "-c",
             \\find -type f -exec file '{}' '+' |
@@ -612,8 +596,6 @@ fn makePkgFromGithubRepo(
         },
         .cwd_dir = tmp_dir,
     });
-    defer program.allocator.free(static_files_result.stdout);
-    defer program.allocator.free(static_files_result.stderr);
 
     if (static_files_result.stdout.len < "install_bin".len)
         return error.NoStaticallyLinkedFiles;
@@ -630,13 +612,7 @@ fn makePkgFromGithubRepo(
     try writer.print("hash = {s}\n", .{&std.fmt.bytesToHex(package_download_result.hash, .lower)});
     try writer.print("\n", .{});
 
-    const name = try program.allocator.dupe(u8, repo);
-    errdefer program.allocator.free(name);
-
-    const version = try program.allocator.dupe(u8, latest_release.version());
-    errdefer program.allocator.free(version);
-
-    return .{ .name = name, .version = version };
+    return .{ .name = repo, .version = latest_release.version() };
 }
 
 const LatestRelease = struct {
@@ -724,8 +700,7 @@ const pkgs_check_usage =
 
 fn pkgsCheckCommand(program: *Program) !void {
     var pkgs_ini_path: []const u8 = "./pkgs.ini";
-    var packages_to_check_map = std.StringArrayHashMap(void).init(program.allocator);
-    defer packages_to_check_map.deinit();
+    var packages_to_check_map = std.StringArrayHashMap(void).init(program.arena);
 
     while (program.args.next()) {
         if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
@@ -738,13 +713,12 @@ fn pkgsCheckCommand(program: *Program) !void {
 
     const cwd = std.fs.cwd();
     const pkgs_ini_data = cwd.readFileAlloc(
-        program.allocator,
+        program.arena,
         pkgs_ini_path,
         std.math.maxInt(usize),
     ) catch "";
-    defer program.allocator.free(pkgs_ini_data);
 
-    var packages = try Packages.parse(program.allocator, pkgs_ini_data);
+    var packages = try Packages.parse(program.gpa, pkgs_ini_data);
     defer packages.deinit();
 
     var packages_to_check = packages_to_check_map.keys();
@@ -782,15 +756,12 @@ fn checkGithubPackageVersion(
     repo: []const u8,
     writer: anytype,
 ) !void {
+    var atom_data = std.ArrayList(u8).init(program.arena);
     const atom_url = try std.fmt.allocPrint(
-        program.allocator,
+        program.arena,
         "https://github.com/{s}/releases.atom",
         .{repo},
     );
-    defer program.allocator.free(atom_url);
-
-    var atom_data = std.ArrayList(u8).init(program.allocator);
-    defer atom_data.deinit();
 
     const release_download_result = try download.download(
         program.http_client,
@@ -834,8 +805,7 @@ const pkgs_inifmt_usage =
 ;
 
 fn pkgsInifmtCommand(program: *Program) !void {
-    var files_to_format = std.StringArrayHashMap(void).init(program.allocator);
-    defer files_to_format.deinit();
+    var files_to_format = std.StringArrayHashMap(void).init(program.arena);
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
@@ -845,7 +815,7 @@ fn pkgsInifmtCommand(program: *Program) !void {
     }
 
     if (files_to_format.count() == 0)
-        return inifmtFiles(program.allocator, std.io.getStdIn(), std.io.getStdOut());
+        return inifmtFiles(program.gpa, std.io.getStdIn(), std.io.getStdOut());
 
     const cwd = std.fs.cwd();
     for (files_to_format.keys()) |file| {
@@ -854,7 +824,7 @@ fn pkgsInifmtCommand(program: *Program) !void {
         {
             const in = try cwd.openFile(file, .{});
             defer in.close();
-            try inifmtFiles(program.allocator, in, out.file);
+            try inifmtFiles(program.gpa, in, out.file);
         }
         try out.finish();
     }
