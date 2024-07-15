@@ -21,7 +21,7 @@ pub fn download(
         try io.pipe(file.reader(), out);
         break :blk .ok;
     } else blk: {
-        var header_buffer: [std.mem.page_size]u8 = undefined;
+        var header_buffer: [1024 * 8]u8 = undefined;
         var request = try client.open(.GET, uri, .{
             .server_header_buffer = &header_buffer,
             .keep_alive = false,
