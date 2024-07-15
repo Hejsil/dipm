@@ -376,6 +376,8 @@ fn pkgsCommand(program: *Program) !void {
             return program.pkgsAddCommand();
         if (program.args.flag(&.{"make"}))
             return program.pkgsMakeCommand();
+        if (program.args.flag(&.{"check"}))
+            return program.pkgsCheckCommand();
         if (program.args.flag(&.{"fmt"}))
             return program.pkgsInifmtCommand();
         if (program.args.flag(&.{ "-h", "--help", "help" }))
@@ -405,7 +407,7 @@ fn pkgsAddCommand(program: *Program) !void {
     defer urls.deinit();
 
     while (program.args.next()) {
-        if (program.args.option(&.{ "-f", "--file" })) |file|
+        if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
             pkgs_ini_path = file;
         if (program.args.flag(&.{ "-c", "--commit" }))
             commit = true;
@@ -709,6 +711,118 @@ fn findDownloadUrl(
     }
 
     return error.DownloadUrlNotFound;
+}
+
+const pkgs_check_usage =
+    \\Usage: dipm pkgs check [options] [url]...
+    \\
+    \\Options:
+    \\  -f, --pkgs-file     Path to pkgs.ini (default: ./pkgs.ini)
+    \\  -h, --help          Display this message
+    \\
+;
+
+fn pkgsCheckCommand(program: *Program) !void {
+    var pkgs_ini_path: []const u8 = "./pkgs.ini";
+    var packages_to_check_map = std.StringArrayHashMap(void).init(program.allocator);
+    defer packages_to_check_map.deinit();
+
+    while (program.args.next()) {
+        if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
+            pkgs_ini_path = file;
+        if (program.args.flag(&.{ "-h", "--help" }))
+            return std.io.getStdOut().writeAll(pkgs_check_usage);
+        if (program.args.positional()) |package|
+            try packages_to_check_map.put(package, {});
+    }
+
+    const cwd = std.fs.cwd();
+    const pkgs_ini_data = cwd.readFileAlloc(
+        program.allocator,
+        pkgs_ini_path,
+        std.math.maxInt(usize),
+    ) catch "";
+    defer program.allocator.free(pkgs_ini_data);
+
+    var packages = try Packages.parse(program.allocator, pkgs_ini_data);
+    defer packages.deinit();
+
+    var packages_to_check = packages_to_check_map.keys();
+    if (packages_to_check.len == 0)
+        packages_to_check = packages.packages.keys();
+
+    var stdout_buffered = std.io.bufferedWriter(std.io.getStdOut().writer());
+    const writer = stdout_buffered.writer();
+
+    for (packages_to_check) |package_name| {
+        const package = packages.packages.get(package_name) orelse {
+            std.log.err("{s} not found", .{package_name});
+            continue;
+        };
+        if (package.update.github.len != 0) {
+            program.checkGithubPackageVersion(
+                package_name,
+                package.info.version,
+                package.update.github,
+                writer,
+            ) catch |err| {
+                std.log.err("{s} failed to check version: {}", .{ package_name, err });
+                continue;
+            };
+            try stdout_buffered.flush();
+        }
+    }
+    try stdout_buffered.flush();
+}
+
+fn checkGithubPackageVersion(
+    program: *Program,
+    name: []const u8,
+    version: []const u8,
+    repo: []const u8,
+    writer: anytype,
+) !void {
+    const atom_url = try std.fmt.allocPrint(
+        program.allocator,
+        "https://github.com/{s}/releases.atom",
+        .{repo},
+    );
+    defer program.allocator.free(atom_url);
+
+    var atom_data = std.ArrayList(u8).init(program.allocator);
+    defer atom_data.deinit();
+
+    const release_download_result = try download.download(
+        program.http_client,
+        atom_url,
+        null,
+        atom_data.writer(),
+    );
+    if (release_download_result.status != .ok)
+        return error.DownloadFailed;
+
+    const end_id = "</id>";
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, atom_data.items, pos, end_id)) |end| : (pos = end + end_id.len) {
+        var start = end;
+        while (0 < start) : (start -= 1) switch (atom_data.items[start - 1]) {
+            '0'...'9', '.' => {},
+            else => break,
+        };
+
+        const new_version = atom_data.items[start..end];
+        if (std.mem.count(u8, new_version, ".") == 0)
+            continue;
+        if (std.mem.startsWith(u8, new_version, "."))
+            continue;
+        if (std.mem.endsWith(u8, new_version, "."))
+            continue;
+        if (!std.mem.eql(u8, version, new_version))
+            try writer.print("{s} {s} -> {s}\n", .{ name, version, new_version });
+        return;
+    }
+
+    return error.NoVersionFound;
 }
 
 const pkgs_inifmt_usage =
