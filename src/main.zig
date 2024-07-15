@@ -457,7 +457,7 @@ fn pkgsUpdateCommand(program: *Program) !void {
     var packages = try Packages.parse(program.gpa, pkgs_ini_data);
     defer packages.deinit();
 
-    var urls = std.ArrayList([]const u8).init(program.arena);
+    var urls = std.ArrayList(UrlAndName).init(program.arena);
     for (packages_to_update.keys()) |package_name| {
         const package = packages.packages.get(package_name) orelse {
             std.log.err("{s} not found", .{package_name});
@@ -467,7 +467,10 @@ fn pkgsUpdateCommand(program: *Program) !void {
         const url = try std.fmt.allocPrint(program.arena, "https://github.com/{s}", .{
             package.update.github,
         });
-        try urls.append(url);
+        try urls.append(.{
+            .name = package_name,
+            .url = url,
+        });
     }
 
     options.urls = urls.items;
@@ -485,7 +488,7 @@ const pkgs_add_usage =
 ;
 
 fn pkgsAddCommand(program: *Program) !void {
-    var urls = std.StringArrayHashMap(void).init(program.arena);
+    var urls = std.ArrayList(UrlAndName).init(program.arena);
     var options = PackagesAddOptions{
         .commit = false,
         .commit_prefix = "Add",
@@ -501,10 +504,10 @@ fn pkgsAddCommand(program: *Program) !void {
         if (program.args.flag(&.{ "-h", "--help" }))
             return program.stdout.writeAll(pkgs_add_usage);
         if (program.args.positional()) |url|
-            try urls.put(url, {});
+            try urls.append(.{ .url = url, .name = null });
     }
 
-    options.urls = urls.keys();
+    options.urls = urls.items;
     return program.pkgsAdd(options);
 }
 
@@ -512,7 +515,12 @@ const PackagesAddOptions = struct {
     pkgs_ini_path: []const u8,
     commit: bool,
     commit_prefix: []const u8,
-    urls: []const []const u8,
+    urls: []const UrlAndName,
+};
+
+const UrlAndName = struct {
+    url: []const u8,
+    name: ?[]const u8,
 };
 
 fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
@@ -537,19 +545,19 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     defer packages.deinit();
 
     for (options.urls) |url| {
-        const package_name, const package = program.makePkgFromUrl(url) catch |err| {
-            std.log.err("{s} {s}", .{ @errorName(err), url });
+        const name, const package = program.makePkgFromUrl(url) catch |err| {
+            std.log.err("{s} {s}", .{ @errorName(err), url.url });
             continue;
         };
 
-        try packages.packages.put(packages.arena.allocator(), package_name, package);
+        try packages.packages.put(packages.arena.allocator(), name, package);
 
         if (options.commit) {
             try packages.writeToFileOverride(pkgs_ini_file);
             try pkgs_ini_file.sync();
 
             const msg = try std.fmt.allocPrint(program.arena, "{s}: {s} {s}", .{
-                package_name,
+                name,
                 options.commit_prefix,
                 package.info.version,
             });
@@ -593,8 +601,11 @@ fn pkgsMakeCommand(program: *Program) !void {
     const writer = stdout_buffered.writer();
 
     for (urls.keys()) |url| {
-        const package_name, const package = try program.makePkgFromUrl(url);
-        try package.write(package_name, writer);
+        const name, const package = try program.makePkgFromUrl(.{
+            .url = url,
+            .name = null,
+        });
+        try package.write(name, writer);
     }
 
     try stdout_buffered.flush();
@@ -607,31 +618,40 @@ const NameAndVersion = struct {
 
 fn makePkgFromUrl(
     program: *Program,
-    url: []const u8,
+    url: UrlAndName,
 ) !struct { []const u8, Package } {
     const github_url = "https://github.com/";
-    if (std.mem.startsWith(u8, url, github_url)) {
-        const repo = url[github_url.len..];
+    if (std.mem.startsWith(u8, url.url, github_url)) {
+        const repo = url.url[github_url.len..];
         var repo_split = std.mem.splitScalar(u8, repo, '/');
-        return program.makePkgFromGithubRepo(
-            repo_split.first(),
-            repo_split.next() orelse "",
-        );
+
+        const repo_user = repo_split.first();
+        const repo_name = repo_split.next() orelse "";
+        return program.makePkgFromGithubRepo(.{
+            .name = url.name orelse repo_name,
+            .user = repo_user,
+            .repo = repo_name,
+        });
     } else {
         return error.InvalidUrl;
     }
 }
 
-fn makePkgFromGithubRepo(
-    program: *Program,
+const GithubRepo = struct {
+    name: []const u8,
     user: []const u8,
     repo: []const u8,
+};
+
+fn makePkgFromGithubRepo(
+    program: *Program,
+    repo: GithubRepo,
 ) !struct { []const u8, Package } {
     var latest_release_json = std.ArrayList(u8).init(program.arena);
     const latest_release_url = try std.fmt.allocPrint(
         program.arena,
         "https://api.github.com/repos/{s}/{s}/releases/latest",
-        .{ user, repo },
+        .{ repo.user, repo.repo },
     );
 
     const release_download_result = try download.download(
@@ -714,11 +734,14 @@ fn makePkgFromGithubRepo(
 
     const hash = std.fmt.bytesToHex(package_download_result.hash, .lower);
     return .{
-        repo,
+        repo.name,
         .{
             .info = .{ .version = latest_release.version() },
             .update = .{
-                .github = try std.fmt.allocPrint(program.arena, "{s}/{s}", .{ user, repo }),
+                .github = try std.fmt.allocPrint(program.arena, "{s}/{s}", .{
+                    repo.user,
+                    repo.repo,
+                }),
             },
             .linux_x86_64 = .{
                 .bin = bins.items,
@@ -745,7 +768,7 @@ const LatestRelease = struct {
 fn findDownloadUrl(
     allocator: std.mem.Allocator,
     release: LatestRelease,
-    name: []const u8,
+    repo: GithubRepo,
     os: std.Target.Os.Tag,
     arch: std.Target.Cpu.Arch,
 ) ![]const u8 {
@@ -764,7 +787,9 @@ fn findDownloadUrl(
     try trim_list.append("static");
     try trim_list.append(release.tag_name);
     try trim_list.append(release.version());
-    try trim_list.append(name);
+    try trim_list.append(repo.name);
+    try trim_list.append(repo.user);
+    try trim_list.append(repo.repo);
     try trim_list.append(@tagName(arch));
     try trim_list.append(@tagName(os));
 
