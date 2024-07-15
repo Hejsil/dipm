@@ -6,22 +6,34 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
 
-    return mainWithArgs(gpa, args[1..]);
+    return mainFull(.{
+        .allocator = gpa,
+        .args = args[1..],
+    });
 }
 
-pub fn mainWithArgs(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    var arena_state = std.heap.ArenaAllocator.init(allocator);
+pub const MainOptions = struct {
+    allocator: std.mem.Allocator,
+    args: []const []const u8,
+
+    stdin: std.fs.File = std.io.getStdIn(),
+    stdout: std.fs.File = std.io.getStdOut(),
+    stderr: std.fs.File = std.io.getStdErr(),
+};
+
+pub fn mainFull(options: MainOptions) !void {
+    var arena_state = std.heap.ArenaAllocator.init(options.allocator);
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
     const home_path = std.process.getEnvVarOwned(arena, "HOME") catch "/";
     const local_home_path = try std.fs.path.join(arena, &.{ home_path, ".local" });
 
-    var http_client = std.http.Client{ .allocator = allocator };
+    var http_client = std.http.Client{ .allocator = options.allocator };
     defer http_client.deinit();
     try http_client.initDefaultProxies(arena);
 
-    var diag = Diagnostics.init(allocator);
+    var diag = Diagnostics.init(options.allocator);
     defer diag.deinit();
 
     var progress = try Progress.init(.{
@@ -29,48 +41,54 @@ pub fn mainWithArgs(allocator: std.mem.Allocator, args: []const []const u8) !voi
         .maximum_node_name_len = 15,
     });
 
-    // We don't really care to store the thread. Just let the os clean it up
-    _ = std.Thread.spawn(.{}, renderThread, .{&progress}) catch |err| blk: {
-        std.log.warn("failed to spawn rendering thread: {}", .{err});
-        break :blk null;
-    };
-
     var program = Program{
-        .gpa = allocator,
+        .gpa = options.allocator,
         .arena = arena,
         .http_client = &http_client,
         .progress = &progress,
         .diagnostics = &diag,
-        .args = .{ .args = args },
+        .stdin = options.stdin,
+        .stdout = options.stdout,
+        .stderr = options.stderr,
+
+        .args = .{ .args = options.args },
         .options = .{
             .prefix = local_home_path,
         },
     };
 
+    // Don't render progress bar in tests
+    // TODO: This should be behind a flag
+    if (!builtin.is_test) {
+        // We don't really care to store the thread. Just let the os clean it up
+        _ = std.Thread.spawn(.{}, renderThread, .{&program}) catch |err| blk: {
+            std.log.warn("failed to spawn rendering thread: {}", .{err});
+            break :blk null;
+        };
+    }
+
     const res = program.mainCommand();
 
     // Stop `renderThread` from rendering by locking stderr for the rest of the programs execution.
-    std.debug.lockStdErr();
-    const stderr = std.io.getStdErr();
-    try progress.cleanupTty(stderr);
-    try diag.reportToFile(stderr);
+    program.io_lock.lock();
+    try progress.cleanupTty(program.stderr);
+    try diag.reportToFile(program.stderr);
     return res;
 }
 
-fn renderThread(progress: *Progress) void {
+fn renderThread(program: *Program) void {
     const fps = 15;
     const delay = std.time.ns_per_s / fps;
     const initial_delay = std.time.ns_per_s / 4;
 
-    const stderr = std.io.getStdErr();
-    if (!stderr.supportsAnsiEscapeCodes())
+    if (!program.stderr.supportsAnsiEscapeCodes())
         return;
 
     std.time.sleep(initial_delay);
     while (true) {
-        std.debug.lockStdErr();
-        progress.renderToTty(stderr) catch {};
-        std.debug.unlockStdErr();
+        program.io_lock.lock();
+        program.progress.renderToTty(program.stderr) catch {};
+        program.io_lock.unlock();
         std.time.sleep(delay);
     }
 }
@@ -94,6 +112,7 @@ const main_usage =
     \\                        {prefix}/lib/
     \\                        {prefix}/share/dipm/
     \\
+    \\
 ;
 
 pub fn mainCommand(program: *Program) !void {
@@ -111,12 +130,12 @@ pub fn mainCommand(program: *Program) !void {
         if (program.args.flag(&.{"pkgs"}))
             return program.pkgsCommand();
         if (program.args.flag(&.{ "-h", "--help", "help" }))
-            return std.io.getStdOut().writeAll(main_usage);
+            return program.stdout.writeAll(main_usage);
         if (program.args.positional()) |_|
             break;
     }
 
-    try std.io.getStdErr().writeAll(main_usage);
+    try program.stderr.writeAll(main_usage);
     return error.InvalidArgument;
 }
 
@@ -127,6 +146,11 @@ arena: std.mem.Allocator,
 http_client: *std.http.Client,
 progress: *Progress,
 diagnostics: *Diagnostics,
+
+io_lock: std.Thread.Mutex = .{},
+stdin: std.fs.File,
+stdout: std.fs.File,
+stderr: std.fs.File,
 
 args: ArgParser,
 options: struct {
@@ -146,7 +170,7 @@ fn installCommand(program: *Program) !void {
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
-            return std.io.getStdOut().writeAll(install_usage);
+            return program.stdout.writeAll(install_usage);
         if (program.args.positional()) |name|
             try packages_to_install.put(name, {});
     }
@@ -187,7 +211,7 @@ fn uninstallCommand(program: *Program) !void {
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
-            return std.io.getStdOut().writeAll(uninstall_usage);
+            return program.stdout.writeAll(uninstall_usage);
         if (program.args.positional()) |name|
             try packages_to_uninstall.put(name, {});
     }
@@ -220,7 +244,7 @@ fn updateCommand(program: *Program) !void {
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
-            return std.io.getStdOut().writeAll(update_usage);
+            return program.stdout.writeAll(update_usage);
         if (program.args.positional()) |name|
             try packages_to_update.put(name, {});
     }
@@ -270,12 +294,12 @@ fn listCommand(program: *Program) !void {
         if (program.args.flag(&.{"installed"}))
             return program.listInstalledCommand();
         if (program.args.flag(&.{ "-h", "--help", "help" }))
-            return std.io.getStdOut().writeAll(list_usage);
+            return program.stdout.writeAll(list_usage);
         if (program.args.positional()) |_|
             break;
     }
 
-    try std.io.getStdErr().writeAll(list_usage);
+    try program.stderr.writeAll(list_usage);
     return error.InvalidArgument;
 }
 
@@ -290,9 +314,9 @@ const list_installed_usage =
 fn listInstalledCommand(program: *Program) !void {
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
-            return std.io.getStdOut().writeAll(list_installed_usage);
+            return program.stdout.writeAll(list_installed_usage);
         if (program.args.positional()) |_| {
-            try std.io.getStdErr().writeAll(list_installed_usage);
+            try program.stderr.writeAll(list_installed_usage);
             return error.InvalidArgument;
         }
     }
@@ -306,7 +330,7 @@ fn listInstalledCommand(program: *Program) !void {
     });
     defer pm.deinit();
 
-    var stdout_buffered = std.io.bufferedWriter(std.io.getStdOut().writer());
+    var stdout_buffered = std.io.bufferedWriter(program.stdout.writer());
     const writer = stdout_buffered.writer();
 
     for (
@@ -330,9 +354,9 @@ const list_all_usage =
 fn listAllCommand(program: *Program) !void {
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
-            return std.io.getStdOut().writeAll(list_all_usage);
+            return program.stdout.writeAll(list_all_usage);
         if (program.args.positional()) |_| {
-            try std.io.getStdErr().writeAll(list_all_usage);
+            try program.stderr.writeAll(list_all_usage);
             return error.InvalidArgument;
         }
     }
@@ -347,7 +371,7 @@ fn listAllCommand(program: *Program) !void {
     });
     defer pkgs.deinit();
 
-    var stdout_buffered = std.io.bufferedWriter(std.io.getStdOut().writer());
+    var stdout_buffered = std.io.bufferedWriter(program.stdout.writer());
     const writer = stdout_buffered.writer();
 
     for (pkgs.packages.keys(), pkgs.packages.values()) |package_name, package|
@@ -379,12 +403,12 @@ fn pkgsCommand(program: *Program) !void {
         if (program.args.flag(&.{"fmt"}))
             return program.pkgsInifmtCommand();
         if (program.args.flag(&.{ "-h", "--help", "help" }))
-            return std.io.getStdOut().writeAll(pkgs_usage);
+            return program.stdout.writeAll(pkgs_usage);
         if (program.args.positional()) |_|
             break;
     }
 
-    try std.io.getStdErr().writeAll(pkgs_usage);
+    try program.stderr.writeAll(pkgs_usage);
     return error.InvalidArgument;
 }
 
@@ -409,7 +433,7 @@ fn pkgsAddCommand(program: *Program) !void {
         if (program.args.flag(&.{ "-c", "--commit" }))
             commit = true;
         if (program.args.flag(&.{ "-h", "--help" }))
-            return std.io.getStdOut().writeAll(pkgs_add_usage);
+            return program.stdout.writeAll(pkgs_add_usage);
         if (program.args.positional()) |url|
             try urls.put(url, {});
     }
@@ -480,12 +504,12 @@ fn pkgsMakeCommand(program: *Program) !void {
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
-            return std.io.getStdOut().writeAll(pkgs_make_usage);
+            return program.stdout.writeAll(pkgs_make_usage);
         if (program.args.positional()) |url|
             try urls.put(url, {});
     }
 
-    var stdout_buffered = std.io.bufferedWriter(std.io.getStdOut().writer());
+    var stdout_buffered = std.io.bufferedWriter(program.stdout.writer());
     const writer = stdout_buffered.writer();
 
     for (urls.keys()) |url|
@@ -706,7 +730,7 @@ fn pkgsCheckCommand(program: *Program) !void {
         if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
             pkgs_ini_path = file;
         if (program.args.flag(&.{ "-h", "--help" }))
-            return std.io.getStdOut().writeAll(pkgs_check_usage);
+            return program.stdout.writeAll(pkgs_check_usage);
         if (program.args.positional()) |package|
             try packages_to_check_map.put(package, {});
     }
@@ -725,7 +749,7 @@ fn pkgsCheckCommand(program: *Program) !void {
     if (packages_to_check.len == 0)
         packages_to_check = packages.packages.keys();
 
-    var stdout_buffered = std.io.bufferedWriter(std.io.getStdOut().writer());
+    var stdout_buffered = std.io.bufferedWriter(program.stdout.writer());
     const writer = stdout_buffered.writer();
 
     for (packages_to_check) |package_name| {
@@ -809,13 +833,13 @@ fn pkgsInifmtCommand(program: *Program) !void {
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
-            return std.io.getStdOut().writeAll(pkgs_inifmt_usage);
+            return program.stdout.writeAll(pkgs_inifmt_usage);
         if (program.args.positional()) |file|
             try files_to_format.put(file, {});
     }
 
     if (files_to_format.count() == 0)
-        return inifmtFiles(program.gpa, std.io.getStdIn(), std.io.getStdOut());
+        return inifmtFiles(program.gpa, program.stdin, program.stdout);
 
     const cwd = std.fs.cwd();
     for (files_to_format.keys()) |file| {
