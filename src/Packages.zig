@@ -164,6 +164,18 @@ pub fn parseInto(packages: *Packages, tmp_allocator: std.mem.Allocator, string: 
     }
 }
 
+pub fn writeToFileOverride(packages: Packages, file: std.fs.File) !void {
+    try file.seekTo(0);
+    try packages.writeToFile(file);
+    try file.setEndPos(try file.getPos());
+}
+
+pub fn writeToFile(packages: Packages, file: std.fs.File) !void {
+    var buffered_writer = std.io.bufferedWriter(file.writer());
+    try packages.write(buffered_writer.writer());
+    try buffered_writer.flush();
+}
+
 pub fn write(packages: Packages, writer: anytype) !void {
     for (packages.packages.keys(), packages.packages.values(), 0..) |package_name, package, i| {
         if (i != 0)
