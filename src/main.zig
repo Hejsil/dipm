@@ -384,6 +384,7 @@ const pkgs_usage =
     \\Usage: dipm pkgs [options] [command]
     \\
     \\Commands:
+    \\  update              Update packages in pkgs.ini
     \\  add                 Make packages and add them to pkgs.ini
     \\  make                Make packages
     \\  check               Check packages for new versions
@@ -394,6 +395,8 @@ const pkgs_usage =
 
 fn pkgsCommand(program: *Program) !void {
     while (program.args.next()) {
+        if (program.args.flag(&.{"update"}))
+            return program.pkgsUpdateCommand();
         if (program.args.flag(&.{"add"}))
             return program.pkgsAddCommand();
         if (program.args.flag(&.{"make"}))
@@ -412,6 +415,64 @@ fn pkgsCommand(program: *Program) !void {
     return error.InvalidArgument;
 }
 
+const pkgs_update_usage =
+    \\Usage: dipm pkgs update [options] [url]...
+    \\
+    \\Options:
+    \\  -f, --pkgs-file     Path to pkgs.ini (default: ./pkgs.ini)
+    \\  -c, --commit        Commit each package updateed to pkgs.ini
+    \\  -h, --help          Display this message
+    \\
+;
+
+fn pkgsUpdateCommand(program: *Program) !void {
+    var packages_to_update = std.StringArrayHashMap(void).init(program.arena);
+    var options = PackagesAddOptions{
+        .commit = false,
+        .pkgs_ini_path = "./pkgs.ini",
+        .urls = undefined,
+    };
+
+    while (program.args.next()) {
+        if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
+            options.pkgs_ini_path = file;
+        if (program.args.flag(&.{ "-c", "--commit" }))
+            options.commit = true;
+        if (program.args.flag(&.{ "-h", "--help" }))
+            return program.stdout.writeAll(pkgs_update_usage);
+        if (program.args.positional()) |url|
+            try packages_to_update.put(url, {});
+    }
+
+    const cwd = std.fs.cwd();
+    const pkgs_ini_file = try cwd.openFile(options.pkgs_ini_path, .{});
+    defer pkgs_ini_file.close();
+
+    const pkgs_ini_data = try pkgs_ini_file.readToEndAlloc(
+        program.arena,
+        std.math.maxInt(usize),
+    );
+
+    var packages = try Packages.parse(program.gpa, pkgs_ini_data);
+    defer packages.deinit();
+
+    var urls = std.ArrayList([]const u8).init(program.arena);
+    for (packages_to_update.keys()) |package_name| {
+        const package = packages.packages.get(package_name) orelse {
+            std.log.err("{s} not found", .{package_name});
+            continue;
+        };
+
+        const url = try std.fmt.allocPrint(program.arena, "https://github.com/{s}", .{
+            package.update.github,
+        });
+        try urls.append(url);
+    }
+
+    options.urls = urls.items;
+    return program.pkgsAdd(options);
+}
+
 const pkgs_add_usage =
     \\Usage: dipm pkgs add [options] [url]...
     \\
@@ -423,52 +484,66 @@ const pkgs_add_usage =
 ;
 
 fn pkgsAddCommand(program: *Program) !void {
-    var commit = false;
-    var pkgs_ini_path: []const u8 = "./pkgs.ini";
     var urls = std.StringArrayHashMap(void).init(program.arena);
+    var options = PackagesAddOptions{
+        .commit = false,
+        .pkgs_ini_path = "./pkgs.ini",
+        .urls = undefined,
+    };
 
     while (program.args.next()) {
         if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
-            pkgs_ini_path = file;
+            options.pkgs_ini_path = file;
         if (program.args.flag(&.{ "-c", "--commit" }))
-            commit = true;
+            options.commit = true;
         if (program.args.flag(&.{ "-h", "--help" }))
             return program.stdout.writeAll(pkgs_add_usage);
         if (program.args.positional()) |url|
             try urls.put(url, {});
     }
 
+    options.urls = urls.keys();
+    return program.pkgsAdd(options);
+}
+
+const PackagesAddOptions = struct {
+    pkgs_ini_path: []const u8,
+    commit: bool,
+    urls: []const []const u8,
+};
+
+fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     const cwd = std.fs.cwd();
-    const pkgs_ini_base_name = std.fs.path.basename(pkgs_ini_path);
-    const pkgs_ini_dir_path = std.fs.path.dirname(pkgs_ini_path) orelse ".";
+    const pkgs_ini_base_name = std.fs.path.basename(options.pkgs_ini_path);
+    const pkgs_ini_dir_path = std.fs.path.dirname(options.pkgs_ini_path) orelse ".";
+
     var pkgs_ini_dir = try cwd.openDir(pkgs_ini_dir_path, .{});
     defer pkgs_ini_dir.close();
 
-    const pkgs_ini_file = try cwd.createFile(pkgs_ini_path, .{
-        .truncate = false,
-        .read = true,
+    const pkgs_ini_file = try pkgs_ini_dir.openFile(pkgs_ini_base_name, .{
+        .mode = .read_write,
     });
     defer pkgs_ini_file.close();
 
-    try pkgs_ini_file.seekFromEnd(0);
+    const pkgs_ini_data = try pkgs_ini_file.readToEndAlloc(
+        program.arena,
+        std.math.maxInt(usize),
+    );
 
-    var file_buffered = std.io.bufferedWriter(pkgs_ini_file.writer());
-    const writer = file_buffered.writer();
+    var packages = try Packages.parse(program.gpa, pkgs_ini_data);
+    defer packages.deinit();
 
-    for (urls.keys()) |url| {
-        const package = try program.makePkgFromUrl(url, writer);
+    for (options.urls) |url| {
+        const package_name, const package = try program.makePkgFromUrl(url);
+        try packages.packages.put(packages.arena.allocator(), package_name, package);
 
-        if (commit) {
-            try file_buffered.flush();
-            try pkgs_ini_file.seekTo(0);
-
-            // Quite inefficient, but format the file before each commit
-            try inifmtFiles(program.gpa, pkgs_ini_file, pkgs_ini_file);
+        if (options.commit) {
+            try packages.writeToFileOverride(pkgs_ini_file);
             try pkgs_ini_file.sync();
 
             const msg = try std.fmt.allocPrint(program.arena, "{s}: Add {s}", .{
-                package.name,
-                package.version,
+                package_name,
+                package.info.version,
             });
 
             var child = std.process.Child.init(
@@ -485,10 +560,7 @@ fn pkgsAddCommand(program: *Program) !void {
         }
     }
 
-    try file_buffered.flush();
-
-    try pkgs_ini_file.seekTo(0);
-    try inifmtFiles(program.gpa, pkgs_ini_file, pkgs_ini_file);
+    try packages.writeToFileOverride(pkgs_ini_file);
 }
 
 const pkgs_make_usage =
@@ -512,8 +584,10 @@ fn pkgsMakeCommand(program: *Program) !void {
     var stdout_buffered = std.io.bufferedWriter(program.stdout.writer());
     const writer = stdout_buffered.writer();
 
-    for (urls.keys()) |url|
-        _ = try program.makePkgFromUrl(url, writer);
+    for (urls.keys()) |url| {
+        const package_name, const package = try program.makePkgFromUrl(url);
+        try package.write(package_name, writer);
+    }
 
     try stdout_buffered.flush();
 }
@@ -523,7 +597,10 @@ const NameAndVersion = struct {
     version: []const u8,
 };
 
-fn makePkgFromUrl(program: *Program, url: []const u8, writer: anytype) !NameAndVersion {
+fn makePkgFromUrl(
+    program: *Program,
+    url: []const u8,
+) !struct { []const u8, Package } {
     const github_url = "https://github.com/";
     if (std.mem.startsWith(u8, url, github_url)) {
         const repo = url[github_url.len..];
@@ -531,7 +608,6 @@ fn makePkgFromUrl(program: *Program, url: []const u8, writer: anytype) !NameAndV
         return program.makePkgFromGithubRepo(
             repo_split.first(),
             repo_split.next() orelse "",
-            writer,
         );
     } else {
         return error.InvalidUrl;
@@ -542,8 +618,7 @@ fn makePkgFromGithubRepo(
     program: *Program,
     user: []const u8,
     repo: []const u8,
-    writer: anytype,
-) !NameAndVersion {
+) !struct { []const u8, Package } {
     var latest_release_json = std.ArrayList(u8).init(program.arena);
     const latest_release_url = try std.fmt.allocPrint(
         program.arena,
@@ -614,29 +689,38 @@ fn makePkgFromGithubRepo(
             \\find -type f -exec file '{}' '+' |
             \\    grep -E 'statically linked|static-pie linked' |
             \\    cut -d: -f1 |
-            \\    sed "s#^./#install_bin = #" |
+            \\    sed 's#^./##' |
             \\    sort
             \\
         },
         .cwd_dir = tmp_dir,
     });
 
-    if (static_files_result.stdout.len < "install_bin".len)
+    if (static_files_result.stdout.len < 1)
         return error.NoStaticallyLinkedFiles;
 
-    try writer.print("[{s}.info]\n", .{repo});
-    try writer.print("version = {s}\n", .{latest_release.version()});
-    try writer.print("\n", .{});
-    try writer.print("[{s}.update]\n", .{repo});
-    try writer.print("github = {s}/{s}\n", .{ user, repo });
-    try writer.print("\n", .{});
-    try writer.print("[{s}.{s}_{s}]\n", .{ repo, @tagName(os), @tagName(arch) });
-    try writer.print("{s}", .{static_files_result.stdout});
-    try writer.print("url = {s}\n", .{download_url});
-    try writer.print("hash = {s}\n", .{&std.fmt.bytesToHex(package_download_result.hash, .lower)});
-    try writer.print("\n", .{});
+    var bins = std.ArrayList([]const u8).init(program.arena);
+    var static_files_lines = std.mem.tokenizeScalar(u8, static_files_result.stdout, '\n');
+    while (static_files_lines.next()) |static_bin|
+        try bins.append(static_bin);
 
-    return .{ .name = repo, .version = latest_release.version() };
+    const hash = std.fmt.bytesToHex(package_download_result.hash, .lower);
+    return .{
+        repo,
+        .{
+            .info = .{ .version = latest_release.version() },
+            .update = .{
+                .github = try std.fmt.allocPrint(program.arena, "{s}/{s}", .{ user, repo }),
+            },
+            .linux_x86_64 = .{
+                .bin = bins.items,
+                .lib = &.{},
+                .share = &.{},
+                .url = download_url,
+                .hash = try program.arena.dupe(u8, &hash),
+            },
+        },
+    };
 }
 
 const LatestRelease = struct {
@@ -880,6 +964,7 @@ test {
     _ = Diagnostics;
     _ = PackageManager;
     _ = Packages;
+    _ = Package;
     _ = Progress;
 
     _ = download;
@@ -891,6 +976,7 @@ const ArgParser = @import("ArgParser.zig");
 const Diagnostics = @import("Diagnostics.zig");
 const PackageManager = @import("PackageManager.zig");
 const Packages = @import("Packages.zig");
+const Package = @import("Package.zig");
 const Progress = @import("Progress.zig");
 
 const builtin = @import("builtin");
