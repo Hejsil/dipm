@@ -438,6 +438,10 @@ fn pkgsAddCommand(program: *Program) !void {
 
         if (commit) {
             try file_buffered.flush();
+            try pkgs_ini_file.seekTo(0);
+
+            // Quite inefficient, but format the file before each commit
+            try inifmtFiles(program.allocator, pkgs_ini_file, pkgs_ini_file);
             try pkgs_ini_file.sync();
 
             const msg = try std.fmt.allocPrint(program.allocator, "{s}: Add {s}", .{
