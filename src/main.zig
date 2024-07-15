@@ -429,6 +429,7 @@ fn pkgsUpdateCommand(program: *Program) !void {
     var packages_to_update = std.StringArrayHashMap(void).init(program.arena);
     var options = PackagesAddOptions{
         .commit = false,
+        .commit_prefix = "Update",
         .pkgs_ini_path = "./pkgs.ini",
         .urls = undefined,
     };
@@ -487,6 +488,7 @@ fn pkgsAddCommand(program: *Program) !void {
     var urls = std.StringArrayHashMap(void).init(program.arena);
     var options = PackagesAddOptions{
         .commit = false,
+        .commit_prefix = "Add",
         .pkgs_ini_path = "./pkgs.ini",
         .urls = undefined,
     };
@@ -509,6 +511,7 @@ fn pkgsAddCommand(program: *Program) !void {
 const PackagesAddOptions = struct {
     pkgs_ini_path: []const u8,
     commit: bool,
+    commit_prefix: []const u8,
     urls: []const []const u8,
 };
 
@@ -534,15 +537,20 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     defer packages.deinit();
 
     for (options.urls) |url| {
-        const package_name, const package = try program.makePkgFromUrl(url);
+        const package_name, const package = program.makePkgFromUrl(url) catch |err| {
+            std.log.err("{s} {s}", .{ @errorName(err), url });
+            continue;
+        };
+
         try packages.packages.put(packages.arena.allocator(), package_name, package);
 
         if (options.commit) {
             try packages.writeToFileOverride(pkgs_ini_file);
             try pkgs_ini_file.sync();
 
-            const msg = try std.fmt.allocPrint(program.arena, "{s}: Add {s}", .{
+            const msg = try std.fmt.allocPrint(program.arena, "{s}: {s} {s}", .{
                 package_name,
+                options.commit_prefix,
                 package.info.version,
             });
 
