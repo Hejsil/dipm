@@ -508,7 +508,13 @@ fn findDownloadUrl(options: struct {
     try trim_list.append(@tagName(options.os));
 
     switch (options.arch) {
-        .x86_64 => try trim_list.append("amd64"),
+        .x86_64 => {
+            try trim_list.append("amd64");
+            try trim_list.append("64bit");
+        },
+        .x86 => {
+            try trim_list.append("32bit");
+        },
         else => {},
     }
 
@@ -601,6 +607,48 @@ test findDownloadUrl {
             "/fzf-0.54.0-windows_armv6.zip",
             "/fzf-0.54.0-windows_armv7.zip",
             "/fzf_0.54.0_checksums.txt",
+        },
+    }));
+    try std.testing.expectEqualStrings("/gophish-v0.12.1-linux-64bit.zip", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings_to_trim = &.{
+            "gophish",
+            "v0.12.1",
+        },
+        .urls = &.{
+            "/gophish-v0.12.1-linux-32bit.zip",
+            "/gophish-v0.12.1-linux-64bit.zip",
+            "/gophish-v0.12.1-osx-64bit.zip",
+            "/gophish-v0.12.1-windows-64bit.zip",
+        },
+    }));
+    try std.testing.expectEqualStrings("/gophish-v0.12.1-windows-64bit.zip", try findDownloadUrl(.{
+        .os = .windows,
+        .arch = .x86_64,
+        .extra_strings_to_trim = &.{
+            "gophish",
+            "v0.12.1",
+        },
+        .urls = &.{
+            "/gophish-v0.12.1-linux-32bit.zip",
+            "/gophish-v0.12.1-linux-64bit.zip",
+            "/gophish-v0.12.1-osx-64bit.zip",
+            "/gophish-v0.12.1-windows-64bit.zip",
+        },
+    }));
+    try std.testing.expectEqualStrings("/gophish-v0.12.1-linux-32bit.zip", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86,
+        .extra_strings_to_trim = &.{
+            "gophish",
+            "v0.12.1",
+        },
+        .urls = &.{
+            "/gophish-v0.12.1-linux-32bit.zip",
+            "/gophish-v0.12.1-linux-64bit.zip",
+            "/gophish-v0.12.1-osx-64bit.zip",
+            "/gophish-v0.12.1-windows-64bit.zip",
         },
     }));
     try std.testing.expectError(error.DownloadUrlNotFound, findDownloadUrl(.{
