@@ -550,7 +550,14 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
             continue;
         };
 
-        try packages.packages.put(packages.arena.allocator(), name, package);
+        const entry = try packages.packages.getOrPut(packages.arena.allocator(), name);
+        if (entry.found_existing) {
+            // TODO: Update the install_bin/lib/share somehow
+            entry.value_ptr.*.linux_x86_64.url = package.linux_x86_64.url;
+            entry.value_ptr.*.linux_x86_64.hash = package.linux_x86_64.hash;
+        } else {
+            entry.value_ptr.* = package;
+        }
 
         if (options.commit) {
             try packages.writeToFileOverride(pkgs_ini_file);
