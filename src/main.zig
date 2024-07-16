@@ -679,67 +679,26 @@ fn pkgsCheckCommand(program: *Program) !void {
             std.log.err("{s} not found", .{package_name});
             continue;
         };
-        if (package.update.github.len != 0) {
-            program.checkGithubPackageVersion(
+
+        const version = package.newestUpstreamVersion(.{
+            .allocator = program.arena,
+            .tmp_allocator = program.gpa,
+            .http_client = program.http_client,
+        }) catch |err| {
+            std.log.err("{s} failed to check version: {}", .{ package_name, err });
+            continue;
+        };
+
+        if (!std.mem.eql(u8, package.info.version, version)) {
+            try writer.print("{s} {s} -> {s}", .{
                 package_name,
                 package.info.version,
-                package.update.github,
-                writer,
-            ) catch |err| {
-                std.log.err("{s} failed to check version: {}", .{ package_name, err });
-                continue;
-            };
+                version,
+            });
             try stdout_buffered.flush();
         }
     }
     try stdout_buffered.flush();
-}
-
-fn checkGithubPackageVersion(
-    program: *Program,
-    name: []const u8,
-    version: []const u8,
-    repo: []const u8,
-    writer: anytype,
-) !void {
-    var atom_data = std.ArrayList(u8).init(program.arena);
-    const atom_url = try std.fmt.allocPrint(
-        program.arena,
-        "https://github.com/{s}/releases.atom",
-        .{repo},
-    );
-
-    const release_download_result = try download.download(
-        program.http_client,
-        atom_url,
-        null,
-        atom_data.writer(),
-    );
-    if (release_download_result.status != .ok)
-        return error.DownloadFailed;
-
-    const end_id = "</id>";
-    var pos: usize = 0;
-    while (std.mem.indexOfPos(u8, atom_data.items, pos, end_id)) |end| : (pos = end + end_id.len) {
-        var start = end;
-        while (0 < start) : (start -= 1) switch (atom_data.items[start - 1]) {
-            '0'...'9', '.' => {},
-            else => break,
-        };
-
-        const new_version = atom_data.items[start..end];
-        if (std.mem.count(u8, new_version, ".") == 0)
-            continue;
-        if (std.mem.startsWith(u8, new_version, "."))
-            continue;
-        if (std.mem.endsWith(u8, new_version, "."))
-            continue;
-        if (!std.mem.eql(u8, version, new_version))
-            try writer.print("{s} {s} -> {s}\n", .{ name, version, new_version });
-        return;
-    }
-
-    return error.NoVersionFound;
 }
 
 const pkgs_inifmt_usage =

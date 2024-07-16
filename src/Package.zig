@@ -309,7 +309,7 @@ pub fn fromGithub(options: struct {
     };
 }
 
-fn expectFromGithub(options: struct {
+fn testFromGithub(options: struct {
     /// Name of the package. `null` means it should be inferred
     name: ?[]const u8 = null,
     user: []const u8,
@@ -436,7 +436,7 @@ fn expectFromGithub(options: struct {
 }
 
 test fromGithub {
-    try expectFromGithub(.{
+    try testFromGithub(.{
         .user = "junegunn",
         .repo = "fzf",
         .tag_name = "v0.54.0",
@@ -580,6 +580,106 @@ test findDownloadUrl {
         .extra_strings_to_trim = &.{},
         .urls = &.{},
     }));
+}
+
+pub fn newestUpstreamVersion(package: Package, options: struct {
+    /// Allocator used for the result
+    allocator: std.mem.Allocator,
+
+    /// Allocator used for internal allocations. None of the allocations made with this
+    /// allocator will be returned.
+    tmp_allocator: std.mem.Allocator,
+
+    http_client: *std.http.Client,
+}) ![]const u8 {
+    if (package.update.github.len != 0)
+        return newestUpstreamVersionGithub(.{
+            .allocator = options.allocator,
+            .tmp_allocator = options.tmp_allocator,
+            .http_client = options.http_client,
+            .repo = package.update.github,
+        });
+
+    return error.NoVersionFound;
+}
+
+fn newestUpstreamVersionGithub(options: struct {
+    /// Allocator used for the result
+    allocator: std.mem.Allocator,
+
+    /// Allocator used for internal allocations. None of the allocations made with this
+    /// allocator will be returned.
+    tmp_allocator: std.mem.Allocator,
+
+    http_client: *std.http.Client,
+
+    repo: []const u8,
+}) ![]const u8 {
+    var arena_state = std.heap.ArenaAllocator.init(options.tmp_allocator);
+    const arena = arena_state.allocator();
+    defer arena_state.deinit();
+
+    const releases_atom_uri = try std.fmt.allocPrint(
+        arena,
+        "https://github.com/{s}/releases.atom",
+        .{options.repo},
+    );
+
+    var result = std.ArrayList(u8).init(arena);
+    const release_download_result = try download.download(
+        options.http_client,
+        releases_atom_uri,
+        null,
+        result.writer(),
+    );
+    if (release_download_result.status != .ok)
+        return error.DownloadFailed;
+
+    const version = try newestUpstreamVersionFromGithubRelease(
+        result.items,
+    );
+    return options.allocator.dupe(u8, version);
+}
+
+fn newestUpstreamVersionFromGithubRelease(string: []const u8) ![]const u8 {
+    const end_id = "</id>";
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, string, pos, end_id)) |end| : (pos = end + end_id.len) {
+        var start = end;
+        while (0 < start) : (start -= 1) switch (string[start - 1]) {
+            '0'...'9', '.' => {},
+            else => break,
+        };
+
+        const version = string[start..end];
+        if (std.mem.count(u8, version, ".") == 0)
+            continue;
+        if (std.mem.startsWith(u8, version, "."))
+            continue;
+        if (std.mem.endsWith(u8, version, "."))
+            continue;
+
+        return version;
+    }
+
+    return error.NoVersionFound;
+}
+
+test newestUpstreamVersionFromGithubRelease {
+    try std.testing.expectEqualStrings("0.54.0", try newestUpstreamVersionFromGithubRelease(
+        \\  <id>tag:github.com,2008:https://github.com/junegunn/fzf/releases</id>
+        \\    <id>tag:github.com,2008:Repository/13807606/v0.54.0</id>
+        \\    <id>tag:github.com,2008:Repository/13807606/0.53.0</id>
+        \\    <id>tag:github.com,2008:Repository/13807606/0.52.1</id>
+        \\    <id>tag:github.com,2008:Repository/13807606/0.52.0</id>
+        \\    <id>tag:github.com,2008:Repository/13807606/0.51.0</id>
+        \\    <id>tag:github.com,2008:Repository/13807606/0.50.0</id>
+        \\    <id>tag:github.com,2008:Repository/13807606/0.49.0</id>
+        \\    <id>tag:github.com,2008:Repository/13807606/0.48.1</id>
+        \\    <id>tag:github.com,2008:Repository/13807606/0.48.0</id>
+        \\    <id>tag:github.com,2008:Repository/13807606/0.47.0</id>
+        \\
+    ));
 }
 
 test {
