@@ -553,6 +553,7 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
         const entry = try packages.packages.getOrPut(packages.arena.allocator(), name);
         if (entry.found_existing) {
             // TODO: Update the install_bin/lib/share somehow
+            entry.value_ptr.*.info.version = package.info.version;
             entry.value_ptr.*.linux_x86_64.url = package.linux_x86_64.url;
             entry.value_ptr.*.linux_x86_64.hash = package.linux_x86_64.hash;
         } else {
