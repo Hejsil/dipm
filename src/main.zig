@@ -166,7 +166,7 @@ const install_usage =
 ;
 
 fn installCommand(program: *Program) !void {
-    var packages_to_install = std.StringArrayHashMap(void).init(program.gpa);
+    var packages_to_install = std.StringArrayHashMap(void).init(program.arena);
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
