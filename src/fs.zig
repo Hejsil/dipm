@@ -2,7 +2,7 @@ pub fn zigCacheTmpDirPath(allocator: std.mem.Allocator) ![]u8 {
     const tmp_dir_path = try zigCacheTmpPath(allocator);
     defer allocator.free(tmp_dir_path);
 
-    const name = tmpDirName();
+    const name = tmpName();
     return std.fs.path.join(allocator, &.{ tmp_dir_path, &name });
 }
 
@@ -22,7 +22,7 @@ pub fn zigCacheTmpPath(allocator: std.mem.Allocator) ![]u8 {
 const tmp_dir_bytes_count = 12;
 const tmp_dir_name_len = std.fs.base64_encoder.calcSize(tmp_dir_bytes_count);
 
-pub fn tmpDirName() [tmp_dir_name_len]u8 {
+pub fn tmpName() [tmp_dir_name_len]u8 {
     var random_bytes: [tmp_dir_bytes_count]u8 = undefined;
     std.crypto.random.bytes(&random_bytes);
 
@@ -32,7 +32,7 @@ pub fn tmpDirName() [tmp_dir_name_len]u8 {
 }
 
 pub fn tmpDir(dir: std.fs.Dir, open_dir_options: std.fs.Dir.OpenOptions) !std.fs.Dir {
-    const name = tmpDirName();
+    const name = tmpName();
     return dir.makeOpenPath(&name, open_dir_options);
 }
 

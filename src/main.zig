@@ -545,19 +545,27 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     defer packages.deinit();
 
     for (options.urls) |url| {
-        const name, const package = program.makePkgFromUrl(url) catch |err| {
+        const package = Package.fromUrl(.{
+            .allocator = packages.arena.allocator(),
+            .tmp_allocator = program.gpa,
+            .http_client = program.http_client,
+            .url = url.url,
+            .name = url.name,
+            .os = builtin.os.tag,
+            .arch = builtin.target.cpu.arch,
+        }) catch |err| {
             std.log.err("{s} {s}", .{ @errorName(err), url.url });
             continue;
         };
 
-        const entry = try packages.packages.getOrPut(packages.arena.allocator(), name);
+        const entry = try packages.packages.getOrPut(packages.arena.allocator(), package.name);
         if (entry.found_existing) {
             // TODO: Update the install_bin/lib/share somehow
-            entry.value_ptr.*.info.version = package.info.version;
-            entry.value_ptr.*.linux_x86_64.url = package.linux_x86_64.url;
-            entry.value_ptr.*.linux_x86_64.hash = package.linux_x86_64.hash;
+            entry.value_ptr.*.info.version = package.package.info.version;
+            entry.value_ptr.*.linux_x86_64.url = package.package.linux_x86_64.url;
+            entry.value_ptr.*.linux_x86_64.hash = package.package.linux_x86_64.hash;
         } else {
-            entry.value_ptr.* = package;
+            entry.value_ptr.* = package.package;
         }
 
         if (options.commit) {
@@ -565,9 +573,9 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
             try pkgs_ini_file.sync();
 
             const msg = try std.fmt.allocPrint(program.arena, "{s}: {s} {s}", .{
-                name,
+                package.name,
                 options.commit_prefix,
-                package.info.version,
+                package.package.info.version,
             });
 
             var child = std.process.Child.init(
@@ -609,233 +617,22 @@ fn pkgsMakeCommand(program: *Program) !void {
     const writer = stdout_buffered.writer();
 
     for (urls.keys()) |url| {
-        const name, const package = try program.makePkgFromUrl(.{
+        const package = Package.fromUrl(.{
+            .allocator = program.arena,
+            .tmp_allocator = program.gpa,
+            .http_client = program.http_client,
             .url = url,
-            .name = null,
-        });
-        try package.write(name, writer);
+            .os = builtin.os.tag,
+            .arch = builtin.target.cpu.arch,
+        }) catch |err| {
+            std.log.err("{s} {s}", .{ @errorName(err), url });
+            continue;
+        };
+
+        try package.package.write(package.name, writer);
     }
 
     try stdout_buffered.flush();
-}
-
-const NameAndVersion = struct {
-    name: []const u8,
-    version: []const u8,
-};
-
-fn makePkgFromUrl(
-    program: *Program,
-    url: UrlAndName,
-) !struct { []const u8, Package } {
-    const github_url = "https://github.com/";
-    if (std.mem.startsWith(u8, url.url, github_url)) {
-        const repo = url.url[github_url.len..];
-        var repo_split = std.mem.splitScalar(u8, repo, '/');
-
-        const repo_user = repo_split.first();
-        const repo_name = repo_split.next() orelse "";
-        return program.makePkgFromGithubRepo(.{
-            .name = url.name orelse repo_name,
-            .user = repo_user,
-            .repo = repo_name,
-        });
-    } else {
-        return error.InvalidUrl;
-    }
-}
-
-const GithubRepo = struct {
-    name: []const u8,
-    user: []const u8,
-    repo: []const u8,
-};
-
-fn makePkgFromGithubRepo(
-    program: *Program,
-    repo: GithubRepo,
-) !struct { []const u8, Package } {
-    var latest_release_json = std.ArrayList(u8).init(program.arena);
-    const latest_release_url = try std.fmt.allocPrint(
-        program.arena,
-        "https://api.github.com/repos/{s}/{s}/releases/latest",
-        .{ repo.user, repo.repo },
-    );
-
-    const release_download_result = try download.download(
-        program.http_client,
-        latest_release_url,
-        null,
-        latest_release_json.writer(),
-    );
-    if (release_download_result.status != .ok)
-        return error.DownloadFailed;
-
-    const latest_release_value = try std.json.parseFromSlice(
-        LatestRelease,
-        program.gpa,
-        latest_release_json.items,
-        .{ .ignore_unknown_fields = true },
-    );
-    const latest_release = latest_release_value.value;
-    defer latest_release_value.deinit();
-
-    const os = builtin.os.tag;
-    const arch = builtin.cpu.arch;
-    const download_url = try findDownloadUrl(
-        program.gpa,
-        latest_release,
-        repo,
-        os,
-        arch,
-    );
-
-    var global_tmp_dir = try std.fs.cwd().makeOpenPath("/tmp/dipm/", .{});
-    defer global_tmp_dir.close();
-
-    var tmp_dir = try fs.tmpDir(global_tmp_dir, .{});
-    defer tmp_dir.close();
-
-    const downloaded_file_name = std.fs.path.basename(download_url);
-    const downloaded_file = try tmp_dir.createFile(downloaded_file_name, .{ .read = true });
-    defer downloaded_file.close();
-
-    const package_download_result = try download.download(
-        program.http_client,
-        download_url,
-        null,
-        downloaded_file.writer(),
-    );
-    if (package_download_result.status != .ok)
-        return error.DownloadFailed;
-
-    try downloaded_file.seekTo(0);
-    try fs.extract(.{
-        .allocator = program.gpa,
-        .input_name = downloaded_file_name,
-        .input_file = downloaded_file,
-        .output_dir = tmp_dir,
-    });
-
-    // TODO: Can this be ported to pure zig easily?
-    const static_files_result = try std.process.Child.run(.{
-        .allocator = program.arena,
-        .argv = &.{
-            "sh", "-c",
-            \\find -type f -exec file '{}' '+' |
-            \\    grep -E 'statically linked|static-pie linked' |
-            \\    cut -d: -f1 |
-            \\    sed 's#^./##' |
-            \\    sort
-            \\
-        },
-        .cwd_dir = tmp_dir,
-    });
-
-    if (static_files_result.stdout.len < 1)
-        return error.NoStaticallyLinkedFiles;
-
-    var bins = std.ArrayList([]const u8).init(program.arena);
-    var static_files_lines = std.mem.tokenizeScalar(u8, static_files_result.stdout, '\n');
-    while (static_files_lines.next()) |static_bin|
-        try bins.append(static_bin);
-
-    const hash = std.fmt.bytesToHex(package_download_result.hash, .lower);
-    return .{
-        repo.name,
-        .{
-            .info = .{ .version = latest_release.version() },
-            .update = .{
-                .github = try std.fmt.allocPrint(program.arena, "{s}/{s}", .{
-                    repo.user,
-                    repo.repo,
-                }),
-            },
-            .linux_x86_64 = .{
-                .bin = bins.items,
-                .lib = &.{},
-                .share = &.{},
-                .url = download_url,
-                .hash = try program.arena.dupe(u8, &hash),
-            },
-        },
-    };
-}
-
-const LatestRelease = struct {
-    tag_name: []const u8,
-    assets: []const struct {
-        browser_download_url: []const u8,
-    },
-
-    fn version(release: LatestRelease) []const u8 {
-        return std.mem.trimLeft(u8, release.tag_name, "v");
-    }
-};
-
-fn findDownloadUrl(
-    allocator: std.mem.Allocator,
-    release: LatestRelease,
-    repo: GithubRepo,
-    os: std.Target.Os.Tag,
-    arch: std.Target.Cpu.Arch,
-) ![]const u8 {
-    // To find the download url, a trim list is constructed. It contains only things that are
-    // expected to be in file name. Each url is the continuesly trimmed until either:
-    // * `/` is reach. This means it is the download url
-    // * Nothing was trimmed. The file name contains something unwanted
-
-    var trim_list = std.ArrayList([]const u8).init(allocator);
-    defer trim_list.deinit();
-
-    try trim_list.append("_");
-    try trim_list.append("-");
-    try trim_list.append("unknown");
-    try trim_list.append("musl");
-    try trim_list.append("static");
-    try trim_list.append(release.tag_name);
-    try trim_list.append(release.version());
-    try trim_list.append(repo.name);
-    try trim_list.append(repo.user);
-    try trim_list.append(repo.repo);
-    try trim_list.append(@tagName(arch));
-    try trim_list.append(@tagName(os));
-
-    switch (arch) {
-        .x86_64 => try trim_list.append("amd64"),
-        else => {},
-    }
-
-    for (fs.FileType.extensions) |ext| {
-        if (ext.ext.len == 0)
-            continue;
-        try trim_list.append(ext.ext);
-    }
-
-    std.sort.insertion([]const u8, trim_list.items, {}, struct {
-        fn lenGt(_: void, a: []const u8, b: []const u8) bool {
-            return a.len > b.len;
-        }
-    }.lenGt);
-
-    outer: for (release.assets) |asset| {
-        var download_url = asset.browser_download_url;
-        inner: while (!std.mem.endsWith(u8, download_url, "/")) {
-            for (trim_list.items) |trim| {
-                std.debug.assert(trim.len != 0);
-                if (std.ascii.endsWithIgnoreCase(download_url, trim)) {
-                    download_url.len -= trim.len;
-                    continue :inner;
-                }
-            }
-
-            continue :outer;
-        }
-
-        return asset.browser_download_url;
-    }
-
-    return error.DownloadUrlNotFound;
 }
 
 const pkgs_check_usage =
@@ -1003,9 +800,9 @@ fn inifmtData(allocator: std.mem.Allocator, data: []const u8, writer: anytype) !
 test {
     _ = ArgParser;
     _ = Diagnostics;
+    _ = Package;
     _ = PackageManager;
     _ = Packages;
-    _ = Package;
     _ = Progress;
 
     _ = download;
