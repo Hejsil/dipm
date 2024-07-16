@@ -446,15 +446,7 @@ fn pkgsUpdateCommand(program: *Program) !void {
     }
 
     const cwd = std.fs.cwd();
-    const pkgs_ini_file = try cwd.openFile(options.pkgs_ini_path, .{});
-    defer pkgs_ini_file.close();
-
-    const pkgs_ini_data = try pkgs_ini_file.readToEndAlloc(
-        program.arena,
-        std.math.maxInt(usize),
-    );
-
-    var packages = try Packages.parse(program.gpa, pkgs_ini_data);
+    var packages = try Packages.parseFromPath(program.gpa, cwd, options.pkgs_ini_path);
     defer packages.deinit();
 
     var urls = std.ArrayList(UrlAndName).init(program.arena);
@@ -536,12 +528,7 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     });
     defer pkgs_ini_file.close();
 
-    const pkgs_ini_data = try pkgs_ini_file.readToEndAlloc(
-        program.arena,
-        std.math.maxInt(usize),
-    );
-
-    var packages = try Packages.parse(program.gpa, pkgs_ini_data);
+    var packages = try Packages.parseFile(program.gpa, pkgs_ini_file);
     defer packages.deinit();
 
     for (options.urls) |url| {
@@ -658,13 +645,7 @@ fn pkgsCheckCommand(program: *Program) !void {
     }
 
     const cwd = std.fs.cwd();
-    const pkgs_ini_data = cwd.readFileAlloc(
-        program.arena,
-        pkgs_ini_path,
-        std.math.maxInt(usize),
-    ) catch "";
-
-    var packages = try Packages.parse(program.gpa, pkgs_ini_data);
+    var packages = try Packages.parseFromPath(program.gpa, cwd, pkgs_ini_path);
     defer packages.deinit();
 
     var packages_to_check = packages_to_check_map.keys();

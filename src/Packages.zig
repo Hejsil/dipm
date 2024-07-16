@@ -85,6 +85,24 @@ pub fn deinit(packages: *Packages) void {
     packages.* = undefined;
 }
 
+pub fn parseFromPath(
+    allocator: std.mem.Allocator,
+    dir: std.fs.Dir,
+    sub_path: []const u8,
+) !Packages {
+    const file = try dir.openFile(sub_path, .{});
+    defer file.close();
+
+    return parseFile(allocator, file);
+}
+
+pub fn parseFile(allocator: std.mem.Allocator, file: std.fs.File) !Packages {
+    const string = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+    defer allocator.free(string);
+
+    return parse(allocator, string);
+}
+
 pub fn parse(allocator: std.mem.Allocator, string: []const u8) !Packages {
     var res = Packages.init(allocator);
     errdefer res.deinit();
