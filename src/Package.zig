@@ -203,6 +203,18 @@ pub fn fromGithub(options: struct {
     const name = try options.allocator.dupe(u8, options.name orelse options.repo);
     errdefer options.allocator.free(name);
 
+    const version = blk: {
+        var version = latest_release.tag_name;
+        if (std.mem.startsWith(u8, version, name))
+            version = version[name.len..];
+        if (std.mem.startsWith(u8, version, "-"))
+            version = version["-".len..];
+        if (std.mem.startsWith(u8, version, "v"))
+            version = version["v".len..];
+        break :blk try options.allocator.dupe(u8, version);
+    };
+    errdefer options.allocator.free(version);
+
     const download_url = try findDownloadUrl(.{
         .os = options.os,
         .arch = options.arch,
@@ -210,7 +222,7 @@ pub fn fromGithub(options: struct {
             options.user,
             options.repo,
             name,
-            latest_release.version(),
+            version,
             latest_release.tag_name,
         },
         // This is only save because `assets` only have the field `browser_download_url`
@@ -289,9 +301,6 @@ pub fn fromGithub(options: struct {
         options.repo,
     });
     errdefer options.allocator.free(github);
-
-    const version = try options.allocator.dupe(u8, latest_release.version());
-    errdefer options.allocator.free(version);
 
     return .{
         .name = name,
@@ -451,6 +460,26 @@ test fromGithub {
         \\
         \\[fzf.linux_x86_64]
         \\install_bin = junegunn-fzf-v0.54.0
+        \\url = <url>
+        \\hash = 86e9fa65b9f0f0f6949ac09c6692d78db54443bf9a69cc8ba366c5ab281b26cf
+        \\
+        ,
+    });
+    try testFromGithub(.{
+        .user = "googlefonts",
+        .repo = "fontc",
+        .tag_name = "fontc-v0.0.1",
+        .os = .linux,
+        .arch = .x86_64,
+        .expect =
+        \\[fontc.info]
+        \\version = 0.0.1
+        \\
+        \\[fontc.update]
+        \\github = googlefonts/fontc
+        \\
+        \\[fontc.linux_x86_64]
+        \\install_bin = googlefonts-fontc-fontc-v0.0.1
         \\url = <url>
         \\hash = 86e9fa65b9f0f0f6949ac09c6692d78db54443bf9a69cc8ba366c5ab281b26cf
         \\
