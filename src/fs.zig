@@ -106,15 +106,19 @@ pub fn extract(options: ExtractOptions) !void {
         .tar_bz2 => {
             // TODO: For now we bail out to an external program for tar.bz2 files.
             //       This makes dipm not self contained, which kinda defeats the points
-            const out_path = try options.output_dir.realpathAlloc(allocator, ".");
-            defer allocator.free(out_path);
+            var out_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const out_path = try options.output_dir.realpath(".", &out_path_buf);
 
-            const result = try std.process.Child.run(.{
-                .allocator = allocator,
-                .argv = &.{ "tar", "-xvf", options.input_name, "-C", out_path },
-            });
-            allocator.free(result.stdout);
-            allocator.free(result.stderr);
+            var child = std.process.Child.init(
+                &.{ "tar", "-xvf", options.input_name, "-C", out_path },
+                allocator,
+            );
+            child.stdin_behavior = .Ignore;
+            child.stdout_behavior = .Pipe;
+            child.stderr_behavior = .Pipe;
+
+            try child.spawn();
+            _ = try child.wait();
         },
         .tar_gz => {
             var decomp = std.compress.gzip.decompressor(node_reader);
