@@ -156,7 +156,7 @@ pub const RenderOptions = struct {
 };
 
 pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usize {
-    var counting_writer = std.io.countingWriter(writer);
+    try writer.writeAll(options.escapes.bold);
 
     var nodes_printed: usize = 0;
     for (progress.nodes) |*node_ptr| {
@@ -166,14 +166,12 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
         const node = node_ptr.get();
         const node_name = node.name orelse continue;
 
-        counting_writer.bytes_written = 0;
         nodes_printed += 1;
         const node_name_len = @min(node_name.len, options.width, progress.maximum_node_name_len);
 
         const bar_start = " [";
         const bar_end = "]";
 
-        try writer.writeAll(options.escapes.bold);
         if (node_name.len == node_name_len) {
             try writer.writeAll(node_name);
         } else switch (node_name_len) {
@@ -209,10 +207,10 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
             try writer.writeAll(bar_end);
         }
 
-        try writer.writeAll(options.escapes.reset);
         try writer.writeAll("\n");
     }
 
+    try writer.writeAll(options.escapes.reset);
     return nodes_printed;
 }
 
