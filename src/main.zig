@@ -518,14 +518,11 @@ const UrlAndName = struct {
 fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     const cwd = std.fs.cwd();
     const pkgs_ini_base_name = std.fs.path.basename(options.pkgs_ini_path);
-    const pkgs_ini_dir_path = std.fs.path.dirname(options.pkgs_ini_path) orelse ".";
 
-    var pkgs_ini_dir = try cwd.openDir(pkgs_ini_dir_path, .{});
-    defer pkgs_ini_dir.close();
-
-    const pkgs_ini_file = try pkgs_ini_dir.openFile(pkgs_ini_base_name, .{
-        .mode = .read_write,
+    var pkgs_ini_dir, const pkgs_ini_file = try fs.openDirAndFile(cwd, options.pkgs_ini_path, .{
+        .file = .{ .mode = .read_write },
     });
+    defer pkgs_ini_dir.close();
     defer pkgs_ini_file.close();
 
     var packages = try Packages.parseFile(program.gpa, pkgs_ini_file);

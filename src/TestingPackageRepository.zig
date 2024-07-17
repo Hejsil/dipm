@@ -40,9 +40,10 @@ pub fn init(options: Options) !TestingPackageRepository {
     var pkgs_dir = try cwd.makeOpenPath(pkgs_dir_path, .{});
     defer pkgs_dir.close();
 
-    if (std.fs.path.dirname(pkgs_ini_path)) |dir_name|
-        try cwd.makePath(dir_name);
-    const pkgs_ini_file = try cwd.createFile(pkgs_ini_path, .{ .exclusive = true });
+    var pkgs_ini_dir, const pkgs_ini_file = fs.createDirAndFile(cwd, pkgs_ini_path, .{
+        .file = .{ .exclusive = true },
+    });
+    defer pkgs_ini_dir.close();
     defer pkgs_ini_file.close();
 
     var buffered_pkg_ini_file = std.io.bufferedWriter(pkgs_ini_file.writer());
