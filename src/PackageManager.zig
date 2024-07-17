@@ -105,7 +105,7 @@ pub fn deinit(pm: *PackageManager) void {
     pm.arena.deinit();
 }
 
-pub fn isInstalled(pm: PackageManager, package_name: []const u8) bool {
+pub fn isInstalled(pm: *const PackageManager, package_name: []const u8) bool {
     return pm.installed_file.data.packages.contains(package_name);
 }
 
@@ -128,12 +128,28 @@ pub fn installMany(pm: *PackageManager, packages: Packages, package_names: []con
         }
     }
 
-    for (packages_to_install.values()) |package| {
-        pm.installOneUnchecked(package) catch |err| switch (err) {
-            error.DiagnosticsInvalidHash => continue,
-            error.DiagnosticsDownloadFailed => continue,
+    var downloads = try DownloadAndExtractJobs.init(.{
+        .allocator = pm.gpa,
+        .dir = pm.own_tmp_dir,
+        .packages = packages_to_install.values(),
+    });
+    defer downloads.deinit();
+
+    // Step 1: Download the packages that needs to be installed. Can be done multithreaded.
+    try downloads.run(pm);
+
+    // Step 2: Install the new version.
+    //         If this fails, packages can be left in a partially updated state
+    for (downloads.jobs.items) |downloaded| {
+        downloaded.result catch |err| switch (err) {
+            DiagnosticError.DiagnosticsInvalidHash => continue,
+            DiagnosticError.DiagnosticsDownloadFailed => continue,
             else => |e| return e,
         };
+
+        const package = downloaded.package;
+        const working_dir = downloaded.working_dir;
+        try pm.installExtractedPackage(working_dir, package);
 
         try pm.diagnostics.installSucceeded(.{
             .name = package.name,
@@ -145,7 +161,7 @@ pub fn installMany(pm: *PackageManager, packages: Packages, package_names: []con
 }
 
 fn packagesToInstall(
-    pm: *PackageManager,
+    pm: *const PackageManager,
     packages: Packages,
     package_names: []const []const u8,
 ) !std.StringArrayHashMap(Package.Specific) {
@@ -173,20 +189,16 @@ fn packagesToInstall(
         };
     }
 
-    // TODO: Check package.install.hash conflicts
-
     return packages_to_install;
 }
 
-fn installOneUnchecked(pm: *PackageManager, package: Package.Specific) !void {
-    var working_dir = try fs.tmpDir(pm.own_tmp_dir, .{});
-    defer working_dir.close();
+const DownloadAndExtractReturnType = @typeInfo(@TypeOf(downloadAndExtractPackage)).Fn.return_type.?;
 
-    try pm.downloadAndExtractPackage(working_dir, package);
-    try pm.installExtractedPackage(working_dir, package);
-}
-
-fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Package.Specific) !void {
+fn downloadAndExtractPackage(
+    pm: *const PackageManager,
+    dir: std.fs.Dir,
+    package: Package.Specific,
+) !void {
     const progress = pm.progress.start(package.name, 1);
     defer pm.progress.end(progress);
 
@@ -195,8 +207,8 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
     defer downloaded_file.close();
 
     // TODO: Get rid of this once we have support for bz2 compression
-    const downloaded_path = try dir.realpathAlloc(pm.gpa, downloaded_file_name);
-    defer pm.gpa.free(downloaded_path);
+    var download_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const downloaded_path = try dir.realpath(downloaded_file_name, &download_path_buf);
 
     const download_result = download.download(
         pm.http_client,
@@ -210,7 +222,7 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
             .url = package.install.url,
             .err = err,
         });
-        return error.DiagnosticsDownloadFailed;
+        return DiagnosticError.DiagnosticsDownloadFailed;
     };
     if (download_result.status != .ok) {
         try pm.diagnostics.downloadFailedWithStatus(.{
@@ -219,7 +231,7 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
             .url = package.install.url,
             .status = download_result.status,
         });
-        return error.DiagnosticsDownloadFailed;
+        return DiagnosticError.DiagnosticsDownloadFailed;
     }
 
     const actual_hash = std.fmt.bytesToHex(download_result.hash, .lower);
@@ -230,7 +242,7 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
             .expected_hash = package.install.hash,
             .actual_hash = &actual_hash,
         });
-        return error.DiagnosticsInvalidHash;
+        return DiagnosticError.DiagnosticsInvalidHash;
     }
 
     try downloaded_file.seekTo(0);
@@ -243,7 +255,11 @@ fn downloadAndExtractPackage(pm: *PackageManager, dir: std.fs.Dir, package: Pack
     });
 }
 
-fn installExtractedPackage(pm: *PackageManager, from_dir: std.fs.Dir, package: Package.Specific) !void {
+fn installExtractedPackage(
+    pm: *PackageManager,
+    from_dir: std.fs.Dir,
+    package: Package.Specific,
+) !void {
     const installed_arena = pm.installed_file.data.arena.allocator();
     var locations = std.ArrayList([]const u8).init(installed_arena);
     defer locations.deinit();
@@ -483,37 +499,25 @@ fn updatePackages(
             });
     }
 
-    // Step 1: Download the packages that needs updating. This is the most likly step to fail, so
-    //         doing this before uninstalling the already installed package is preferred.
-    var successfull_downloads = std.ArrayList(struct {
-        working_dir: std.fs.Dir,
-        package: Package.Specific,
-    }).init(pm.gpa);
-    defer {
-        for (successfull_downloads.items) |*item|
-            item.working_dir.close();
-        successfull_downloads.deinit();
-    }
+    var downloads = try DownloadAndExtractJobs.init(.{
+        .allocator = pm.gpa,
+        .dir = pm.own_tmp_dir,
+        .packages = packages_to_install.values(),
+    });
+    defer downloads.deinit();
 
-    try successfull_downloads.ensureTotalCapacity(packages_to_install.count());
-    for (packages_to_install.values()) |package| {
-        var working_dir = try fs.tmpDir(pm.own_tmp_dir, .{});
-        errdefer working_dir.close();
-
-        pm.downloadAndExtractPackage(working_dir, package) catch |err| switch (err) {
-            error.DiagnosticsInvalidHash => continue,
-            error.DiagnosticsDownloadFailed => continue,
-            else => |e| return e,
-        };
-        successfull_downloads.appendAssumeCapacity(.{
-            .working_dir = working_dir,
-            .package = package,
-        });
-    }
+    // Step 1: Download the packages that needs updating. Can be done multithreaded.
+    try downloads.run(pm);
 
     // Step 2: Uninstall the already installed packages.
     //         If this fails, packages can be left in a partially updated state
-    for (successfull_downloads.items) |downloaded| {
+    for (downloads.jobs.items) |downloaded| {
+        downloaded.result catch |err| switch (err) {
+            DiagnosticError.DiagnosticsInvalidHash => continue,
+            DiagnosticError.DiagnosticsDownloadFailed => continue,
+            else => |e| return e,
+        };
+
         const package = downloaded.package;
         const installed_package = packages_to_uninstall.get(package.name).?;
         try pm.uninstallOneUnchecked(package.name, installed_package);
@@ -521,7 +525,9 @@ fn updatePackages(
 
     // Step 3: Install the new version.
     //         If this fails, packages can be left in a partially updated state
-    for (successfull_downloads.items) |downloaded| {
+    for (downloads.jobs.items) |downloaded| {
+        downloaded.result catch continue;
+
         const package = downloaded.package;
         const working_dir = downloaded.working_dir;
         try pm.installExtractedPackage(working_dir, package);
@@ -536,6 +542,65 @@ fn updatePackages(
 
     try pm.installed_file.flush();
 }
+
+const DownloadAndExtractJobs = struct {
+    jobs: std.ArrayList(DownloadAndExtractJob),
+
+    fn init(args: struct {
+        allocator: std.mem.Allocator,
+        dir: std.fs.Dir,
+        packages: []const Package.Specific,
+    }) !DownloadAndExtractJobs {
+        var res = DownloadAndExtractJobs{
+            .jobs = std.ArrayList(DownloadAndExtractJob).init(args.allocator),
+        };
+        errdefer res.deinit();
+
+        try res.jobs.ensureTotalCapacity(args.packages.len);
+        for (args.packages) |package| {
+            var working_dir = try fs.tmpDir(args.dir, .{});
+            errdefer working_dir.close();
+
+            res.jobs.appendAssumeCapacity(.{
+                .working_dir = working_dir,
+                .package = package,
+                .result = {},
+            });
+        }
+
+        return res;
+    }
+
+    fn run(jobs: DownloadAndExtractJobs, pm: *PackageManager) !void {
+        var thread_pool: std.Thread.Pool = undefined;
+        try thread_pool.init(.{ .allocator = pm.gpa });
+        defer thread_pool.deinit();
+
+        for (jobs.jobs.items) |*job|
+            try thread_pool.spawn(DownloadAndExtractJob.run, .{ job, pm });
+    }
+
+    fn deinit(jobs: DownloadAndExtractJobs) void {
+        for (jobs.jobs.items) |*job|
+            job.working_dir.close();
+        jobs.jobs.deinit();
+    }
+};
+
+const DownloadAndExtractJob = struct {
+    package: Package.Specific,
+    working_dir: std.fs.Dir,
+    result: DownloadAndExtractReturnType,
+
+    fn run(job: *DownloadAndExtractJob, pm: *PackageManager) void {
+        job.result = pm.downloadAndExtractPackage(job.working_dir, job.package);
+    }
+};
+
+const DiagnosticError = error{
+    DiagnosticsDownloadFailed,
+    DiagnosticsInvalidHash,
+};
 
 pub fn IniFile(comptime T: type) type {
     return struct {
