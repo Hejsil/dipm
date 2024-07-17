@@ -81,6 +81,7 @@ pub fn download(options: DownloadOptions) !Packages {
 }
 
 pub fn deinit(packages: *Packages) void {
+    packages.packages.deinit(packages.arena.child_allocator);
     packages.arena.deinit();
     packages.* = undefined;
 }
@@ -112,6 +113,7 @@ pub fn parse(allocator: std.mem.Allocator, string: []const u8) !Packages {
 }
 
 pub fn parseInto(packages: *Packages, tmp_allocator: std.mem.Allocator, string: []const u8) !void {
+    const gpa = packages.arena.child_allocator;
     const arena = packages.arena.allocator();
 
     // TODO: This is quite an inefficient implementation. It first parsers a dynamic ini and then
@@ -168,7 +170,7 @@ pub fn parseInto(packages: *Packages, tmp_allocator: std.mem.Allocator, string: 
                 try linux_x86_64_install_share.append(arena, try arena.dupe(u8, property.value));
         }
 
-        try packages.packages.putNoClobber(arena, package_name, .{
+        try packages.packages.putNoClobber(gpa, package_name, .{
             .info = .{ .version = try arena.dupe(u8, info_version) },
             .update = .{ .github = try arena.dupe(u8, update_github) },
             .linux_x86_64 = .{
@@ -203,15 +205,19 @@ pub fn write(packages: Packages, writer: anytype) !void {
     }
 }
 
-fn expectCanonical(string: []const u8) !void {
-    var packages = try parse(std.testing.allocator, string);
-    defer packages.deinit();
-
+fn expectWrite(packages: *Packages, string: []const u8) !void {
     var rendered = std.ArrayList(u8).init(std.testing.allocator);
     defer rendered.deinit();
 
     try packages.write(rendered.writer());
     try std.testing.expectEqualStrings(string, rendered.items);
+}
+
+fn expectCanonical(string: []const u8) !void {
+    var packages = try parse(std.testing.allocator, string);
+    defer packages.deinit();
+
+    return expectWrite(&packages, string);
 }
 
 test "parse" {
@@ -243,6 +249,83 @@ test "parse" {
         \\install_share = test24
         \\url = test2
         \\hash = test2
+        \\
+    );
+}
+
+/// Update a package. If it doesn't exist it is added.
+pub fn update(packages: *Packages, package: Package.Named) !void {
+    const gpa = packages.arena.child_allocator;
+    const entry = try packages.packages.getOrPut(gpa, package.name);
+    if (entry.found_existing) {
+        // TODO: Update the install_bin/lib/share somehow
+        entry.value_ptr.*.info.version = package.package.info.version;
+        entry.value_ptr.*.linux_x86_64.url = package.package.linux_x86_64.url;
+        entry.value_ptr.*.linux_x86_64.hash = package.package.linux_x86_64.hash;
+    } else {
+        entry.value_ptr.* = package.package;
+    }
+}
+
+test update {
+    var packages = Packages.init(std.testing.allocator);
+    defer packages.deinit();
+
+    try expectWrite(&packages, "");
+
+    try packages.update(.{
+        .name = "test",
+        .package = .{
+            .info = .{ .version = "0.1.0" },
+            .update = .{ .github = "test/test" },
+            .linux_x86_64 = .{
+                .bin = &.{"test:test/test"},
+                .lib = &.{},
+                .share = &.{},
+                .hash = "test_hash1",
+                .url = "test_url1",
+            },
+        },
+    });
+    try expectWrite(&packages,
+        \\[test.info]
+        \\version = 0.1.0
+        \\
+        \\[test.update]
+        \\github = test/test
+        \\
+        \\[test.linux_x86_64]
+        \\install_bin = test:test/test
+        \\url = test_url1
+        \\hash = test_hash1
+        \\
+    );
+
+    try packages.update(.{
+        .name = "test",
+        .package = .{
+            .info = .{ .version = "0.2.0" },
+            .update = .{ .github = "test/test" },
+            .linux_x86_64 = .{
+                .bin = &.{"test:test/test"},
+                .lib = &.{},
+                .share = &.{},
+                .hash = "test_hash2",
+                .url = "test_url2",
+            },
+        },
+    });
+    try expectWrite(&packages,
+        \\[test.info]
+        \\version = 0.2.0
+        \\
+        \\[test.update]
+        \\github = test/test
+        \\
+        \\[test.linux_x86_64]
+        \\install_bin = test:test/test
+        \\url = test_url2
+        \\hash = test_hash2
         \\
     );
 }
