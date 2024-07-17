@@ -671,7 +671,7 @@ fn pkgsCheckCommand(program: *Program) !void {
         };
 
         if (!std.mem.eql(u8, package.info.version, version)) {
-            try writer.print("{s} {s} -> {s}", .{
+            try writer.print("{s} {s} -> {s}\n", .{
                 package_name,
                 package.info.version,
                 version,
