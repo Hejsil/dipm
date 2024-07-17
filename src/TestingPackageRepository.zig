@@ -40,7 +40,7 @@ pub fn init(options: Options) !TestingPackageRepository {
     var pkgs_dir = try cwd.makeOpenPath(pkgs_dir_path, .{});
     defer pkgs_dir.close();
 
-    var pkgs_ini_dir, const pkgs_ini_file = fs.createDirAndFile(cwd, pkgs_ini_path, .{
+    var pkgs_ini_dir, const pkgs_ini_file = try fs.createDirAndFile(cwd, pkgs_ini_path, .{
         .file = .{ .exclusive = true },
     });
     defer pkgs_ini_dir.close();
