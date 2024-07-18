@@ -1,4 +1,3 @@
-gpa: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 lock: std.Thread.Mutex,
 
@@ -23,7 +22,6 @@ failures: struct {
 
 pub fn init(allocator: std.mem.Allocator) Diagnostics {
     return .{
-        .gpa = allocator,
         .arena = std.heap.ArenaAllocator.init(allocator),
         .lock = .{},
         .successes = .{
@@ -46,18 +44,22 @@ pub fn init(allocator: std.mem.Allocator) Diagnostics {
 }
 
 pub fn reset(diagnostics: *Diagnostics) void {
-    const allocator = diagnostics.gpa;
+    const allocator = diagnostics.gpa();
     diagnostics.deinit();
     diagnostics.* = init(allocator);
 }
 
+fn gpa(diagnostics: *Diagnostics) std.mem.Allocator {
+    return diagnostics.arena.child_allocator;
+}
+
 pub fn deinit(diagnostics: *Diagnostics) void {
     inline for (@typeInfo(@TypeOf(diagnostics.successes)).Struct.fields) |field|
-        @field(diagnostics.successes, field.name).deinit(diagnostics.gpa);
+        @field(diagnostics.successes, field.name).deinit(diagnostics.gpa());
     inline for (@typeInfo(@TypeOf(diagnostics.warnings)).Struct.fields) |field|
-        @field(diagnostics.warnings, field.name).deinit(diagnostics.gpa);
+        @field(diagnostics.warnings, field.name).deinit(diagnostics.gpa());
     inline for (@typeInfo(@TypeOf(diagnostics.failures)).Struct.fields) |field|
-        @field(diagnostics.failures, field.name).deinit(diagnostics.gpa);
+        @field(diagnostics.failures, field.name).deinit(diagnostics.gpa());
 
     diagnostics.arena.deinit();
     diagnostics.* = undefined;
@@ -224,7 +226,7 @@ pub fn installSucceeded(diagnostics: *Diagnostics, package: PackageVersion) !voi
     defer diagnostics.lock.unlock();
 
     const arena = diagnostics.arena.allocator();
-    return diagnostics.successes.installs.append(diagnostics.gpa, .{
+    return diagnostics.successes.installs.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, package.name),
         .version = try arena.dupe(u8, package.version),
     });
@@ -235,7 +237,7 @@ pub fn updateSucceeded(diagnostics: *Diagnostics, package: PackageFromTo) !void 
     defer diagnostics.lock.unlock();
 
     const arena = diagnostics.arena.allocator();
-    return diagnostics.successes.updates.append(diagnostics.gpa, .{
+    return diagnostics.successes.updates.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, package.name),
         .from_version = try arena.dupe(u8, package.from_version),
         .to_version = try arena.dupe(u8, package.to_version),
@@ -247,7 +249,7 @@ pub fn uninstallSucceeded(diagnostics: *Diagnostics, package: PackageVersion) !v
     defer diagnostics.lock.unlock();
 
     const arena = diagnostics.arena.allocator();
-    return diagnostics.successes.uninstalls.append(diagnostics.gpa, .{
+    return diagnostics.successes.uninstalls.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, package.name),
         .version = try arena.dupe(u8, package.version),
     });
@@ -258,14 +260,14 @@ pub fn alreadyInstalled(diagnostics: *Diagnostics, package: Package) !void {
     defer diagnostics.lock.unlock();
 
     const arena = diagnostics.arena.allocator();
-    return diagnostics.warnings.already_installed.append(diagnostics.gpa, .{
+    return diagnostics.warnings.already_installed.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, package.name),
     });
 }
 
 pub fn notInstalled(diagnostics: *Diagnostics, package: Package) !void {
     const arena = diagnostics.arena.allocator();
-    return diagnostics.warnings.not_installed.append(diagnostics.gpa, .{
+    return diagnostics.warnings.not_installed.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, package.name),
     });
 }
@@ -275,7 +277,7 @@ pub fn notFound(diagnostics: *Diagnostics, not_found: NotFound) !void {
     defer diagnostics.lock.unlock();
 
     const arena = diagnostics.arena.allocator();
-    return diagnostics.warnings.not_found.append(diagnostics.gpa, .{
+    return diagnostics.warnings.not_found.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, not_found.name),
         .os = not_found.os,
         .arch = not_found.arch,
@@ -287,7 +289,7 @@ pub fn upToDate(diagnostics: *Diagnostics, package: PackageVersion) !void {
     defer diagnostics.lock.unlock();
 
     const arena = diagnostics.arena.allocator();
-    return diagnostics.warnings.up_to_date.append(diagnostics.gpa, .{
+    return diagnostics.warnings.up_to_date.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, package.name),
         .version = try arena.dupe(u8, package.version),
     });
@@ -298,7 +300,7 @@ pub fn hashMismatch(diagnostics: *Diagnostics, mismatch: HashMismatch) !void {
     defer diagnostics.lock.unlock();
 
     const arena = diagnostics.arena.allocator();
-    return diagnostics.failures.hash_mismatches.append(diagnostics.gpa, .{
+    return diagnostics.failures.hash_mismatches.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, mismatch.name),
         .version = try arena.dupe(u8, mismatch.version),
         .expected_hash = try arena.dupe(u8, mismatch.expected_hash),
@@ -311,7 +313,7 @@ pub fn downloadFailed(diagnostics: *Diagnostics, failure: DownloadFailed) !void 
     defer diagnostics.lock.unlock();
 
     const arena = diagnostics.arena.allocator();
-    return diagnostics.failures.downloads.append(diagnostics.gpa, .{
+    return diagnostics.failures.downloads.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, failure.name),
         .version = try arena.dupe(u8, failure.version),
         .url = try arena.dupe(u8, failure.url),
@@ -327,7 +329,7 @@ pub fn downloadFailedWithStatus(
     defer diagnostics.lock.unlock();
 
     const arena = diagnostics.arena.allocator();
-    return diagnostics.failures.downloads_with_status.append(diagnostics.gpa, .{
+    return diagnostics.failures.downloads_with_status.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, failure.name),
         .version = try arena.dupe(u8, failure.version),
         .url = try arena.dupe(u8, failure.url),
