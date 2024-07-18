@@ -174,10 +174,15 @@ fn packagesToInstall(
         packages_to_install.putAssumeCapacity(package_name, undefined);
 
     // Now, populate. The packages that dont exist gets removed here.
-    for (packages_to_install.keys(), packages_to_install.values(), 0..) |package_name, *entry, i| {
+    var i: usize = 0;
+    while (i < packages_to_install.count()) {
+        const package_name = packages_to_install.keys()[i];
+        const entry = &packages_to_install.values()[i];
         entry.* = blk: {
             const package = packages.packages.get(package_name) orelse break :blk null;
-            break :blk package.specific(package_name, pm.os, pm.arch);
+            const specific = package.specific(package_name, pm.os, pm.arch) orelse break :blk null;
+            i += 1;
+            break :blk specific;
         } orelse {
             try pm.diagnostics.notFound(.{
                 .name = package_name,
