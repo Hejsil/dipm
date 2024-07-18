@@ -502,19 +502,19 @@ fn updatePackages(
 const DownloadAndExtractJobs = struct {
     jobs: std.ArrayList(DownloadAndExtractJob),
 
-    fn init(args: struct {
+    fn init(options: struct {
         allocator: std.mem.Allocator,
         dir: std.fs.Dir,
         packages: []const Package.Specific,
     }) !DownloadAndExtractJobs {
         var res = DownloadAndExtractJobs{
-            .jobs = std.ArrayList(DownloadAndExtractJob).init(args.allocator),
+            .jobs = std.ArrayList(DownloadAndExtractJob).init(options.allocator),
         };
         errdefer res.deinit();
 
-        try res.jobs.ensureTotalCapacity(args.packages.len);
-        for (args.packages) |package| {
-            var working_dir = try fs.tmpDir(args.dir, .{});
+        try res.jobs.ensureTotalCapacity(options.packages.len);
+        for (options.packages) |package| {
+            var working_dir = try fs.tmpDir(options.dir, .{});
             errdefer working_dir.close();
 
             res.jobs.appendAssumeCapacity(.{

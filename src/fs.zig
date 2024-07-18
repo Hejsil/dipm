@@ -170,17 +170,17 @@ pub fn extract(options: ExtractOptions) !void {
 pub fn openDirAndFile(
     dir: std.fs.Dir,
     path: []const u8,
-    args: struct {
+    options: struct {
         dir: std.fs.Dir.OpenOptions = .{},
         file: std.fs.File.OpenFlags = .{},
     },
 ) !struct { std.fs.Dir, std.fs.File } {
     const dir_path = std.fs.path.dirname(path) orelse ".";
-    var result_dir = try dir.openDir(dir_path, args.dir);
+    var result_dir = try dir.openDir(dir_path, options.dir);
     errdefer result_dir.close();
 
     const base_name = std.fs.path.basename(path);
-    const result_file = try result_dir.openFile(base_name, args.file);
+    const result_file = try result_dir.openFile(base_name, options.file);
     errdefer result_file.close();
 
     return .{ result_dir, result_file };
@@ -189,17 +189,17 @@ pub fn openDirAndFile(
 pub fn createDirAndFile(
     dir: std.fs.Dir,
     path: []const u8,
-    args: struct {
+    options: struct {
         dir: std.fs.Dir.OpenOptions = .{},
         file: std.fs.File.CreateFlags = .{},
     },
 ) !struct { std.fs.Dir, std.fs.File } {
     const dir_path = std.fs.path.dirname(path) orelse ".";
-    var result_dir = try dir.makeOpenPath(dir_path, args.dir);
+    var result_dir = try dir.makeOpenPath(dir_path, options.dir);
     errdefer result_dir.close();
 
     const base_name = std.fs.path.basename(path);
-    const result_file = try result_dir.createFile(base_name, args.file);
+    const result_file = try result_dir.createFile(base_name, options.file);
     errdefer result_file.close();
 
     return .{ result_dir, result_file };

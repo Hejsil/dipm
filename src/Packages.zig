@@ -290,7 +290,7 @@ pub fn update(packages: *Packages, package: Package.Named) !void {
     }
 }
 
-fn updateInstall(args: struct {
+fn updateInstall(options: struct {
     arena: std.mem.Allocator,
     tmp_allocator: std.mem.Allocator,
 
@@ -299,17 +299,17 @@ fn updateInstall(args: struct {
     new_version: []const u8,
     new_installs: []const []const u8,
 }) ![]const []const u8 {
-    var tmp_arena_state = std.heap.ArenaAllocator.init(args.tmp_allocator);
+    var tmp_arena_state = std.heap.ArenaAllocator.init(options.tmp_allocator);
     const tmp_arena = tmp_arena_state.allocator();
     defer tmp_arena_state.deinit();
 
-    var res = std.ArrayList([]const u8).init(args.arena);
-    try res.ensureTotalCapacity(args.new_installs.len);
+    var res = std.ArrayList([]const u8).init(options.arena);
+    try res.ensureTotalCapacity(options.new_installs.len);
 
-    outer: for (args.new_installs) |new_install_str| {
+    outer: for (options.new_installs) |new_install_str| {
         const new_install = Package.Install.fromString(new_install_str);
 
-        for (args.old_installs) |old_install_str| {
+        for (options.old_installs) |old_install_str| {
             const old_install = Package.Install.fromString(old_install_str);
             if (std.mem.eql(u8, old_install.to, new_install.to)) {
                 // Old and new installs the same file. This happends when the path changes, but
@@ -323,15 +323,15 @@ fn updateInstall(args: struct {
                 u8,
                 tmp_arena,
                 old_install_str,
-                args.old_version,
-                args.new_version,
+                options.old_version,
+                options.new_version,
             );
             const old_install_replaced = Package.Install.fromString(old_replaced_version);
             if (std.mem.eql(u8, old_install_replaced.from, new_install.from)) {
                 // Old and new from location are the same after we replace old_version
                 // with new version in the old install string:
                 //   test:test-0.1.0, test-0.2.0 -> test:test-0.2.0
-                const install = try std.fmt.allocPrint(args.arena, "{s}{s}{s}", .{
+                const install = try std.fmt.allocPrint(options.arena, "{s}{s}{s}", .{
                     if (old_install_replaced.explicit) old_install_replaced.to else "",
                     if (old_install_replaced.explicit) ":" else "",
                     new_install.from,
