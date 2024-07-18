@@ -189,7 +189,9 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
             continue;
         }
         if (remaining_width >= 4) {
-            const percent = (node.curr * 100) / node.max;
+            const curr: u64 = node.curr;
+            const max: u64 = node.curr;
+            const percent = (curr * 100) / max;
             try writer.writeByteNTimes(' ', progress.maximum_node_name_len - node_name_len);
             try writer.print(" {d:>3}", .{percent});
             remaining_width -= 4;
