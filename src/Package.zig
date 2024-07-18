@@ -532,7 +532,9 @@ fn findDownloadUrl(options: struct {
         }
     }.lenGt);
 
-    outer: for (options.urls) |url| {
+    var best_match: ?usize = null;
+
+    outer: for (options.urls, 0..) |url, i| {
         var download_url = url;
         inner: while (!std.mem.endsWith(u8, download_url, "/")) {
             for (trim_list.slice()) |trim| {
@@ -546,8 +548,13 @@ fn findDownloadUrl(options: struct {
             continue :outer;
         }
 
-        return url;
+        const old_match = if (best_match) |b| options.urls[b] else "";
+        if (url.len > old_match.len)
+            best_match = i;
     }
+
+    if (best_match) |res|
+        return options.urls[res];
 
     return error.DownloadUrlNotFound;
 }
@@ -649,6 +656,24 @@ test findDownloadUrl {
             "/gophish-v0.12.1-linux-64bit.zip",
             "/gophish-v0.12.1-osx-64bit.zip",
             "/gophish-v0.12.1-windows-64bit.zip",
+        },
+    }));
+    try std.testing.expectEqualStrings("/wasmer-linux-musl-amd64.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings_to_trim = &.{
+            "wasmer",
+        },
+        .urls = &.{
+            "/wasmer-darwin-amd64.tar.gz",
+            "/wasmer-darwin-arm64.tar.gz",
+            "/wasmer-linux-aarch64.tar.gz",
+            "/wasmer-linux-amd64.tar.gz",
+            "/wasmer-linux-musl-amd64.tar.gz",
+            "/wasmer-linux-riscv64.tar.gz",
+            "/wasmer-windows-amd64.tar.gz",
+            "/wasmer-windows-gnu64.tar.gz",
+            "/wasmer-windows.exe",
         },
     }));
     try std.testing.expectError(error.DownloadUrlNotFound, findDownloadUrl(.{
