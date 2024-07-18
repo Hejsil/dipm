@@ -166,13 +166,14 @@ const install_usage =
 ;
 
 fn installCommand(program: *Program) !void {
-    var packages_to_install = std.StringArrayHashMap(void).init(program.arena);
+    var packages_to_install = std.ArrayList([]const u8).init(program.arena);
+    try packages_to_install.ensureTotalCapacity(program.args.args.len);
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
             return program.stdout.writeAll(install_usage);
         if (program.args.positional()) |name|
-            try packages_to_install.put(name, {});
+            packages_to_install.appendAssumeCapacity(name);
     }
 
     var pkgs = try Packages.download(.{
@@ -194,7 +195,7 @@ fn installCommand(program: *Program) !void {
     });
     defer pm.deinit();
 
-    try pm.installMany(pkgs, packages_to_install.keys());
+    try pm.installMany(pkgs, packages_to_install.items);
     try pm.cleanup();
 }
 
@@ -207,13 +208,14 @@ const uninstall_usage =
 ;
 
 fn uninstallCommand(program: *Program) !void {
-    var packages_to_uninstall = std.StringArrayHashMap(void).init(program.arena);
+    var packages_to_uninstall = std.ArrayList([]const u8).init(program.arena);
+    try packages_to_uninstall.ensureTotalCapacity(program.args.args.len);
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
             return program.stdout.writeAll(uninstall_usage);
         if (program.args.positional()) |name|
-            try packages_to_uninstall.put(name, {});
+            packages_to_uninstall.appendAssumeCapacity(name);
     }
 
     var pm = try PackageManager.init(.{
@@ -225,7 +227,7 @@ fn uninstallCommand(program: *Program) !void {
     });
     defer pm.deinit();
 
-    try pm.uninstallMany(packages_to_uninstall.keys());
+    try pm.uninstallMany(packages_to_uninstall.items);
     try pm.cleanup();
 }
 
@@ -240,13 +242,14 @@ const update_usage =
 ;
 
 fn updateCommand(program: *Program) !void {
-    var packages_to_update = std.StringArrayHashMap(void).init(program.arena);
+    var packages_to_update = std.ArrayList([]const u8).init(program.arena);
+    try packages_to_update.ensureTotalCapacity(program.args.args.len);
 
     while (program.args.next()) {
         if (program.args.flag(&.{ "-h", "--help" }))
             return program.stdout.writeAll(update_usage);
         if (program.args.positional()) |name|
-            try packages_to_update.put(name, {});
+            packages_to_update.appendAssumeCapacity(name);
     }
 
     var pkgs = try Packages.download(.{
@@ -268,10 +271,10 @@ fn updateCommand(program: *Program) !void {
     });
     defer pm.deinit();
 
-    if (packages_to_update.count() == 0) {
+    if (packages_to_update.items.len == 0) {
         try pm.updateAll(pkgs);
     } else {
-        try pm.updateMany(pkgs, packages_to_update.keys());
+        try pm.updateMany(pkgs, packages_to_update.items);
     }
 
     try pm.cleanup();
