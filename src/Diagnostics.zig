@@ -213,7 +213,7 @@ pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !v
 }
 
 pub fn hasFailed(diagnostics: Diagnostics) bool {
-    inline for (@typeInfo(@TypeOf(diagnostics.failures))) |field| {
+    inline for (@typeInfo(@TypeOf(diagnostics.failures)).Struct.fields) |field| {
         if (@field(diagnostics.failures, field.name).items.len != 0)
             return true;
     }

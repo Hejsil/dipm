@@ -1,16 +1,28 @@
-pub fn main() !void {
+pub fn main() u8 {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
     const gpa = gpa_state.allocator();
     defer _ = gpa_state.deinit();
 
-    const args = try std.process.argsAlloc(gpa);
+    const args = std.process.argsAlloc(gpa) catch @panic("OOM");
     defer std.process.argsFree(gpa, args);
 
-    return mainFull(.{
+    mainFull(.{
         .allocator = gpa,
         .args = args[1..],
-    });
+    }) catch |err| switch (err) {
+        DiagnosticsError.DiagnosticFailure => return 1,
+        else => |e| {
+            std.log.err("{s}", .{@errorName(e)});
+            return 1;
+        },
+    };
+
+    return 0;
 }
+
+pub const DiagnosticsError = error{
+    DiagnosticFailure,
+};
 
 pub const MainOptions = struct {
     allocator: std.mem.Allocator,
@@ -57,15 +69,11 @@ pub fn mainFull(options: MainOptions) !void {
         },
     };
 
-    // Don't render progress bar in tests
-    // TODO: This should be behind a flag
-    if (!builtin.is_test) {
-        // We don't really care to store the thread. Just let the os clean it up
-        _ = std.Thread.spawn(.{}, renderThread, .{&program}) catch |err| blk: {
-            std.log.warn("failed to spawn rendering thread: {}", .{err});
-            break :blk null;
-        };
-    }
+    // We don't really care to store the thread. Just let the os clean it up
+    _ = std.Thread.spawn(.{}, renderThread, .{&program}) catch |err| blk: {
+        std.log.warn("failed to spawn rendering thread: {}", .{err});
+        break :blk null;
+    };
 
     const res = program.mainCommand();
 
@@ -73,6 +81,10 @@ pub fn mainFull(options: MainOptions) !void {
     program.io_lock.lock();
     try progress.cleanupTty(program.stderr);
     try diag.reportToFile(program.stderr);
+
+    if (diag.hasFailed())
+        return DiagnosticsError.DiagnosticFailure;
+
     return res;
 }
 
