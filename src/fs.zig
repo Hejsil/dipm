@@ -205,6 +205,32 @@ pub fn createDirAndFile(
     return .{ result_dir, result_file };
 }
 
+pub fn copyTree(from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
+    var iter = from_dir.iterate();
+    while (try iter.next()) |entry| switch (entry.kind) {
+        .directory => {
+            var child_from_dir = try from_dir.openDir(entry.name, .{ .iterate = true });
+            defer child_from_dir.close();
+            var child_to_dir = try to_dir.makeOpenPath(entry.name, .{});
+            defer child_to_dir.close();
+
+            try copyTree(child_from_dir, child_to_dir);
+        },
+        .file => try from_dir.copyFile(entry.name, to_dir, entry.name, .{}),
+
+        .sym_link,
+        .block_device,
+        .character_device,
+        .named_pipe,
+        .unix_domain_socket,
+        .whiteout,
+        .door,
+        .event_port,
+        .unknown,
+        => return error.CouldNotCopyEntireTree,
+    };
+}
+
 const Progress = @import("Progress.zig");
 
 const builtin = @import("builtin");

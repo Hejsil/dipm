@@ -322,14 +322,12 @@ fn installGeneric(the_install: Install, from_dir: std.fs.Dir, to_dir: std.fs.Dir
 
     switch (stat.kind) {
         .directory => {
-            try to_dir.makeDir(the_install.to);
-
             var child_from_dir = try from_dir.openDir(the_install.from, .{ .iterate = true });
             defer child_from_dir.close();
-            var child_to_dir = try to_dir.openDir(the_install.to, .{});
+            var child_to_dir = try to_dir.makeOpenPath(the_install.to, .{});
             defer child_to_dir.close();
 
-            try copyTree(child_from_dir, child_to_dir);
+            try fs.copyTree(child_from_dir, child_to_dir);
         },
         .sym_link, .file => try from_dir.copyFile(the_install.from, to_dir, the_install.to, .{}),
 
@@ -341,36 +339,8 @@ fn installGeneric(the_install: Install, from_dir: std.fs.Dir, to_dir: std.fs.Dir
         .door,
         .event_port,
         .unknown,
-        => return error.Unknown,
+        => return error.CouldNotCopyEntireTree,
     }
-}
-
-fn copyTree(from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
-    var iter = from_dir.iterate();
-    while (try iter.next()) |entry| switch (entry.kind) {
-        .directory => {
-            try to_dir.makeDir(entry.name);
-
-            var child_from_dir = try from_dir.openDir(entry.name, .{ .iterate = true });
-            defer child_from_dir.close();
-            var child_to_dir = try to_dir.openDir(entry.name, .{});
-            defer child_to_dir.close();
-
-            try copyTree(child_from_dir, child_to_dir);
-        },
-        .file => try from_dir.copyFile(entry.name, to_dir, entry.name, .{}),
-
-        .sym_link,
-        .block_device,
-        .character_device,
-        .named_pipe,
-        .unix_domain_socket,
-        .whiteout,
-        .door,
-        .event_port,
-        .unknown,
-        => return error.Unknown,
-    };
 }
 
 const Install = struct {
