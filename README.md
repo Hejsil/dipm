@@ -1,15 +1,6 @@
 A package manager for installing linux programs that are self contained
 
-# How to use
-
-```sh
-$ dipm install fzf # Install fzf
-
-$ ls ~/.local/bin/fzf # fzf has now been installed in ~/.local/bin
-/home/user/.local/bin/fzf
-
-$ dipm uninstall fzf # Uninstall fzf
-```
+![readme.gif](./readme.gif)
 
 # How to install
 
@@ -41,3 +32,11 @@ curl <my-cool-pkg-install-script> | sh
 
 But imagine a world where we had a package manager for installing these binaries. This is what `dipm`
 tries to be.
+
+# Why not X?
+
+There are package managers that work on multiple distros like [homebrew](https://brew.sh/) or
+[nix](https://nixos.org/). While these are great, they're quite complicated for what I want.
+
+Also, writing a package manager is fun~ 😉
+
