@@ -258,13 +258,94 @@ pub fn update(packages: *Packages, package: Package.Named) !void {
     const gpa = packages.arena.child_allocator;
     const entry = try packages.packages.getOrPut(gpa, package.name);
     if (entry.found_existing) {
-        // TODO: Update the install_bin/lib/share somehow
+        entry.value_ptr.*.linux_x86_64.bin = try updateInstall(.{
+            .arena = packages.arena.allocator(),
+            .tmp_allocator = packages.arena.child_allocator,
+            .old_version = entry.value_ptr.*.info.version,
+            .old_installs = entry.value_ptr.*.linux_x86_64.bin,
+            .new_version = package.package.info.version,
+            .new_installs = package.package.linux_x86_64.bin,
+        });
+        entry.value_ptr.*.linux_x86_64.lib = try updateInstall(.{
+            .arena = packages.arena.allocator(),
+            .tmp_allocator = packages.arena.child_allocator,
+            .old_version = entry.value_ptr.*.info.version,
+            .old_installs = entry.value_ptr.*.linux_x86_64.lib,
+            .new_version = package.package.info.version,
+            .new_installs = package.package.linux_x86_64.lib,
+        });
+        entry.value_ptr.*.linux_x86_64.share = try updateInstall(.{
+            .arena = packages.arena.allocator(),
+            .tmp_allocator = packages.arena.child_allocator,
+            .old_version = entry.value_ptr.*.info.version,
+            .old_installs = entry.value_ptr.*.linux_x86_64.share,
+            .new_version = package.package.info.version,
+            .new_installs = package.package.linux_x86_64.share,
+        });
         entry.value_ptr.*.info.version = package.package.info.version;
         entry.value_ptr.*.linux_x86_64.url = package.package.linux_x86_64.url;
         entry.value_ptr.*.linux_x86_64.hash = package.package.linux_x86_64.hash;
     } else {
         entry.value_ptr.* = package.package;
     }
+}
+
+fn updateInstall(args: struct {
+    arena: std.mem.Allocator,
+    tmp_allocator: std.mem.Allocator,
+
+    old_version: []const u8,
+    old_installs: []const []const u8,
+    new_version: []const u8,
+    new_installs: []const []const u8,
+}) ![]const []const u8 {
+    var tmp_arena_state = std.heap.ArenaAllocator.init(args.tmp_allocator);
+    const tmp_arena = tmp_arena_state.allocator();
+    defer tmp_arena_state.deinit();
+
+    var res = std.ArrayList([]const u8).init(args.arena);
+    try res.ensureTotalCapacity(args.new_installs.len);
+
+    outer: for (args.new_installs) |new_install_str| {
+        const new_install = Package.Install.fromString(new_install_str);
+
+        for (args.old_installs) |old_install_str| {
+            const old_install = Package.Install.fromString(old_install_str);
+            if (std.mem.eql(u8, old_install.to, new_install.to)) {
+                // Old and new installs the same file. This happends when the path changes, but
+                // the file name stays the same:
+                //   test-0.1.0/test, test-0.2.0/test -> test-0.2.0/test
+                res.appendAssumeCapacity(new_install_str);
+                continue :outer;
+            }
+
+            const old_replaced_version = try std.mem.replaceOwned(
+                u8,
+                tmp_arena,
+                old_install_str,
+                args.old_version,
+                args.new_version,
+            );
+            const old_install_replaced = Package.Install.fromString(old_replaced_version);
+            if (std.mem.eql(u8, old_install_replaced.from, new_install.from)) {
+                // Old and new from location are the same after we replace old_version
+                // with new version in the old install string:
+                //   test:test-0.1.0, test-0.2.0 -> test:test-0.2.0
+                const install = try std.fmt.allocPrint(args.arena, "{s}{s}{s}", .{
+                    if (old_install_replaced.explicit) old_install_replaced.to else "",
+                    if (old_install_replaced.explicit) ":" else "",
+                    new_install.from,
+                });
+                res.appendAssumeCapacity(install);
+                continue :outer;
+            }
+        }
+
+        // Seems like this new install does not match any of the old installs. Just add it.
+        res.appendAssumeCapacity(new_install_str);
+    }
+
+    return res.toOwnedSlice();
 }
 
 test update {
@@ -279,7 +360,10 @@ test update {
             .info = .{ .version = "0.1.0" },
             .update = .{ .github = "test/test" },
             .linux_x86_64 = .{
-                .bin = &.{"test:test/test"},
+                .bin = &.{
+                    "test:test-0.1.0/test",
+                    "test2:test-0.1.0",
+                },
                 .lib = &.{},
                 .share = &.{},
                 .hash = "test_hash1",
@@ -295,7 +379,8 @@ test update {
         \\github = test/test
         \\
         \\[test.linux_x86_64]
-        \\install_bin = test:test/test
+        \\install_bin = test:test-0.1.0/test
+        \\install_bin = test2:test-0.1.0
         \\url = test_url1
         \\hash = test_hash1
         \\
@@ -307,7 +392,11 @@ test update {
             .info = .{ .version = "0.2.0" },
             .update = .{ .github = "test/test" },
             .linux_x86_64 = .{
-                .bin = &.{"test:test/test"},
+                .bin = &.{
+                    "test:test-0.2.0/test",
+                    "test-0.2.0",
+                    "test3",
+                },
                 .lib = &.{},
                 .share = &.{},
                 .hash = "test_hash2",
@@ -323,7 +412,9 @@ test update {
         \\github = test/test
         \\
         \\[test.linux_x86_64]
-        \\install_bin = test:test/test
+        \\install_bin = test:test-0.2.0/test
+        \\install_bin = test2:test-0.2.0
+        \\install_bin = test3
         \\url = test_url2
         \\hash = test_hash2
         \\

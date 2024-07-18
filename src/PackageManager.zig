@@ -270,7 +270,7 @@ fn installExtractedPackage(
     defer locations.deinit();
 
     for (package.install.bin) |install_field| {
-        const the_install = Install.fromString(install_field);
+        const the_install = Package.Install.fromString(install_field);
         try installBin(the_install, from_dir, pm.bin_dir);
         try locations.append(try std.fs.path.join(installed_arena, &.{
             pm.prefix_path,
@@ -279,7 +279,7 @@ fn installExtractedPackage(
         }));
     }
     for (package.install.lib) |install_field| {
-        const the_install = Install.fromString(install_field);
+        const the_install = Package.Install.fromString(install_field);
         try installGeneric(the_install, from_dir, pm.lib_dir);
         try locations.append(try std.fs.path.join(installed_arena, &.{
             pm.prefix_path,
@@ -288,7 +288,7 @@ fn installExtractedPackage(
         }));
     }
     for (package.install.share) |install_field| {
-        const the_install = Install.fromString(install_field);
+        const the_install = Package.Install.fromString(install_field);
         try installGeneric(the_install, from_dir, pm.share_dir);
         try locations.append(try std.fs.path.join(installed_arena, &.{
             pm.prefix_path,
@@ -305,7 +305,7 @@ fn installExtractedPackage(
     });
 }
 
-fn installBin(the_install: Install, from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
+fn installBin(the_install: Package.Install, from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
     try from_dir.copyFile(the_install.from, to_dir, the_install.to, .{});
 
     const installed_file = try to_dir.openFile(the_install.to, .{});
@@ -317,7 +317,7 @@ fn installBin(the_install: Install, from_dir: std.fs.Dir, to_dir: std.fs.Dir) !v
     try installed_file.setPermissions(permissions);
 }
 
-fn installGeneric(the_install: Install, from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
+fn installGeneric(the_install: Package.Install, from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
     const stat = try from_dir.statFile(the_install.from);
 
     switch (stat.kind) {
@@ -342,25 +342,6 @@ fn installGeneric(the_install: Install, from_dir: std.fs.Dir, to_dir: std.fs.Dir
         => return error.CouldNotCopyEntireTree,
     }
 }
-
-const Install = struct {
-    from: []const u8,
-    to: []const u8,
-
-    pub fn fromString(string: []const u8) Install {
-        if (std.mem.indexOfScalar(u8, string, ':')) |colon_index| {
-            return .{
-                .to = string[0..colon_index],
-                .from = string[colon_index + 1 ..],
-            };
-        } else {
-            return .{
-                .to = std.fs.path.basename(string),
-                .from = string,
-            };
-        }
-    }
-};
 
 pub fn uninstallOne(pm: *PackageManager, package_name: []const u8) !void {
     return pm.uninstallMany(&.{package_name});

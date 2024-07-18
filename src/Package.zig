@@ -1,6 +1,6 @@
 info: Info,
 update: Update,
-linux_x86_64: Install,
+linux_x86_64: InstallArch,
 
 const Info = struct {
     version: []const u8,
@@ -10,12 +10,34 @@ const Update = struct {
     github: []const u8,
 };
 
-const Install = struct {
+const InstallArch = struct {
     url: []const u8,
     hash: []const u8,
     bin: []const []const u8,
     lib: []const []const u8,
     share: []const []const u8,
+};
+
+pub const Install = struct {
+    from: []const u8,
+    to: []const u8,
+    explicit: bool,
+
+    pub fn fromString(string: []const u8) Install {
+        if (std.mem.indexOfScalar(u8, string, ':')) |colon_index| {
+            return .{
+                .to = string[0..colon_index],
+                .from = string[colon_index + 1 ..],
+                .explicit = true,
+            };
+        } else {
+            return .{
+                .to = std.fs.path.basename(string),
+                .from = string,
+                .explicit = true,
+            };
+        }
+    }
 };
 
 pub const Named = struct {
@@ -49,7 +71,7 @@ pub const Specific = struct {
     name: []const u8,
     info: Info,
     update: Update,
-    install: Install,
+    install: InstallArch,
 };
 
 pub fn specific(
