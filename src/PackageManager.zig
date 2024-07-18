@@ -215,12 +215,11 @@ fn downloadAndExtractPackage(
     var download_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const downloaded_path = try dir.realpath(downloaded_file_name, &download_path_buf);
 
-    const download_result = download.download(
-        pm.http_client,
-        package.install.url,
-        progress,
-        downloaded_file.writer(),
-    ) catch |err| {
+    const download_result = download.download(downloaded_file.writer(), .{
+        .client = pm.http_client,
+        .uri_str = package.install.url,
+        .progress = progress,
+    }) catch |err| {
         try pm.diagnostics.downloadFailed(.{
             .name = package.name,
             .version = package.info.version,

@@ -194,12 +194,10 @@ pub fn fromGithub(options: struct {
     );
 
     var latest_release_json = std.ArrayList(u8).init(arena);
-    const release_download_result = try download.download(
-        options.http_client,
-        latest_release_uri,
-        null,
-        latest_release_json.writer(),
-    );
+    const release_download_result = try download.download(latest_release_json.writer(), .{
+        .client = options.http_client,
+        .uri_str = latest_release_uri,
+    });
     if (release_download_result.status != .ok)
         return error.DownloadFailed;
 
@@ -261,12 +259,10 @@ pub fn fromGithub(options: struct {
     const downloaded_file = try tmp_dir.createFile(downloaded_file_name, .{ .read = true });
     defer downloaded_file.close();
 
-    const package_download_result = try download.download(
-        options.http_client,
-        download_url,
-        null,
-        downloaded_file.writer(),
-    );
+    const package_download_result = try download.download(downloaded_file.writer(), .{
+        .client = options.http_client,
+        .uri_str = download_url,
+    });
     if (package_download_result.status != .ok)
         return error.DownloadFailed;
 
@@ -750,12 +746,10 @@ fn newestUpstreamVersionGithub(options: struct {
     );
 
     var result = std.ArrayList(u8).init(arena);
-    const release_download_result = try download.download(
-        options.http_client,
-        releases_atom_uri,
-        null,
-        result.writer(),
-    );
+    const release_download_result = try download.download(result.writer(), .{
+        .client = options.http_client,
+        .uri_str = releases_atom_uri,
+    });
     if (release_download_result.status != .ok)
         return error.DownloadFailed;
 

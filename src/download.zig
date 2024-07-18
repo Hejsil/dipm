@@ -3,17 +3,17 @@ pub const Result = struct {
     hash: [std.crypto.hash.sha2.Sha256.digest_length]u8,
 };
 
-pub fn download(
+pub fn download(writer: anytype, options: struct {
     client: *std.http.Client,
     uri_str: []const u8,
-    progress: ?*Progress.Node,
-    writer: anytype,
-) !Result {
+
+    progress: Progress.Node = .none,
+}) !Result {
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     var hashing_writer = std.compress.hashedWriter(writer, &hasher);
     const out = hashing_writer.writer();
 
-    const uri = try std.Uri.parse(uri_str);
+    const uri = try std.Uri.parse(options.uri_str);
     const status = if (std.mem.eql(u8, uri.scheme, "file")) blk: {
         var path_buf: [std.fs.max_path_bytes]u8 = undefined;
         const path = try std.fmt.bufPrint(&path_buf, "{raw}", .{uri.path});
@@ -22,7 +22,7 @@ pub fn download(
         break :blk .ok;
     } else blk: {
         var header_buffer: [1024 * 8]u8 = undefined;
-        var request = try client.open(.GET, uri, .{
+        var request = try options.client.open(.GET, uri, .{
             .server_header_buffer = &header_buffer,
             .keep_alive = false,
         });
@@ -32,12 +32,10 @@ pub fn download(
         try request.finish();
         try request.wait();
 
-        if (progress != null and request.response.content_length != null) {
-            const content_length = request.response.content_length.?;
-            progress.?.setMax(@min(content_length, std.math.maxInt(u32)));
-        }
+        if (request.response.content_length) |length|
+            options.progress.setMax(@min(length, std.math.maxInt(u32)));
 
-        var node_writer = Progress.nodeWriter(out, progress);
+        var node_writer = Progress.nodeWriter(out, options.progress);
         try io.pipe(request.reader(), node_writer.writer());
         break :blk request.response.status;
     };

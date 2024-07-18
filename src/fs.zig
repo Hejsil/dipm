@@ -86,7 +86,7 @@ pub const ExtractOptions = struct {
 
     output_dir: std.fs.Dir,
 
-    node: ?*Progress.Node = null,
+    node: Progress.Node = .none,
 };
 
 pub fn extract(options: ExtractOptions) !void {
@@ -97,10 +97,8 @@ pub fn extract(options: ExtractOptions) !void {
     var node_reader_state = Progress.nodeReader(buffered_reader.reader(), options.node);
     const node_reader = node_reader_state.reader();
 
-    if (options.node) |p| {
-        p.setMax(@min(std.math.maxInt(u32), try options.input_file.getEndPos()));
-        p.setCurr(0);
-    }
+    options.node.setMax(@min(std.math.maxInt(u32), try options.input_file.getEndPos()));
+    options.node.setCurr(0);
 
     switch (FileType.fromPath(options.input_name)) {
         .tar_bz2 => {

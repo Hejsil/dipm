@@ -1,7 +1,41 @@
-nodes: []Node,
+nodes: []NodeState,
 maximum_node_name_len: u32,
 
-pub const Node = struct {
+pub const Node = enum(usize) {
+    none = 0,
+    _,
+
+    fn init(ptr: ?*NodeState) Node {
+        return @enumFromInt(@intFromPtr(ptr));
+    }
+
+    fn unwrap(node: Node) ?*NodeState {
+        return @ptrFromInt(@intFromEnum(node));
+    }
+
+    pub fn advance(node: Node, amount: u32) void {
+        const state = node.unwrap() orelse return;
+        state.lock.lock();
+        state.inner.curr += amount;
+        state.lock.unlock();
+    }
+
+    pub fn setMax(node: Node, max: u32) void {
+        const state = node.unwrap() orelse return;
+        state.lock.lock();
+        state.inner.max = max;
+        state.lock.unlock();
+    }
+
+    pub fn setCurr(node: Node, curr: u32) void {
+        const state = node.unwrap() orelse return;
+        state.lock.lock();
+        state.inner.curr = curr;
+        state.lock.unlock();
+    }
+};
+
+const NodeState = struct {
     inner: Inner,
     // TODO: This can probably be done in a lock free way using a certain value of `max` as a
     //       "locked" value, and spinning until we can get it
@@ -13,37 +47,19 @@ pub const Node = struct {
         max: u32 = 0,
     };
 
-    const none = Node{
+    const none = NodeState{
         .inner = .{},
         .lock = .{},
     };
 
-    pub fn advance(node: *Node, amount: u32) void {
-        node.lock.lock();
-        node.inner.curr += amount;
-        node.lock.unlock();
-    }
-
-    pub fn setMax(node: *Node, max: u32) void {
-        node.lock.lock();
-        node.inner.max = max;
-        node.lock.unlock();
-    }
-
-    pub fn setCurr(node: *Node, curr: u32) void {
-        node.lock.lock();
-        node.inner.curr = curr;
-        node.lock.unlock();
-    }
-
-    fn get(node: *Node) Inner {
+    fn get(node: *NodeState) Inner {
         node.lock.lock();
         const res = node.inner;
         node.lock.unlock();
         return res;
     }
 
-    fn aquire(node: *Node, inner: Inner) bool {
+    fn aquire(node: *NodeState, inner: Inner) bool {
         node.lock.lock();
         defer node.lock.unlock();
 
@@ -54,7 +70,7 @@ pub const Node = struct {
         return true;
     }
 
-    fn release(node: *Node) void {
+    fn release(node: *NodeState) void {
         node.lock.lock();
         node.inner = .{};
         node.lock.unlock();
@@ -63,10 +79,10 @@ pub const Node = struct {
 
 pub fn init(options: Options) !Progress {
     const allocator = options.allocator;
-    const nodes = try allocator.alloc(Node, options.maximum_nodes);
+    const nodes = try allocator.alloc(NodeState, options.maximum_nodes);
     errdefer allocator.free(nodes);
 
-    @memset(nodes, Node.none);
+    @memset(nodes, NodeState.none);
 
     return .{
         .nodes = nodes,
@@ -85,17 +101,17 @@ pub fn deinit(progress: *Progress, allocator: std.mem.Allocator) void {
     progress.* = undefined;
 }
 
-pub fn start(progress: Progress, name: []const u8, max: u32) ?*Node {
+pub fn start(progress: Progress, name: []const u8, max: u32) Node {
     for (progress.nodes) |*node| {
         if (node.aquire(.{ .name = name, .max = max }))
-            return node;
+            return Node.init(node);
     }
-    return null;
+    return .none;
 }
 
-pub fn end(progress: Progress, node: ?*Node) void {
+pub fn end(progress: Progress, node: Node) void {
     _ = progress;
-    if (node) |n| n.release();
+    if (node.unwrap()) |n| n.release();
 }
 
 const clear = "\x1b[J";
@@ -220,7 +236,7 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
 pub fn NodeWriter(comptime Child: type) type {
     return struct {
         child: Child,
-        node: ?*Node,
+        node: Node,
 
         pub const Error = Child.Error;
         pub const Writer = std.io.Writer(*Self, Error, write);
@@ -233,15 +249,13 @@ pub fn NodeWriter(comptime Child: type) type {
 
         pub fn write(self: *Self, bytes: []const u8) Error!usize {
             const res = try self.child.write(bytes);
-            if (self.node) |node|
-                node.advance(@min(res, std.math.maxInt(u32)));
-
+            self.node.advance(@min(res, std.math.maxInt(u32)));
             return res;
         }
     };
 }
 
-pub fn nodeWriter(child: anytype, node: ?*Node) NodeWriter(@TypeOf(child)) {
+pub fn nodeWriter(child: anytype, node: Node) NodeWriter(@TypeOf(child)) {
     return .{ .child = child, .node = node };
 }
 
@@ -249,7 +263,7 @@ pub fn nodeWriter(child: anytype, node: ?*Node) NodeWriter(@TypeOf(child)) {
 pub fn NodeReader(comptime Child: type) type {
     return struct {
         child: Child,
-        node: ?*Node,
+        node: Node,
 
         pub const Error = Child.Error;
         pub const Reader = std.io.Reader(*Self, Error, read);
@@ -262,21 +276,19 @@ pub fn NodeReader(comptime Child: type) type {
 
         pub fn read(self: *Self, buf: []u8) Error!usize {
             const res = try self.child.read(buf);
-            if (self.node) |node|
-                node.advance(@min(res, std.math.maxInt(u32)));
-
+            self.node.advance(@min(res, std.math.maxInt(u32)));
             return res;
         }
     };
 }
 
-pub fn nodeReader(child: anytype, node: ?*Node) NodeReader(@TypeOf(child)) {
+pub fn nodeReader(child: anytype, node: Node) NodeReader(@TypeOf(child)) {
     return .{ .child = child, .node = node };
 }
 
 fn expectRender(
     expected: []const u8,
-    nodes: []const Node.Inner,
+    nodes: []const NodeState.Inner,
     render_options: RenderOptions,
     options: Options,
 ) !void {
