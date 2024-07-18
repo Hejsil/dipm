@@ -106,6 +106,23 @@ test "install test-zst" {
     try pm.cleanup();
 }
 
+test "install multiple of same package" {
+    const repo = simple_repository_v1.get();
+    var pm = try TestingPackageManager.init(.{});
+    defer pm.deinit();
+
+    try pm.pm.installMany(repo.packages, &.{
+        "test-zst", "test-zst",
+        "test-xz",  "test-xz",
+    });
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-zst 0.1.0<R>
+        \\<B><g>✓<R> <B>test-xz 0.1.0<R>
+        \\
+    );
+    try pm.cleanup();
+}
+
 test "install already installed" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{});
