@@ -129,6 +129,7 @@ pub fn fromUrl(options: struct {
     tmp_allocator: std.mem.Allocator,
 
     http_client: *std.http.Client,
+    progress: Progress.Node = .none,
 
     /// Name of the package. `null` means it should be inferred
     name: ?[]const u8 = null,
@@ -148,6 +149,7 @@ pub fn fromUrl(options: struct {
             .allocator = options.allocator,
             .tmp_allocator = options.tmp_allocator,
             .http_client = options.http_client,
+            .progress = options.progress,
             .name = options.name,
             .user = repo_user,
             .repo = repo_name,
@@ -170,6 +172,7 @@ pub fn fromGithub(options: struct {
     tmp_allocator: std.mem.Allocator,
 
     http_client: *std.http.Client,
+    progress: Progress.Node = .none,
 
     /// Name of the package. `null` means it should be inferred
     name: ?[]const u8 = null,
@@ -197,6 +200,7 @@ pub fn fromGithub(options: struct {
     const release_download_result = try download.download(latest_release_json.writer(), .{
         .client = options.http_client,
         .uri_str = latest_release_uri,
+        .progress = options.progress,
     });
     if (release_download_result.status != .ok)
         return error.DownloadFailed;
@@ -262,6 +266,7 @@ pub fn fromGithub(options: struct {
     const package_download_result = try download.download(downloaded_file.writer(), .{
         .client = options.http_client,
         .uri_str = download_url,
+        .progress = options.progress,
     });
     if (package_download_result.status != .ok)
         return error.DownloadFailed;
@@ -711,12 +716,14 @@ pub fn newestUpstreamVersion(package: Package, options: struct {
     tmp_allocator: std.mem.Allocator,
 
     http_client: *std.http.Client,
+    progress: Progress.Node = .none,
 }) ![]const u8 {
     if (package.update.github.len != 0)
         return newestUpstreamVersionGithub(.{
             .allocator = options.allocator,
             .tmp_allocator = options.tmp_allocator,
             .http_client = options.http_client,
+            .progress = options.progress,
             .repo = package.update.github,
         });
 
@@ -732,6 +739,7 @@ fn newestUpstreamVersionGithub(options: struct {
     tmp_allocator: std.mem.Allocator,
 
     http_client: *std.http.Client,
+    progress: Progress.Node = .none,
 
     repo: []const u8,
 }) ![]const u8 {
@@ -749,6 +757,7 @@ fn newestUpstreamVersionGithub(options: struct {
     const release_download_result = try download.download(result.writer(), .{
         .client = options.http_client,
         .uri_str = releases_atom_uri,
+        .progress = options.progress,
     });
     if (release_download_result.status != .ok)
         return error.DownloadFailed;
@@ -801,11 +810,15 @@ test newestUpstreamVersionFromGithubRelease {
 }
 
 test {
+    _ = Progress;
+
     _ = download;
     _ = fs;
 }
 
 const Package = @This();
+
+const Progress = @import("Progress.zig");
 
 const builtin = @import("builtin");
 const download = @import("download.zig");
