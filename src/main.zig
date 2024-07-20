@@ -403,7 +403,6 @@ const pkgs_usage =
     \\  add                 Make packages and add them to pkgs.ini
     \\  make                Make packages
     \\  check               Check packages for new versions
-    \\  fmt                 Format pkgs file
     \\  help                Display this message
     \\
 ;
@@ -418,8 +417,6 @@ fn pkgsCommand(program: *Program) !void {
             return program.pkgsMakeCommand();
         if (program.args.flag(&.{"check"}))
             return program.pkgsCheckCommand();
-        if (program.args.flag(&.{"fmt"}))
-            return program.pkgsInifmtCommand();
         if (program.args.flag(&.{ "-h", "--help", "help" }))
             return program.stdout.writeAll(pkgs_usage);
         if (program.args.positional()) |_|
@@ -686,59 +683,11 @@ fn pkgsCheckCommand(program: *Program) !void {
     try stdout_buffered.flush();
 }
 
-const pkgs_inifmt_usage =
-    \\Usage: dipm pkgs fmt [options] [file]...
-    \\
-    \\Options:
-    \\  -h, --help          Display this message
-    \\
-;
 
-fn pkgsInifmtCommand(program: *Program) !void {
-    var files_to_format = std.StringArrayHashMap(void).init(program.arena);
 
-    while (program.args.next()) {
-        if (program.args.flag(&.{ "-h", "--help" }))
-            return program.stdout.writeAll(pkgs_inifmt_usage);
-        if (program.args.positional()) |file|
-            try files_to_format.put(file, {});
+
+
     }
-
-    if (files_to_format.count() == 0)
-        return inifmtFiles(program.gpa, program.stdin, program.stdout);
-
-    const cwd = std.fs.cwd();
-    for (files_to_format.keys()) |file| {
-        var out = try cwd.atomicFile(file, .{});
-        defer out.deinit();
-        {
-            const in = try cwd.openFile(file, .{});
-            defer in.close();
-            try inifmtFiles(program.gpa, in, out.file);
-        }
-        try out.finish();
-    }
-}
-
-fn inifmtFiles(allocator: std.mem.Allocator, file: std.fs.File, out: std.fs.File) !void {
-    const data = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-    defer allocator.free(data);
-
-    try out.seekTo(0);
-    var buffered_writer = std.io.bufferedWriter(out.writer());
-    try inifmtData(allocator, data, buffered_writer.writer());
-
-    try buffered_writer.flush();
-    try out.setEndPos(try out.getPos());
-}
-
-fn inifmtData(allocator: std.mem.Allocator, data: []const u8, writer: anytype) !void {
-    // TODO: This does not preserve comments
-    const i = try ini.Dynamic.parse(allocator, data, .{
-        .allocate = ini.Dynamic.Allocate.none,
-    });
-    defer i.deinit();
-    try i.write(writer);
 }
 
 test {
@@ -751,7 +700,6 @@ test {
 
     _ = download;
     _ = fs;
-    _ = ini;
 }
 
 const ArgParser = @import("ArgParser.zig");
@@ -764,5 +712,4 @@ const Progress = @import("Progress.zig");
 const builtin = @import("builtin");
 const download = @import("download.zig");
 const fs = @import("fs.zig");
-const ini = @import("ini.zig");
 const std = @import("std");
