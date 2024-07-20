@@ -541,6 +541,9 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     defer packages.deinit();
 
     for (options.urls) |url| {
+        const progress = program.progress.start(url.name orelse url.url, 1);
+        defer program.progress.end(progress);
+
         const package = Package.fromUrl(.{
             .allocator = packages.arena.allocator(),
             .tmp_allocator = program.gpa,
@@ -653,41 +656,65 @@ fn pkgsCheckCommand(program: *Program) !void {
     if (packages_to_check.len == 0)
         packages_to_check = packages.packages.keys();
 
-    var stdout_buffered = std.io.bufferedWriter(program.stdout.writer());
-    const writer = stdout_buffered.writer();
+    const top_level_progress = program.progress.start(
+        "progress",
+        @min(packages_to_check.len, std.math.maxInt(u32)),
+    );
+
+    var out_of_date_pkgs = std.ArrayList(struct {
+        name: []const u8,
+        old_version: []const u8,
+        new_version: []const u8,
+    }).init(program.arena);
 
     for (packages_to_check) |package_name| {
+        defer top_level_progress.advance(1);
+
         const package = packages.packages.get(package_name) orelse {
             std.log.err("{s} not found", .{package_name});
             continue;
         };
 
+        const package_progress = program.progress.start(package_name, 1);
+        defer program.progress.end(package_progress);
+
         const version = package.newestUpstreamVersion(.{
             .allocator = program.arena,
             .tmp_allocator = program.gpa,
             .http_client = program.http_client,
+            .progress = package_progress,
         }) catch |err| {
             std.log.err("{s} failed to check version: {}", .{ package_name, err });
             continue;
         };
 
         if (!std.mem.eql(u8, package.info.version, version)) {
-            try writer.print("{s} {s} -> {s}\n", .{
-                package_name,
-                package.info.version,
-                version,
+            try out_of_date_pkgs.append(.{
+                .name = package_name,
+                .old_version = package.info.version,
+                .new_version = version,
             });
-            try stdout_buffered.flush();
         }
     }
-    try stdout_buffered.flush();
-}
 
+    program.progress.end(top_level_progress);
 
+    var stdout_buffered = std.io.bufferedWriter(program.stdout.writer());
+    const writer = stdout_buffered.writer();
 
+    program.io_lock.lock();
+    defer program.io_lock.unlock();
 
+    try program.progress.cleanupTty(program.stderr);
 
+    for (out_of_date_pkgs.items) |item| {
+        try writer.print("{s} {s} -> {s}\n", .{
+            item.name,
+            item.old_version,
+            item.new_version,
+        });
     }
+    try stdout_buffered.flush();
 }
 
 test {
