@@ -774,12 +774,13 @@ fn newestUpstreamVersionFromGithubRelease(string: []const u8) ![]const u8 {
     while (std.mem.indexOfPos(u8, string, pos, end_id)) |end| : (pos = end + end_id.len) {
         var start = end;
         while (0 < start) : (start -= 1) switch (string[start - 1]) {
-            '0'...'9', '.' => {},
+            '0'...'9', '.', '_' => {},
             else => break,
         };
 
         const version = string[start..end];
-        if (std.mem.count(u8, version, ".") == 0)
+        if (std.mem.count(u8, version, ".") == 0 and
+            std.mem.count(u8, version, "_") == 0)
             continue;
         if (std.mem.startsWith(u8, version, "."))
             continue;
@@ -805,6 +806,20 @@ test newestUpstreamVersionFromGithubRelease {
         \\    <id>tag:github.com,2008:Repository/13807606/0.48.1</id>
         \\    <id>tag:github.com,2008:Repository/13807606/0.48.0</id>
         \\    <id>tag:github.com,2008:Repository/13807606/0.47.0</id>
+        \\
+    ));
+    try std.testing.expectEqualStrings("2024_05_05", try newestUpstreamVersionFromGithubRelease(
+        \\  <id>tag:github.com,2008:https://github.com/marler8997/zigup/releases</id>
+        \\    <id>tag:github.com,2008:Repository/268129020/v2024_05_05</id>
+        \\    <id>tag:github.com,2008:Repository/268129020/v2024_05_04</id>
+        \\    <id>tag:github.com,2008:Repository/268129020/v2024_03_13</id>
+        \\    <id>tag:github.com,2008:Repository/268129020/v2024_02_25</id>
+        \\    <id>tag:github.com,2008:Repository/268129020/v2023_07_27</id>
+        \\    <id>tag:github.com,2008:Repository/268129020/v2022_08_25</id>
+        \\    <id>tag:github.com,2008:Repository/268129020/v2022_07_04</id>
+        \\    <id>tag:github.com,2008:Repository/268129020/v2022_02_08</id>
+        \\    <id>tag:github.com,2008:Repository/268129020/v2022_01_14</id>
+        \\    <id>tag:github.com,2008:Repository/268129020/v2021_10_16</id>
         \\
     ));
 }
