@@ -177,14 +177,15 @@ fn packagesToInstall(
     var i: usize = 0;
     while (i < packages_to_install.count()) {
         const package_name = packages_to_install.keys()[i];
-        const entry = &packages_to_install.values()[i];
-        entry.* = blk: {
-            const package = packages.packages.get(package_name) orelse break :blk null;
-            const specific = package.specific(package_name, pm.os, pm.arch) orelse break :blk null;
-            i += 1;
-            break :blk specific;
-        } orelse {
-            try pm.diagnostics.notFound(.{
+
+        const package = packages.packages.get(package_name) orelse {
+            try pm.diagnostics.notFound(.{ .name = package_name });
+            packages_to_install.swapRemoveAt(i);
+            continue;
+        };
+
+        const specific = package.specific(package_name, pm.os, pm.arch) orelse {
+            try pm.diagnostics.notFoundForTarget(.{
                 .name = package_name,
                 .os = pm.os,
                 .arch = pm.arch,
@@ -192,6 +193,9 @@ fn packagesToInstall(
             packages_to_install.swapRemoveAt(i);
             continue;
         };
+
+        packages_to_install.values()[i] = specific;
+        i += 1;
     }
 
     return packages_to_install;

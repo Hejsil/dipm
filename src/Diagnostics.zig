@@ -10,11 +10,13 @@ successes: struct {
 warnings: struct {
     already_installed: std.ArrayListUnmanaged(Package),
     not_installed: std.ArrayListUnmanaged(Package),
-    not_found: std.ArrayListUnmanaged(NotFound),
+    not_found: std.ArrayListUnmanaged(Package),
+    not_found_for_target: std.ArrayListUnmanaged(PackageTarget),
     up_to_date: std.ArrayListUnmanaged(PackageVersion),
 },
 
 failures: struct {
+    no_version_found: std.ArrayListUnmanaged(PackageError),
     hash_mismatches: std.ArrayListUnmanaged(HashMismatch),
     downloads: std.ArrayListUnmanaged(DownloadFailed),
     downloads_with_status: std.ArrayListUnmanaged(DownloadFailedWithStatus),
@@ -33,9 +35,11 @@ pub fn init(allocator: std.mem.Allocator) Diagnostics {
             .already_installed = .{},
             .not_installed = .{},
             .not_found = .{},
+            .not_found_for_target = .{},
             .up_to_date = .{},
         },
         .failures = .{
+            .no_version_found = .{},
             .hash_mismatches = .{},
             .downloads = .{},
             .downloads_with_status = .{},
@@ -155,6 +159,15 @@ pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !v
             not_found.name,
             esc.reset,
         });
+        try writer.print("└── Package not found\n", .{});
+    }
+    for (diagnostics.warnings.not_found_for_target.items) |not_found| {
+        try writer.print("{s} {s}{s}{s}\n", .{
+            warning,
+            esc.bold,
+            not_found.name,
+            esc.reset,
+        });
         try writer.print("└── Package not found for {s}_{s}\n", .{
             @tagName(not_found.os),
             @tagName(not_found.arch),
@@ -209,6 +222,15 @@ pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !v
         try writer.print("│   Hash mismatch\n", .{});
         try writer.print("│     expected: {s}\n", .{hash_mismatch.expected_hash});
         try writer.print("└──   actual:   {s}\n", .{hash_mismatch.actual_hash});
+    }
+    for (diagnostics.failures.no_version_found.items) |no_version| {
+        try writer.print("{s} {s}{s}{s}\n", .{
+            failure,
+            esc.bold,
+            no_version.name,
+            esc.reset,
+        });
+        try writer.print("└── No version found: {s}\n", .{@errorName(no_version.err)});
     }
 }
 
@@ -272,12 +294,22 @@ pub fn notInstalled(diagnostics: *Diagnostics, package: Package) !void {
     });
 }
 
-pub fn notFound(diagnostics: *Diagnostics, not_found: NotFound) !void {
+pub fn notFound(diagnostics: *Diagnostics, package: Package) !void {
     diagnostics.lock.lock();
     defer diagnostics.lock.unlock();
 
     const arena = diagnostics.arena.allocator();
     return diagnostics.warnings.not_found.append(diagnostics.gpa(), .{
+        .name = try arena.dupe(u8, package.name),
+    });
+}
+
+pub fn notFoundForTarget(diagnostics: *Diagnostics, not_found: PackageTarget) !void {
+    diagnostics.lock.lock();
+    defer diagnostics.lock.unlock();
+
+    const arena = diagnostics.arena.allocator();
+    return diagnostics.warnings.not_found_for_target.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, not_found.name),
         .os = not_found.os,
         .arch = not_found.arch,
@@ -292,6 +324,17 @@ pub fn upToDate(diagnostics: *Diagnostics, package: PackageVersion) !void {
     return diagnostics.warnings.up_to_date.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, package.name),
         .version = try arena.dupe(u8, package.version),
+    });
+}
+
+pub fn noVersionFound(diagnostics: *Diagnostics, package: PackageError) !void {
+    diagnostics.lock.lock();
+    defer diagnostics.lock.unlock();
+
+    const arena = diagnostics.arena.allocator();
+    return diagnostics.failures.no_version_found.append(diagnostics.gpa(), .{
+        .name = try arena.dupe(u8, package.name),
+        .err = package.err,
     });
 }
 
@@ -352,7 +395,12 @@ pub const PackageFromTo = struct {
     to_version: []const u8,
 };
 
-pub const NotFound = struct {
+pub const PackageError = struct {
+    name: []const u8,
+    err: anyerror,
+};
+
+pub const PackageTarget = struct {
     name: []const u8,
     os: std.Target.Os.Tag,
     arch: std.Target.Cpu.Arch,

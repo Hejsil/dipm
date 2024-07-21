@@ -356,7 +356,7 @@ test "not found" {
     try pm.pm.installOne(repo.packages, "not-found");
     try pm.expectDiagnostics(
         \\<B><y>⚠<R> <B>not-found<R>
-        \\└── Package not found for linux_x86_64
+        \\└── Package not found
         \\
     );
     try pm.cleanup();
@@ -392,7 +392,7 @@ test "dedupe not found" {
     try pm.pm.installMany(repo.packages, &.{ "not-found", "not-found" });
     try pm.expectDiagnostics(
         \\<B><y>⚠<R> <B>not-found<R>
-        \\└── Package not found for linux_x86_64
+        \\└── Package not found
         \\
     );
     try pm.cleanup();

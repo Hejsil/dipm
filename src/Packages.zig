@@ -420,6 +420,61 @@ test update {
     );
 }
 
+/// Loop over all packages and find out if any of them are outdated from their upstream version.
+/// If the package is outdated, this is reported to the diagnostics as an `updateSucceeded`.
+pub fn findOutdatedPackages(
+    packages: *const Packages,
+    options: struct {
+        allocator: std.mem.Allocator,
+        http_client: *std.http.Client,
+        progress: *Progress,
+        diagnostics: *Diagnostics,
+
+        packages_to_check: ?[]const []const u8 = null,
+    },
+) !void {
+    const packages_to_check = options.packages_to_check orelse packages.packages.keys();
+    const top_level_progress = options.progress.start(
+        "progress",
+        @min(packages_to_check.len, std.math.maxInt(u32)),
+    );
+    defer options.progress.end(top_level_progress);
+
+    for (packages_to_check) |package_name| {
+        defer top_level_progress.advance(1);
+
+        const package = packages.packages.get(package_name) orelse {
+            try options.diagnostics.notFound(.{ .name = package_name });
+            continue;
+        };
+
+        const package_progress = options.progress.start(package_name, 1);
+        defer options.progress.end(package_progress);
+
+        const version = package.newestUpstreamVersion(.{
+            .allocator = options.allocator,
+            .tmp_allocator = options.allocator,
+            .http_client = options.http_client,
+            .progress = package_progress,
+        }) catch |err| {
+            try options.diagnostics.noVersionFound(.{
+                .name = package_name,
+                .err = err,
+            });
+            continue;
+        };
+        defer options.allocator.free(version);
+
+        if (!std.mem.eql(u8, package.info.version, version)) {
+            try options.diagnostics.updateSucceeded(.{
+                .name = package_name,
+                .from_version = package.info.version,
+                .to_version = version,
+            });
+        }
+    }
+}
+
 test {
     _ = Diagnostics;
     _ = Package;
