@@ -434,44 +434,74 @@ pub fn findOutdatedPackages(
     },
 ) !void {
     const packages_to_check = options.packages_to_check orelse packages.packages.keys();
-    const top_level_progress = options.progress.start(
-        "progress",
-        @min(packages_to_check.len, std.math.maxInt(u32)),
+    const results = try options.allocator.alloc(
+        FindOutdatedPackagesJobReturnType,
+        packages_to_check.len,
     );
-    defer options.progress.end(top_level_progress);
+    defer options.allocator.free(results);
 
-    for (packages_to_check) |package_name| {
-        defer top_level_progress.advance(1);
+    var thread_pool: std.Thread.Pool = undefined;
+    try thread_pool.init(.{ .allocator = options.allocator });
+    defer thread_pool.deinit();
 
-        const package = packages.packages.get(package_name) orelse {
-            try options.diagnostics.notFound(.{ .name = package_name });
-            continue;
-        };
-
-        const package_progress = options.progress.start(package_name, 1);
-        defer options.progress.end(package_progress);
-
-        const version = package.newestUpstreamVersion(.{
+    for (results, packages_to_check) |*result, package_name| {
+        try thread_pool.spawn(struct {
+            fn run(out: *FindOutdatedPackagesJobReturnType, job: FindOutdatedPackagesJob) void {
+                out.* = findOutdatedPackagesJob(job);
+            }
+        }.run, .{ result, FindOutdatedPackagesJob{
+            .packages = packages,
+            .package_name = package_name,
             .allocator = options.allocator,
-            .tmp_allocator = options.allocator,
             .http_client = options.http_client,
-            .progress = package_progress,
-        }) catch |err| {
-            try options.diagnostics.noVersionFound(.{
-                .name = package_name,
-                .err = err,
-            });
-            continue;
-        };
-        defer options.allocator.free(version);
+            .progress = options.progress,
+            .diagnostics = options.diagnostics,
+        } });
+    }
 
-        if (!std.mem.eql(u8, package.info.version, version)) {
-            try options.diagnostics.updateSucceeded(.{
-                .name = package_name,
-                .from_version = package.info.version,
-                .to_version = version,
-            });
-        }
+    for (results) |result|
+        try result;
+}
+
+const FindOutdatedPackagesJob = struct {
+    packages: *const Packages,
+    package_name: []const u8,
+    allocator: std.mem.Allocator,
+    http_client: *std.http.Client,
+    progress: *Progress,
+    diagnostics: *Diagnostics,
+};
+
+const FindOutdatedPackagesJobReturnType =
+    @typeInfo(@TypeOf(findOutdatedPackagesJob)).Fn.return_type.?;
+
+fn findOutdatedPackagesJob(job: FindOutdatedPackagesJob) !void {
+    const package = job.packages.packages.get(job.package_name) orelse {
+        return job.diagnostics.notFound(.{ .name = job.package_name });
+    };
+
+    const package_progress = job.progress.start(job.package_name, 1);
+    defer job.progress.end(package_progress);
+
+    const version = package.newestUpstreamVersion(.{
+        .allocator = job.allocator,
+        .tmp_allocator = job.allocator,
+        .http_client = job.http_client,
+        .progress = package_progress,
+    }) catch |err| {
+        return job.diagnostics.noVersionFound(.{
+            .name = job.package_name,
+            .err = err,
+        });
+    };
+    defer job.allocator.free(version);
+
+    if (!std.mem.eql(u8, package.info.version, version)) {
+        try job.diagnostics.updateSucceeded(.{
+            .name = job.package_name,
+            .from_version = package.info.version,
+            .to_version = version,
+        });
     }
 }
 
