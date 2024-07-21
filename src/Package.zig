@@ -534,6 +534,7 @@ fn findDownloadUrl(options: struct {
         .x86_64 => {
             try trim_list.append("amd64");
             try trim_list.append("64bit");
+            try trim_list.append("x64");
         },
         .x86 => {
             try trim_list.append("32bit");
@@ -699,6 +700,43 @@ test findDownloadUrl {
             "/wasmer-windows.exe",
         },
     }));
+    try std.testing.expectEqualStrings("/mise-v2024.7.4-linux-x64-musl.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings_to_trim = &.{
+            "mise",
+            "v2024.7.4",
+        },
+        .urls = &.{
+            "/mise-v2024.7.4-linux-arm64",
+            "/mise-v2024.7.4-linux-arm64-musl",
+            "/mise-v2024.7.4-linux-arm64-musl.tar.gz",
+            "/mise-v2024.7.4-linux-arm64-musl.tar.xz",
+            "/mise-v2024.7.4-linux-arm64.tar.gz",
+            "/mise-v2024.7.4-linux-arm64.tar.xz",
+            "/mise-v2024.7.4-linux-armv7",
+            "/mise-v2024.7.4-linux-armv7-musl",
+            "/mise-v2024.7.4-linux-armv7-musl.tar.gz",
+            "/mise-v2024.7.4-linux-armv7-musl.tar.xz",
+            "/mise-v2024.7.4-linux-armv7.tar.gz",
+            "/mise-v2024.7.4-linux-armv7.tar.xz",
+            "/mise-v2024.7.4-linux-x64",
+            "/mise-v2024.7.4-linux-x64-musl",
+            "/mise-v2024.7.4-linux-x64-musl.tar.gz",
+            "/mise-v2024.7.4-linux-x64-musl.tar.xz",
+            "/mise-v2024.7.4-linux-x64.tar.gz",
+            "/mise-v2024.7.4-linux-x64.tar.xz",
+            "/mise-v2024.7.4-macos-arm64",
+            "/mise-v2024.7.4-macos-arm64.tar.gz",
+            "/mise-v2024.7.4-macos-arm64.tar.xz",
+            "/mise-v2024.7.4-macos-x64",
+            "/mise-v2024.7.4-macos-x64.tar.gz",
+            "/mise-v2024.7.4-macos-x64.tar.xz",
+            "/mise-v2024.7.4-win-arm64.zip",
+            "/mise-v2024.7.4-win-x64.zip",
+        },
+    }));
+
     try std.testing.expectError(error.DownloadUrlNotFound, findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
