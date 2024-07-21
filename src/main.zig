@@ -402,7 +402,7 @@ const pkgs_usage =
     \\  update              Update packages in pkgs.ini
     \\  add                 Make packages and add them to pkgs.ini
     \\  make                Make packages
-    \\  check               Check packages for new versions
+    \\  outdated            Check if any packages are outdated from upstream
     \\  help                Display this message
     \\
 ;
@@ -415,8 +415,8 @@ fn pkgsCommand(program: *Program) !void {
             return program.pkgsAddCommand();
         if (program.args.flag(&.{"make"}))
             return program.pkgsMakeCommand();
-        if (program.args.flag(&.{"check"}))
-            return program.pkgsCheckCommand();
+        if (program.args.flag(&.{"outdated"}))
+            return program.pkgsOutdatedCommand();
         if (program.args.flag(&.{ "-h", "--help", "help" }))
             return program.stdout.writeAll(pkgs_usage);
         if (program.args.positional()) |_|
@@ -626,8 +626,8 @@ fn pkgsMakeCommand(program: *Program) !void {
     try stdout_buffered.flush();
 }
 
-const pkgs_check_usage =
-    \\Usage: dipm pkgs check [options] [url]...
+const pkgs_outdated_usage =
+    \\Usage: dipm pkgs outdated [options] [url]...
     \\
     \\Options:
     \\  -f, --pkgs-file     Path to pkgs.ini (default: ./pkgs.ini)
@@ -635,7 +635,7 @@ const pkgs_check_usage =
     \\
 ;
 
-fn pkgsCheckCommand(program: *Program) !void {
+fn pkgsOutdatedCommand(program: *Program) !void {
     var pkgs_ini_path: []const u8 = "./pkgs.ini";
     var packages_to_check_map = std.StringArrayHashMap(void).init(program.arena);
 
@@ -643,7 +643,7 @@ fn pkgsCheckCommand(program: *Program) !void {
         if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
             pkgs_ini_path = file;
         if (program.args.flag(&.{ "-h", "--help" }))
-            return program.stdout.writeAll(pkgs_check_usage);
+            return program.stdout.writeAll(pkgs_outdated_usage);
         if (program.args.positional()) |package|
             try packages_to_check_map.put(package, {});
     }
