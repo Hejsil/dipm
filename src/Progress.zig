@@ -124,10 +124,10 @@ pub fn renderToTty(progress: Progress, tty: std.fs.File) !void {
         return;
 
     var winsize: std.posix.winsize = .{
-        .ws_row = 0,
-        .ws_col = 0,
-        .ws_xpixel = 0,
-        .ws_ypixel = 0,
+        .row = 0,
+        .col = 0,
+        .xpixel = 0,
+        .ypixel = 0,
     };
 
     const err = std.posix.system.ioctl(tty.handle, std.posix.T.IOCGWINSZ, @intFromPtr(&winsize));
@@ -137,14 +137,14 @@ pub fn renderToTty(progress: Progress, tty: std.fs.File) !void {
     // The -2 here is so that the PS1 is not scrolled off the top of the terminal.
     // one because we keep the cursor on the next line
     // one more to account for the PS1
-    const height = winsize.ws_row -| 2;
+    const height = winsize.row -| 2;
 
     var buffered_tty = std.io.bufferedWriter(tty.writer());
     const writer = buffered_tty.writer();
 
     try writer.writeAll(start_sync ++ clear);
     const nodes_printed = try progress.render(writer, .{
-        .width = winsize.ws_col,
+        .width = winsize.col,
         .height = height,
         .escapes = Escapes.ansi,
     });
