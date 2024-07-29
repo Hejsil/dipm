@@ -330,9 +330,8 @@ fn updateInstall(options: struct {
                 // Old and new from location are the same after we replace old_version
                 // with new version in the old install string:
                 //   test:test-0.1.0, test-0.2.0 -> test:test-0.2.0
-                const install = try std.fmt.allocPrint(options.arena, "{s}{s}{s}", .{
-                    if (old_install_replaced.explicit) old_install_replaced.to else "",
-                    if (old_install_replaced.explicit) ":" else "",
+                const install = try std.fmt.allocPrint(options.arena, "{s}:{s}", .{
+                    old_install_replaced.to,
                     new_install.from,
                 });
                 res.appendAssumeCapacity(install);
@@ -360,7 +359,7 @@ test update {
             .update = .{ .github = "test/test" },
             .linux_x86_64 = .{
                 .bin = &.{
-                    "test:test-0.1.0/test",
+                    "test-0.1.0/test",
                     "test2:test-0.1.0",
                 },
                 .lib = &.{},
@@ -378,7 +377,7 @@ test update {
         \\github = test/test
         \\
         \\[test.linux_x86_64]
-        \\install_bin = test:test-0.1.0/test
+        \\install_bin = test-0.1.0/test
         \\install_bin = test2:test-0.1.0
         \\url = test_url1
         \\hash = test_hash1
@@ -392,7 +391,7 @@ test update {
             .update = .{ .github = "test/test" },
             .linux_x86_64 = .{
                 .bin = &.{
-                    "test:test-0.2.0/test",
+                    "test-0.2.0/test",
                     "test-0.2.0",
                     "test3",
                 },
@@ -411,7 +410,7 @@ test update {
         \\github = test/test
         \\
         \\[test.linux_x86_64]
-        \\install_bin = test:test-0.2.0/test
+        \\install_bin = test-0.2.0/test
         \\install_bin = test2:test-0.2.0
         \\install_bin = test3
         \\url = test_url2

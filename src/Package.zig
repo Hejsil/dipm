@@ -21,20 +21,17 @@ const InstallArch = struct {
 pub const Install = struct {
     from: []const u8,
     to: []const u8,
-    explicit: bool,
 
     pub fn fromString(string: []const u8) Install {
         if (std.mem.indexOfScalar(u8, string, ':')) |colon_index| {
             return .{
                 .to = string[0..colon_index],
                 .from = string[colon_index + 1 ..],
-                .explicit = true,
             };
         } else {
             return .{
                 .to = std.fs.path.basename(string),
                 .from = string,
-                .explicit = true,
             };
         }
     }
