@@ -521,6 +521,7 @@ fn findDownloadUrl(options: struct {
     var trim_list = std.BoundedArray([]const u8, 128){};
     try trim_list.append("_");
     try trim_list.append("-");
+    try trim_list.append(".");
     try trim_list.append("unknown");
     try trim_list.append("musl");
     try trim_list.append("static");
@@ -731,6 +732,46 @@ test findDownloadUrl {
             "/mise-v2024.7.4-macos-x64.tar.xz",
             "/mise-v2024.7.4-win-arm64.zip",
             "/mise-v2024.7.4-win-x64.zip",
+        },
+    }));
+    try std.testing.expectEqualStrings("/shadowsocks-v1.20.3.x86_64-unknown-linux-musl.tar.xz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings_to_trim = &.{
+            "shadowsocks",
+            "v1.20.3",
+        },
+        .urls = &.{
+            "/shadowsocks-v1.20.3.aarch64-apple-darwin.tar.xz",
+            "/shadowsocks-v1.20.3.aarch64-apple-darwin.tar.xz.sha256",
+            "/shadowsocks-v1.20.3.aarch64-unknown-linux-gnu.tar.xz",
+            "/shadowsocks-v1.20.3.aarch64-unknown-linux-gnu.tar.xz.sha256",
+            "/shadowsocks-v1.20.3.aarch64-unknown-linux-musl.tar.xz",
+            "/shadowsocks-v1.20.3.aarch64-unknown-linux-musl.tar.xz.sha256",
+            "/shadowsocks-v1.20.3.arm-unknown-linux-gnueabi.tar.xz",
+            "/shadowsocks-v1.20.3.arm-unknown-linux-gnueabi.tar.xz.sha256",
+            "/shadowsocks-v1.20.3.arm-unknown-linux-gnueabihf.tar.xz",
+            "/shadowsocks-v1.20.3.arm-unknown-linux-gnueabihf.tar.xz.sha256",
+            "/shadowsocks-v1.20.3.arm-unknown-linux-musleabi.tar.xz",
+            "/shadowsocks-v1.20.3.arm-unknown-linux-musleabi.tar.xz.sha256",
+            "/shadowsocks-v1.20.3.arm-unknown-linux-musleabihf.tar.xz",
+            "/shadowsocks-v1.20.3.arm-unknown-linux-musleabihf.tar.xz.sha256",
+            "/shadowsocks-v1.20.3.armv7-unknown-linux-gnueabihf.tar.xz",
+            "/shadowsocks-v1.20.3.armv7-unknown-linux-gnueabihf.tar.xz.sha256",
+            "/shadowsocks-v1.20.3.armv7-unknown-linux-musleabihf.tar.xz",
+            "/shadowsocks-v1.20.3.armv7-unknown-linux-musleabihf.tar.xz.sha256",
+            "/shadowsocks-v1.20.3.i686-unknown-linux-musl.tar.xz",
+            "/shadowsocks-v1.20.3.i686-unknown-linux-musl.tar.xz.sha256",
+            "/shadowsocks-v1.20.3.x86_64-apple-darwin.tar.xz",
+            "/shadowsocks-v1.20.3.x86_64-apple-darwin.tar.xz.sha256",
+            "/shadowsocks-v1.20.3.x86_64-pc-windows-gnu.zip",
+            "/shadowsocks-v1.20.3.x86_64-pc-windows-gnu.zip.sha256",
+            "/shadowsocks-v1.20.3.x86_64-pc-windows-msvc.zip",
+            "/shadowsocks-v1.20.3.x86_64-pc-windows-msvc.zip.sha256",
+            "/shadowsocks-v1.20.3.x86_64-unknown-linux-gnu.tar.xz",
+            "/shadowsocks-v1.20.3.x86_64-unknown-linux-gnu.tar.xz.sha256",
+            "/shadowsocks-v1.20.3.x86_64-unknown-linux-musl.tar.xz",
+            "/shadowsocks-v1.20.3.x86_64-unknown-linux-musl.tar.xz.sha256",
         },
     }));
 
