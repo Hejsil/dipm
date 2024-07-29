@@ -22,6 +22,7 @@ pub fn init(options: Options) !TestingPackageManager {
         .maximum_nodes = 0,
     });
 
+    const cwd = std.fs.cwd();
     const prefix = if (options.prefix) |prefix| prefix else random_prefix_path;
     if (options.installed_file_data) |installed_file_data| {
         var buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -31,15 +32,26 @@ pub fn init(options: Options) !TestingPackageManager {
             paths.installed_file_name,
         });
 
-        try std.fs.cwd().makePath(std.fs.path.dirname(installed_path) orelse ".");
-        try std.fs.cwd().writeFile(.{
+        try cwd.makePath(std.fs.path.dirname(installed_path) orelse ".");
+        try cwd.writeFile(.{
             .sub_path = installed_path,
             .data = installed_file_data,
         });
     }
 
+    const installed_pkgs = try allocator.create(InstalledPackages);
+    errdefer allocator.destroy(installed_pkgs);
+
+    installed_pkgs.* = try InstalledPackages.open(.{
+        .allocator = allocator,
+        .tmp_allocator = allocator,
+        .prefix = prefix,
+    });
+    errdefer installed_pkgs.deinit();
+
     var pm = try PackageManager.init(.{
         .allocator = allocator,
+        .installed_packages = installed_pkgs,
         .diagnostics = diag,
         .progress = progress,
         .prefix = prefix,
@@ -66,11 +78,17 @@ pub const Options = struct {
 
 pub fn deinit(pm: *TestingPackageManager) void {
     const allocator = pm.pm.gpa;
-    pm.pm.deinit();
+    pm.pm.installed_packages.deinit();
+    allocator.destroy(pm.pm.installed_packages);
+
     pm.diag.deinit();
-    pm.progress.deinit(allocator);
     allocator.destroy(pm.diag);
+
+    pm.progress.deinit(allocator);
     allocator.destroy(pm.progress);
+
+    pm.pm.deinit();
+
     pm.* = undefined;
 }
 
@@ -132,8 +150,10 @@ pub fn expectDiagnostics(pm: TestingPackageManager, expected: []const u8) !void 
 
 test {
     _ = Diagnostics;
+    _ = InstalledPackages;
     _ = PackageManager;
     _ = Packages;
+    _ = Progress;
 
     _ = fs;
     _ = paths;
@@ -142,6 +162,7 @@ test {
 const TestingPackageManager = @This();
 
 const Diagnostics = @import("Diagnostics.zig");
+const InstalledPackages = @import("InstalledPackages.zig");
 const PackageManager = @import("PackageManager.zig");
 const Packages = @import("Packages.zig");
 const Progress = @import("Progress.zig");

@@ -2,7 +2,7 @@ gpa: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 
 http_client: *std.http.Client,
-installed_file: IniFile(InstalledPackages),
+installed_packages: *InstalledPackages,
 
 diagnostics: *Diagnostics,
 progress: *Progress,
@@ -16,7 +16,6 @@ bin_dir: std.fs.Dir,
 lib_dir: std.fs.Dir,
 share_dir: std.fs.Dir,
 
-own_data_dir: std.fs.Dir,
 own_tmp_dir: std.fs.Dir,
 
 pub fn init(options: Options) !PackageManager {
@@ -41,16 +40,10 @@ pub fn init(options: Options) !PackageManager {
     var share_dir = try prefix_dir.makeOpenPath(paths.share_subpath, .{});
     errdefer share_dir.close();
 
-    var own_data_dir = try prefix_dir.makeOpenPath(paths.own_data_subpath, .{});
-    errdefer own_data_dir.close();
-
     var own_tmp_dir = try prefix_dir.makeOpenPath(paths.own_tmp_subpath, .{
         .iterate = true,
     });
     errdefer own_tmp_dir.close();
-
-    var installed_file = try IniFile(InstalledPackages).create(allocator, own_data_dir, paths.installed_file_name);
-    errdefer installed_file.close();
 
     return PackageManager{
         .gpa = allocator,
@@ -65,15 +58,15 @@ pub fn init(options: Options) !PackageManager {
         .bin_dir = bin_dir,
         .lib_dir = lib_dir,
         .share_dir = share_dir,
-        .own_data_dir = own_data_dir,
         .own_tmp_dir = own_tmp_dir,
-        .installed_file = installed_file,
+        .installed_packages = options.installed_packages,
     };
 }
 
 pub const Options = struct {
     allocator: std.mem.Allocator,
     http_client: *std.http.Client,
+    installed_packages: *InstalledPackages,
 
     /// Successes and failures are reported to the diagnostics. Set this for more details
     /// about failures.
@@ -96,17 +89,14 @@ pub fn cleanup(pm: PackageManager) !void {
 pub fn deinit(pm: *PackageManager) void {
     pm.bin_dir.close();
     pm.lib_dir.close();
-    pm.own_data_dir.close();
     pm.prefix_dir.close();
     pm.share_dir.close();
-
-    pm.installed_file.close();
 
     pm.arena.deinit();
 }
 
 pub fn isInstalled(pm: *const PackageManager, package_name: []const u8) bool {
-    return pm.installed_file.data.packages.contains(package_name);
+    return pm.installed_packages.packages.contains(package_name);
 }
 
 pub fn installOne(pm: *PackageManager, packages: Packages, package_name: []const u8) !void {
@@ -157,7 +147,7 @@ pub fn installMany(pm: *PackageManager, packages: Packages, package_names: []con
         });
     }
 
-    try pm.installed_file.flush();
+    try pm.installed_packages.flush();
 }
 
 fn packagesToInstall(
@@ -268,7 +258,7 @@ fn installExtractedPackage(
     from_dir: std.fs.Dir,
     package: Package.Specific,
 ) !void {
-    const installed_arena = pm.installed_file.data.arena.allocator();
+    const installed_arena = pm.installed_packages.arena.allocator();
     var locations = std.ArrayList([]const u8).init(installed_arena);
     defer locations.deinit();
 
@@ -302,7 +292,7 @@ fn installExtractedPackage(
 
     // Caller ensures that package is not installed
     const installed_key = try installed_arena.dupe(u8, package.name);
-    try pm.installed_file.data.packages.putNoClobber(installed_arena, installed_key, .{
+    try pm.installed_packages.packages.putNoClobber(installed_arena, installed_key, .{
         .version = try installed_arena.dupe(u8, package.info.version),
         .locations = try locations.toOwnedSlice(),
     });
@@ -362,7 +352,7 @@ pub fn uninstallMany(pm: *PackageManager, package_names: []const []const u8) !vo
         });
     }
 
-    try pm.installed_file.flush();
+    try pm.installed_packages.flush();
 }
 
 fn packagesToUninstall(
@@ -374,7 +364,7 @@ fn packagesToUninstall(
 
     try packages_to_uninstall.ensureTotalCapacity(package_names.len);
     for (package_names) |package_name| {
-        const package = pm.installed_file.data.packages.get(package_name) orelse {
+        const package = pm.installed_packages.packages.get(package_name) orelse {
             try pm.diagnostics.notInstalled((.{
                 .name = package_name,
             }));
@@ -399,11 +389,11 @@ fn uninstallOneUnchecked(
     for (package.locations) |location|
         try cwd.deleteTree(location);
 
-    _ = pm.installed_file.data.packages.orderedRemove(package_name);
+    _ = pm.installed_packages.packages.orderedRemove(package_name);
 }
 
 pub fn updateAll(pm: *PackageManager, packages: Packages) !void {
-    const installed_packages = pm.installed_file.data.packages.keys();
+    const installed_packages = pm.installed_packages.packages.keys();
     const packages_to_update = try pm.gpa.dupe([]const u8, installed_packages);
     defer pm.gpa.free(packages_to_update);
 
@@ -499,7 +489,7 @@ fn updatePackages(
         });
     }
 
-    try pm.installed_file.flush();
+    try pm.installed_packages.flush();
 }
 
 const DownloadAndExtractJobs = struct {
@@ -560,52 +550,6 @@ const DiagnosticError = error{
     DiagnosticsDownloadFailed,
     DiagnosticsInvalidHash,
 };
-
-pub fn IniFile(comptime T: type) type {
-    return struct {
-        file: std.fs.File,
-        data: T,
-
-        pub fn open(allocator: std.mem.Allocator, dir: std.fs.Dir, name: []const u8) !@This() {
-            const file = try dir.openFile(name, .{});
-            errdefer file.close();
-
-            return fromFile(allocator, file);
-        }
-
-        pub fn create(allocator: std.mem.Allocator, dir: std.fs.Dir, name: []const u8) !@This() {
-            const file = try dir.createFile(name, .{ .read = true, .truncate = false });
-            errdefer file.close();
-
-            return fromFile(allocator, file);
-        }
-
-        pub fn fromFile(allocator: std.mem.Allocator, file: std.fs.File) !@This() {
-            const data_str = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-            defer allocator.free(data_str);
-
-            const data = try T.parse(allocator, data_str);
-            errdefer data.deinit();
-
-            return @This(){ .file = file, .data = data };
-        }
-
-        pub fn flush(file: @This()) !void {
-            try file.file.seekTo(0);
-
-            var buffered_file = std.io.bufferedWriter(file.file.writer());
-            try file.data.write(buffered_file.writer());
-            try buffered_file.flush();
-
-            try file.file.setEndPos(try file.file.getPos());
-        }
-
-        pub fn close(file: *@This()) void {
-            file.file.close();
-            file.data.deinit();
-        }
-    };
-}
 
 test {
     _ = Diagnostics;

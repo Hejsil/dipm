@@ -188,6 +188,13 @@ fn installCommand(program: *Program) !void {
             packages_to_install.appendAssumeCapacity(name);
     }
 
+    var installed_packages = try InstalledPackages.open(.{
+        .allocator = program.gpa,
+        .tmp_allocator = program.gpa,
+        .prefix = program.options.prefix,
+    });
+    defer installed_packages.deinit();
+
     var pkgs = try Packages.download(.{
         .allocator = program.gpa,
         .http_client = program.http_client,
@@ -201,6 +208,7 @@ fn installCommand(program: *Program) !void {
     var pm = try PackageManager.init(.{
         .allocator = program.gpa,
         .http_client = program.http_client,
+        .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .prefix = program.options.prefix,
@@ -230,9 +238,17 @@ fn uninstallCommand(program: *Program) !void {
             packages_to_uninstall.appendAssumeCapacity(name);
     }
 
+    var installed_packages = try InstalledPackages.open(.{
+        .allocator = program.gpa,
+        .tmp_allocator = program.gpa,
+        .prefix = program.options.prefix,
+    });
+    defer installed_packages.deinit();
+
     var pm = try PackageManager.init(.{
         .allocator = program.gpa,
         .http_client = program.http_client,
+        .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .prefix = program.options.prefix,
@@ -264,6 +280,13 @@ fn updateCommand(program: *Program) !void {
             packages_to_update.appendAssumeCapacity(name);
     }
 
+    var installed_packages = try InstalledPackages.open(.{
+        .allocator = program.gpa,
+        .tmp_allocator = program.gpa,
+        .prefix = program.options.prefix,
+    });
+    defer installed_packages.deinit();
+
     var pkgs = try Packages.download(.{
         .allocator = program.gpa,
         .http_client = program.http_client,
@@ -277,6 +300,7 @@ fn updateCommand(program: *Program) !void {
     var pm = try PackageManager.init(.{
         .allocator = program.gpa,
         .http_client = program.http_client,
+        .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .prefix = program.options.prefix,
@@ -336,21 +360,19 @@ fn listInstalledCommand(program: *Program) !void {
         }
     }
 
-    var pm = try PackageManager.init(.{
+    var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
-        .http_client = program.http_client,
-        .diagnostics = program.diagnostics,
-        .progress = program.progress,
+        .tmp_allocator = program.gpa,
         .prefix = program.options.prefix,
     });
-    defer pm.deinit();
+    defer installed_packages.deinit();
 
     var stdout_buffered = std.io.bufferedWriter(program.stdout.writer());
     const writer = stdout_buffered.writer();
 
     for (
-        pm.installed_file.data.packages.keys(),
-        pm.installed_file.data.packages.values(),
+        installed_packages.packages.keys(),
+        installed_packages.packages.values(),
     ) |package_name, package| {
         try writer.print("{s}\t{s}\n", .{ package_name, package.version });
     }
@@ -667,6 +689,7 @@ fn pkgsOutdatedCommand(program: *Program) !void {
 test {
     _ = ArgParser;
     _ = Diagnostics;
+    _ = InstalledPackages;
     _ = Package;
     _ = PackageManager;
     _ = Packages;
@@ -678,6 +701,7 @@ test {
 
 const ArgParser = @import("ArgParser.zig");
 const Diagnostics = @import("Diagnostics.zig");
+const InstalledPackages = @import("InstalledPackages.zig");
 const PackageManager = @import("PackageManager.zig");
 const Packages = @import("Packages.zig");
 const Package = @import("Package.zig");
