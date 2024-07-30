@@ -322,7 +322,14 @@ fn installGeneric(the_install: Package.Install, from_dir: std.fs.Dir, to_dir: st
 
             try fs.copyTree(child_from_dir, child_to_dir);
         },
-        .sym_link, .file => try from_dir.copyFile(the_install.from, to_dir, the_install.to, .{}),
+        .sym_link, .file => {
+            const install_base_name = std.fs.path.basename(the_install.to);
+            const child_to_dir_path = std.fs.path.dirname(the_install.to) orelse ".";
+            var child_to_dir = try to_dir.makeOpenPath(child_to_dir_path, .{});
+            defer child_to_dir.close();
+
+            try from_dir.copyFile(the_install.from, child_to_dir, install_base_name, .{});
+        },
 
         .block_device,
         .character_device,

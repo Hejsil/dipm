@@ -6,10 +6,18 @@ test "install test-file" {
     var buf: [std.mem.page_size]u8 = undefined;
     try pm.pm.installOne(repo.packages, "test-file");
     try pm.expectFile("bin/test-file", "Binary");
+    try pm.expectFile("lib/test-file", "Binary");
+    try pm.expectFile("lib/subdir/test-file", "Binary");
+    try pm.expectFile("share/test-file", "Binary");
+    try pm.expectFile("share/subdir/test-file", "Binary");
     try pm.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
         \\[test-file]
         \\version = 0.1.0
         \\location = {[prefix]s}/bin/test-file
+        \\location = {[prefix]s}/lib/test-file
+        \\location = {[prefix]s}/lib/subdir/test-file
+        \\location = {[prefix]s}/share/test-file
+        \\location = {[prefix]s}/share/subdir/test-file
         \\
     , .{ .prefix = pm.pm.prefix_path }));
     try pm.expectDiagnostics(
@@ -145,21 +153,20 @@ test "uninstall" {
     var pm = try TestingPackageManager.init(.{});
     defer pm.deinit();
 
-    try pm.pm.installOne(repo.packages, "test-xz");
+    try pm.pm.installOne(repo.packages, "test-file");
     pm.diag.reset();
 
-    try pm.pm.uninstallOne("test-xz");
-    try pm.expectNoFile("bin/test-xz");
-    try pm.expectNoFile("lib/test-xz");
-    try pm.expectNoFile("lib/test-xz-dir/file");
-    try pm.expectNoFile("share/test-xz");
-    try pm.expectNoFile("share/test-xz-dir/file");
+    try pm.pm.uninstallOne("test-file");
+    try pm.expectNoFile("bin/test-file");
+    try pm.expectNoFile("lib/test-file");
+    try pm.expectNoFile("lib/subdir/test-file");
+    try pm.expectNoFile("share/test-file");
+    try pm.expectNoFile("share/subdir/test-file");
     try pm.expectFile("share/dipm/installed.ini", "");
     try pm.expectDiagnostics(
-        \\<B><g>✓<R> <B>test-xz 0.1.0 -> ✗<R>
+        \\<B><g>✓<R> <B>test-file 0.1.0 -> ✗<R>
         \\
     );
-
     try pm.cleanup();
 }
 
@@ -538,6 +545,8 @@ pub const simple_file = TestingPackageRepository.Package{
         .content = "Binary",
     },
     .install_bin = &.{"test-file:pkg"},
+    .install_lib = &.{ "test-file:pkg", "subdir/test-file:pkg" },
+    .install_share = &.{ "test-file:pkg", "subdir/test-file:pkg" },
 };
 
 // All `simple_tree_` binaries are compressed archives. They're generated with the following
