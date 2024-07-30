@@ -190,7 +190,6 @@ fn installCommand(program: *Program) !void {
 
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
-        .tmp_allocator = program.gpa,
         .prefix = program.options.prefix,
     });
     defer installed_packages.deinit();
@@ -240,7 +239,6 @@ fn uninstallCommand(program: *Program) !void {
 
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
-        .tmp_allocator = program.gpa,
         .prefix = program.options.prefix,
     });
     defer installed_packages.deinit();
@@ -282,7 +280,6 @@ fn updateCommand(program: *Program) !void {
 
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
-        .tmp_allocator = program.gpa,
         .prefix = program.options.prefix,
     });
     defer installed_packages.deinit();
@@ -362,7 +359,6 @@ fn listInstalledCommand(program: *Program) !void {
 
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
-        .tmp_allocator = program.gpa,
         .prefix = program.options.prefix,
     });
     defer installed_packages.deinit();

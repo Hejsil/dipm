@@ -5,7 +5,7 @@ file: ?std.fs.File,
 
 pub fn open(options: struct {
     allocator: std.mem.Allocator,
-    tmp_allocator: std.mem.Allocator,
+    tmp_allocator: ?std.mem.Allocator = null,
     prefix: []const u8,
 }) !InstalledPackages {
     const cwd = std.fs.cwd();
@@ -35,11 +35,12 @@ pub fn deinit(packages: *InstalledPackages) void {
 
 pub fn parseFromFile(options: struct {
     allocator: std.mem.Allocator,
-    tmp_allocator: std.mem.Allocator,
+    tmp_allocator: ?std.mem.Allocator = null,
     file: std.fs.File,
 }) !InstalledPackages {
-    const data_str = try options.file.readToEndAlloc(options.tmp_allocator, std.math.maxInt(usize));
-    defer options.tmp_allocator.free(data_str);
+    const tmp_allocator = options.tmp_allocator orelse options.allocator;
+    const data_str = try options.file.readToEndAlloc(tmp_allocator, std.math.maxInt(usize));
+    defer tmp_allocator.free(data_str);
 
     var res = try parse(.{
         .allocator = options.allocator,
@@ -54,14 +55,15 @@ pub fn parseFromFile(options: struct {
 
 pub fn parse(options: struct {
     allocator: std.mem.Allocator,
-    tmp_allocator: std.mem.Allocator,
+    tmp_allocator: ?std.mem.Allocator = null,
     string: []const u8,
 }) !InstalledPackages {
     // TODO: This is quite an inefficient implementation. It first parsers a dynamic ini and then
     //       extracts the fields. Instead, the parsing needs to be done manually, or a ini parser
     //       that can parse into T is needed.
 
-    const dynamic = try ini.Dynamic.parse(options.tmp_allocator, options.string, .{
+    const tmp_allocator = options.tmp_allocator orelse options.allocator;
+    const dynamic = try ini.Dynamic.parse(tmp_allocator, options.string, .{
         .allocate = ini.Dynamic.Allocate.none,
     });
     defer dynamic.deinit();

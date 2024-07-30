@@ -123,7 +123,7 @@ pub fn fromUrl(options: struct {
 
     /// Allocator used for internal allocations. None of the allocations made with this
     /// allocator will be returned.
-    tmp_allocator: std.mem.Allocator,
+    tmp_allocator: ?std.mem.Allocator = null,
 
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
@@ -166,7 +166,7 @@ pub fn fromGithub(options: struct {
 
     /// Allocator used for internal allocations. None of the allocations made with this
     /// allocator will be returned.
-    tmp_allocator: std.mem.Allocator,
+    tmp_allocator: ?std.mem.Allocator = null,
 
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
@@ -183,7 +183,8 @@ pub fn fromGithub(options: struct {
     os: std.Target.Os.Tag,
     arch: std.Target.Cpu.Arch,
 }) !Named {
-    var arena_state = std.heap.ArenaAllocator.init(options.tmp_allocator);
+    const tmp_allocator = options.tmp_allocator orelse options.allocator;
+    var arena_state = std.heap.ArenaAllocator.init(tmp_allocator);
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
@@ -789,7 +790,7 @@ pub fn newestUpstreamVersion(package: Package, options: struct {
 
     /// Allocator used for internal allocations. None of the allocations made with this
     /// allocator will be returned.
-    tmp_allocator: std.mem.Allocator,
+    tmp_allocator: ?std.mem.Allocator = null,
 
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
@@ -812,14 +813,15 @@ fn newestUpstreamVersionGithub(options: struct {
 
     /// Allocator used for internal allocations. None of the allocations made with this
     /// allocator will be returned.
-    tmp_allocator: std.mem.Allocator,
+    tmp_allocator: ?std.mem.Allocator = null,
 
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
 
     repo: []const u8,
 }) ![]const u8 {
-    var arena_state = std.heap.ArenaAllocator.init(options.tmp_allocator);
+    const tmp_allocator = options.tmp_allocator orelse options.allocator;
+    var arena_state = std.heap.ArenaAllocator.init(tmp_allocator);
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
