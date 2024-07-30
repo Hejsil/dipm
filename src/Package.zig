@@ -243,6 +243,10 @@ pub fn fromGithub(options: struct {
         .extra_strings_to_trim = &.{
             options.user,
             options.repo,
+            // A lot of tools have a full name (like nushell) but uses a shorthand for the actual
+            // program (nu for nushell)
+            options.repo[0..@min(2, options.repo.len)],
+            options.repo[0..@min(3, options.repo.len)],
             name,
             version,
             latest_release.tag_name,
