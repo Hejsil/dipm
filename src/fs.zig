@@ -31,9 +31,26 @@ pub fn tmpName() [tmp_dir_name_len]u8 {
     return res;
 }
 
-pub fn tmpDir(dir: std.fs.Dir, open_dir_options: std.fs.Dir.OpenOptions) !std.fs.Dir {
-    const name = tmpName();
-    return dir.makeOpenPath(&name, open_dir_options);
+pub const TmpDir = struct {
+    dir: std.fs.Dir,
+    name: [tmp_dir_name_len]u8,
+};
+
+pub fn tmpDir(dir: std.fs.Dir, open_dir_options: std.fs.Dir.OpenOptions) !TmpDir {
+    while (true) {
+        const name = tmpName();
+        dir.makeDir(&name) catch |err| switch (err) {
+            error.PathAlreadyExists => continue,
+            else => |e| return e,
+        };
+        var res = dir.openDir(&name, open_dir_options) catch |err| switch (err) {
+            error.FileNotFound => continue,
+            else => |e| return e,
+        };
+        errdefer res.close();
+
+        return .{ .dir = res, .name = name };
+    }
 }
 
 pub const FileType = enum {

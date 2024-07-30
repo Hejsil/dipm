@@ -255,10 +255,10 @@ pub fn fromGithub(options: struct {
     defer global_tmp_dir.close();
 
     var tmp_dir = try fs.tmpDir(global_tmp_dir, .{});
-    defer tmp_dir.close();
+    defer tmp_dir.dir.close();
 
     const downloaded_file_name = std.fs.path.basename(download_url);
-    const downloaded_file = try tmp_dir.createFile(downloaded_file_name, .{ .read = true });
+    const downloaded_file = try tmp_dir.dir.createFile(downloaded_file_name, .{ .read = true });
     defer downloaded_file.close();
 
     const package_download_result = try download.download(downloaded_file.writer(), .{
@@ -274,7 +274,7 @@ pub fn fromGithub(options: struct {
         .allocator = arena,
         .input_name = downloaded_file_name,
         .input_file = downloaded_file,
-        .output_dir = tmp_dir,
+        .output_dir = tmp_dir.dir,
     });
 
     // TODO: Can this be ported to pure zig easily?
@@ -289,7 +289,7 @@ pub fn fromGithub(options: struct {
             \\    sort
             \\
         },
-        .cwd_dir = tmp_dir,
+        .cwd_dir = tmp_dir.dir,
     });
 
     if (static_files_result.stdout.len < 1)

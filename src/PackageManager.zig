@@ -518,7 +518,7 @@ const DownloadAndExtractJobs = struct {
             errdefer working_dir.close();
 
             res.jobs.appendAssumeCapacity(.{
-                .working_dir = working_dir,
+                .working_dir = working_dir.dir,
                 .package = package,
                 .result = {},
             });
