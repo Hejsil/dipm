@@ -5,7 +5,10 @@ progress: *Progress,
 pub fn init(options: Options) !TestingPackageManager {
     const allocator = options.allocator;
 
-    const random_prefix_path = try fs.zigCacheTmpDirPath(allocator);
+    var random_prefix_dir = try fs.zigCacheTmpDir();
+    defer random_prefix_dir.dir.close();
+
+    const random_prefix_path = try random_prefix_dir.path(allocator);
     defer allocator.free(random_prefix_path);
 
     const diag = try allocator.create(Diagnostics);

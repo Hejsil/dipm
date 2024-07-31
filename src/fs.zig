@@ -1,22 +1,69 @@
-pub fn zigCacheTmpDirPath(allocator: std.mem.Allocator) ![]u8 {
-    const tmp_dir_path = try zigCacheTmpPath(allocator);
-    defer allocator.free(tmp_dir_path);
+pub const ZigCacheTmpDir = struct {
+    zig_cache_path: []const u8,
+    tmp_subdir_name: []const u8,
+    dir_name: [tmp_dir_name_len]u8,
+    dir: std.fs.Dir,
 
-    const name = tmpName();
-    return std.fs.path.join(allocator, &.{ tmp_dir_path, &name });
+    pub fn deleteAndClose(dir: *ZigCacheTmpDir) void {
+        defer dir.dir.close();
+
+        var parent_dir = dir.dir.openDir("..", .{}) catch return;
+        defer parent_dir.close();
+
+        parent_dir.deleteTree(&dir.dir_name) catch {};
+    }
+
+    pub fn path(dir: ZigCacheTmpDir, allocator: std.mem.Allocator) ![]u8 {
+        return std.fs.path.join(allocator, &.{
+            dir.zig_cache_path,
+            dir.tmp_subdir_name,
+            &dir.dir_name,
+        });
+    }
+};
+
+pub fn zigCacheTmpDir() !ZigCacheTmpDir {
+    const zig_cache_path = zigCachePath();
+    var zig_cache_dir = try std.fs.cwd().openDir(zig_cache_path, .{});
+    defer zig_cache_dir.close();
+
+    const tmp_subdir_name = "tmp";
+    var zig_cache_tmp_dir = try zig_cache_dir.openDir(tmp_subdir_name, .{});
+    defer zig_cache_tmp_dir.close();
+
+    var res = try tmpDir(zig_cache_tmp_dir, .{});
+    errdefer res.dir.close();
+
+    return .{
+        .zig_cache_path = zig_cache_path,
+        .tmp_subdir_name = tmp_subdir_name,
+        .dir_name = res.name,
+        .dir = res.dir,
+    };
 }
 
-pub fn zigCacheTmpPath(allocator: std.mem.Allocator) ![]u8 {
+var zig_cache_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+var zig_cache_path_len: usize = 0;
+var zig_cache_path_once = std.once(zigCachePathOnce);
+
+fn zigCachePathOnce() void {
     comptime std.debug.assert(builtin.is_test);
 
     var self_exe_dir_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const self_exe_dir_path = try std.fs.selfExeDirPath(&self_exe_dir_path_buf);
+    const self_exe_dir_path = std.fs.selfExeDirPath(&self_exe_dir_path_buf) catch ".zig-cache/o/aaaa";
 
     // The code below assumes that the self exe dir path is in `.zig-cache/o/<hash>` and gets
     // us `.zig-cache/tmp` based on this assumption.
     const o_path = std.fs.path.dirname(self_exe_dir_path) orelse unreachable;
     const zig_cache_path = std.fs.path.dirname(o_path) orelse unreachable;
-    return std.fs.path.join(allocator, &.{ zig_cache_path, "tmp" });
+
+    zig_cache_path_len = zig_cache_path.len;
+    @memcpy(zig_cache_path_buf[0..zig_cache_path.len], zig_cache_path);
+}
+
+pub fn zigCachePath() []const u8 {
+    zig_cache_path_once.call();
+    return zig_cache_path_buf[0..zig_cache_path_len];
 }
 
 const tmp_dir_bytes_count = 12;

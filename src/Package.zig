@@ -359,10 +359,10 @@ fn testFromGithub(options: struct {
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
-    const cwd = std.fs.cwd();
-    const tmp_dir_path = try fs.zigCacheTmpDirPath(arena);
-    try cwd.makeDir(tmp_dir_path);
+    var tmp_dir = try fs.zigCacheTmpDir();
+    defer tmp_dir.deleteAndClose();
 
+    const tmp_dir_path = try tmp_dir.path(arena);
     const static_binary_name = try std.fmt.allocPrint(arena, "{s}-{s}-{s}", .{
         options.user,
         options.repo,
@@ -372,6 +372,8 @@ fn testFromGithub(options: struct {
         tmp_dir_path,
         static_binary_name,
     });
+
+    const cwd = std.fs.cwd();
     try cwd.writeFile(.{
         .sub_path = static_binary_path,
         // Small static binary produced with:
