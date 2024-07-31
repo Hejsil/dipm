@@ -41,10 +41,6 @@ pub fn mainFull(options: MainOptions) !void {
     const home_path = std.process.getEnvVarOwned(arena, "HOME") catch "/";
     const local_home_path = try std.fs.path.join(arena, &.{ home_path, ".local" });
 
-    var http_client = std.http.Client{ .allocator = options.allocator };
-    defer http_client.deinit();
-    try http_client.initDefaultProxies(arena);
-
     var diag = Diagnostics.init(options.allocator);
     defer diag.deinit();
 
@@ -56,7 +52,6 @@ pub fn mainFull(options: MainOptions) !void {
     var program = Program{
         .gpa = options.allocator,
         .arena = arena,
-        .http_client = &http_client,
         .progress = &progress,
         .diagnostics = &diag,
         .stdin = options.stdin,
@@ -155,7 +150,6 @@ const Program = @This();
 
 gpa: std.mem.Allocator,
 arena: std.mem.Allocator,
-http_client: *std.http.Client,
 progress: *Progress,
 diagnostics: *Diagnostics,
 
@@ -188,6 +182,9 @@ fn installCommand(program: *Program) !void {
             packages_to_install.appendAssumeCapacity(name);
     }
 
+    var http_client = std.http.Client{ .allocator = program.gpa };
+    defer http_client.deinit();
+
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
         .prefix = program.options.prefix,
@@ -196,7 +193,7 @@ fn installCommand(program: *Program) !void {
 
     var pkgs = try Packages.download(.{
         .allocator = program.gpa,
-        .http_client = program.http_client,
+        .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .prefix = program.options.prefix,
@@ -206,7 +203,7 @@ fn installCommand(program: *Program) !void {
 
     var pm = try PackageManager.init(.{
         .allocator = program.gpa,
-        .http_client = program.http_client,
+        .http_client = &http_client,
         .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -237,6 +234,9 @@ fn uninstallCommand(program: *Program) !void {
             packages_to_uninstall.appendAssumeCapacity(name);
     }
 
+    var http_client = std.http.Client{ .allocator = program.gpa };
+    defer http_client.deinit();
+
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
         .prefix = program.options.prefix,
@@ -245,7 +245,7 @@ fn uninstallCommand(program: *Program) !void {
 
     var pm = try PackageManager.init(.{
         .allocator = program.gpa,
-        .http_client = program.http_client,
+        .http_client = &http_client,
         .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -278,6 +278,9 @@ fn updateCommand(program: *Program) !void {
             packages_to_update.appendAssumeCapacity(name);
     }
 
+    var http_client = std.http.Client{ .allocator = program.gpa };
+    defer http_client.deinit();
+
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
         .prefix = program.options.prefix,
@@ -286,7 +289,7 @@ fn updateCommand(program: *Program) !void {
 
     var pkgs = try Packages.download(.{
         .allocator = program.gpa,
-        .http_client = program.http_client,
+        .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .prefix = program.options.prefix,
@@ -296,7 +299,7 @@ fn updateCommand(program: *Program) !void {
 
     var pm = try PackageManager.init(.{
         .allocator = program.gpa,
-        .http_client = program.http_client,
+        .http_client = &http_client,
         .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -394,9 +397,12 @@ fn listAllCommand(program: *Program) !void {
         }
     }
 
+    var http_client = std.http.Client{ .allocator = program.gpa };
+    defer http_client.deinit();
+
     var pkgs = try Packages.download(.{
         .allocator = program.gpa,
-        .http_client = program.http_client,
+        .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .prefix = program.options.prefix,
@@ -546,6 +552,9 @@ const UrlAndName = struct {
 };
 
 fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
+    var http_client = std.http.Client{ .allocator = program.gpa };
+    defer http_client.deinit();
+
     const cwd = std.fs.cwd();
     const pkgs_ini_base_name = std.fs.path.basename(options.pkgs_ini_path);
 
@@ -565,7 +574,7 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
         const package = Package.fromUrl(.{
             .allocator = packages.arena.allocator(),
             .tmp_allocator = program.gpa,
-            .http_client = program.http_client,
+            .http_client = &http_client,
             .url = url.url,
             .name = url.name,
             .os = builtin.os.tag,
@@ -622,6 +631,9 @@ fn pkgsMakeCommand(program: *Program) !void {
             try urls.put(url, {});
     }
 
+    var http_client = std.http.Client{ .allocator = program.gpa };
+    defer http_client.deinit();
+
     var stdout_buffered = std.io.bufferedWriter(program.stdout.writer());
     const writer = stdout_buffered.writer();
 
@@ -629,7 +641,7 @@ fn pkgsMakeCommand(program: *Program) !void {
         const package = Package.fromUrl(.{
             .allocator = program.arena,
             .tmp_allocator = program.gpa,
-            .http_client = program.http_client,
+            .http_client = &http_client,
             .url = url,
             .os = builtin.os.tag,
             .arch = builtin.target.cpu.arch,
@@ -666,13 +678,16 @@ fn pkgsOutdatedCommand(program: *Program) !void {
             try packages_to_check_map.put(package, {});
     }
 
+    var http_client = std.http.Client{ .allocator = program.gpa };
+    defer http_client.deinit();
+
     const cwd = std.fs.cwd();
     var packages = try Packages.parseFromPath(program.gpa, cwd, pkgs_ini_path);
     defer packages.deinit();
 
     try packages.findOutdatedPackages(.{
         .allocator = program.gpa,
-        .http_client = program.http_client,
+        .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .packages_to_check = if (packages_to_check_map.count() == 0)
