@@ -4,7 +4,9 @@ pub const Result = struct {
 };
 
 pub fn download(writer: anytype, options: struct {
-    client: *std.http.Client,
+    /// Client used to download files over the internet. If null then only `file://` schemes can
+    /// be "downloaded"
+    client: ?*std.http.Client = null,
     uri_str: []const u8,
 
     progress: Progress.Node = .none,
@@ -21,8 +23,10 @@ pub fn download(writer: anytype, options: struct {
         try io.pipe(file.reader(), out);
         break :blk .ok;
     } else blk: {
+        const client = options.client orelse return error.NoHttpClientProvided;
+
         var header_buffer: [1024 * 8]u8 = undefined;
-        var request = try options.client.open(.GET, uri, .{
+        var request = try client.open(.GET, uri, .{
             .server_header_buffer = &header_buffer,
             .keep_alive = false,
         });

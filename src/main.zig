@@ -234,9 +234,6 @@ fn uninstallCommand(program: *Program) !void {
             packages_to_uninstall.appendAssumeCapacity(name);
     }
 
-    var http_client = std.http.Client{ .allocator = program.gpa };
-    defer http_client.deinit();
-
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
         .prefix = program.options.prefix,
@@ -245,7 +242,6 @@ fn uninstallCommand(program: *Program) !void {
 
     var pm = try PackageManager.init(.{
         .allocator = program.gpa,
-        .http_client = &http_client,
         .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,

@@ -57,9 +57,6 @@ pub fn init(options: Options) !TestingPackageManager {
         .prefix = prefix,
         .arch = .x86_64,
         .os = .linux,
-
-        // Will never download in tests
-        .http_client = undefined,
     });
     errdefer pm.deinit();
 

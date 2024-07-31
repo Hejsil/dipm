@@ -1,7 +1,7 @@
 gpa: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 
-http_client: *std.http.Client,
+http_client: ?*std.http.Client,
 installed_packages: *InstalledPackages,
 
 diagnostics: *Diagnostics,
@@ -65,7 +65,7 @@ pub fn init(options: Options) !PackageManager {
 
 pub const Options = struct {
     allocator: std.mem.Allocator,
-    http_client: *std.http.Client,
+    http_client: ?*std.http.Client = null,
     installed_packages: *InstalledPackages,
 
     /// Successes and failures are reported to the diagnostics. Set this for more details
