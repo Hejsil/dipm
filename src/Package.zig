@@ -48,12 +48,9 @@ pub const Named = struct {
 };
 
 pub fn deinit(package: Package, allocator: std.mem.Allocator) void {
-    for (package.linux_x86_64.bin) |item|
-        allocator.free(item);
-    for (package.linux_x86_64.lib) |item|
-        allocator.free(item);
-    for (package.linux_x86_64.share) |item|
-        allocator.free(item);
+    heap.freeItems(allocator, package.linux_x86_64.bin);
+    heap.freeItems(allocator, package.linux_x86_64.lib);
+    heap.freeItems(allocator, package.linux_x86_64.share);
 
     allocator.free(package.info.version);
     allocator.free(package.update.github);
@@ -287,8 +284,7 @@ pub fn fromGithub(options: struct {
         .dir = tmp_dir.dir,
     });
     errdefer {
-        for (binaries) |item|
-            options.allocator.free(item);
+        heap.freeItems(options.allocator, binaries);
         options.allocator.free(binaries);
     }
 
@@ -544,8 +540,7 @@ fn testFindStaticallyLinkedBinaries(options: struct {
         .dir = tmp_dir.dir,
     });
     defer {
-        for (result) |item|
-            allocator.free(item);
+        heap.freeItems(allocator, result);
         allocator.free(result);
     }
 
@@ -968,6 +963,7 @@ test {
 
     _ = download;
     _ = fs;
+    _ = heap;
 }
 
 const Package = @This();
@@ -977,4 +973,5 @@ const Progress = @import("Progress.zig");
 const builtin = @import("builtin");
 const download = @import("download.zig");
 const fs = @import("fs.zig");
+const heap = @import("heap.zig");
 const std = @import("std");
