@@ -255,7 +255,7 @@ pub fn fromGithub(options: struct {
     var global_tmp_dir = try std.fs.cwd().makeOpenPath("/tmp/dipm/", .{});
     defer global_tmp_dir.close();
 
-    var tmp_dir = try fs.tmpDir(global_tmp_dir, .{});
+    var tmp_dir = try fs.tmpDir(global_tmp_dir, .{ .iterate = true });
     defer tmp_dir.dir.close();
 
     const downloaded_file_name = std.fs.path.basename(download_url);
@@ -277,6 +277,16 @@ pub fn fromGithub(options: struct {
         .input_file = downloaded_file,
         .output_dir = tmp_dir.dir,
     });
+
+    const man_pages = try findManPages(.{
+        .allocator = options.allocator,
+        .tmp_allocator = tmp_allocator,
+        .dir = tmp_dir.dir,
+    });
+    errdefer {
+        heap.freeItems(options.allocator, man_pages);
+        options.allocator.free(man_pages);
+    }
 
     const binaries = try findStaticallyLinkedBinaries(.{
         .allocator = options.allocator,
@@ -309,7 +319,7 @@ pub fn fromGithub(options: struct {
             .linux_x86_64 = .{
                 .bin = binaries,
                 .lib = &.{},
-                .share = &.{},
+                .share = man_pages,
                 .url = download_url_duped,
                 .hash = hash_duped,
             },
@@ -544,9 +554,10 @@ fn testFindStaticallyLinkedBinaries(options: struct {
         allocator.free(result);
     }
 
-    try std.testing.expectEqual(options.expected.len, result.len);
-    for (options.expected, result) |expected, actual|
+    const len = @min(options.expected.len, result.len);
+    for (options.expected[0..len], result[0..len]) |expected, actual|
         try std.testing.expectEqualStrings(expected, actual);
+    try std.testing.expectEqual(options.expected.len, result.len);
 }
 
 test findStaticallyLinkedBinaries {
@@ -560,6 +571,133 @@ test findStaticallyLinkedBinaries {
         .expected = &.{
             "binary",
             "subdir/binary",
+        },
+    });
+}
+
+fn findManPages(options: struct {
+    allocator: std.mem.Allocator,
+    tmp_allocator: std.mem.Allocator,
+    dir: std.fs.Dir,
+}) ![][]const u8 {
+    var walker = try options.dir.walk(options.tmp_allocator);
+    defer walker.deinit();
+
+    var result = std.ArrayList([]const u8).init(options.allocator);
+    defer {
+        heap.freeItems(options.allocator, result.items);
+        result.deinit();
+    }
+
+    while (try walker.next()) |entry| {
+        if (entry.kind != .file)
+            continue;
+        if (!isManPage(entry.basename))
+            continue;
+
+        const duped = try options.allocator.dupe(u8, entry.path);
+        errdefer options.allocator.free(duped);
+
+        try result.append(duped);
+    }
+
+    std.mem.sort([]const u8, result.items, {}, mem.sortLessThan(u8));
+    return result.toOwnedSlice();
+}
+
+fn isManPage(filename: []const u8) bool {
+    var basename = filename;
+    if (std.mem.endsWith(u8, basename, ".gz"))
+        basename = basename[0 .. basename.len - ".gz".len];
+
+    var state: enum {
+        start,
+        number,
+        end,
+    } = .start;
+
+    for (0..basename.len) |i_forward| {
+        const i_backward = (basename.len - i_forward) - 1;
+        const c = basename[i_backward];
+        switch (state) {
+            .start => switch (c) {
+                '0'...'9' => state = .number,
+                else => return false,
+            },
+            .number => switch (c) {
+                '0'...'9' => {},
+                '.' => state = .end,
+                else => return false,
+            },
+            .end => switch (c) {
+                // This seems like a binary ending with a version number, like fzf-0.2.2
+                '0'...'9' => return false,
+                else => return true,
+            },
+        }
+    }
+
+    return false;
+}
+
+fn testfindManPages(options: struct {
+    files: []const std.fs.Dir.WriteFileOptions,
+    expected: []const []const u8,
+}) !void {
+    var tmp_dir = try fs.zigCacheTmpDir(.{ .iterate = true });
+    defer tmp_dir.deleteAndClose();
+
+    for (options.files) |file_options| {
+        try tmp_dir.dir.makePath(std.fs.path.dirname(file_options.sub_path) orelse ".");
+        try tmp_dir.dir.writeFile(file_options);
+    }
+
+    const allocator = std.testing.allocator;
+    const result = try findManPages(.{
+        .allocator = allocator,
+        .tmp_allocator = allocator,
+        .dir = tmp_dir.dir,
+    });
+    defer {
+        heap.freeItems(allocator, result);
+        allocator.free(result);
+    }
+
+    const len = @min(options.expected.len, result.len);
+    for (options.expected[0..len], result[0..len]) |expected, actual|
+        try std.testing.expectEqualStrings(expected, actual);
+    try std.testing.expectEqual(options.expected.len, result.len);
+}
+
+test findManPages {
+    try testfindManPages(.{
+        .files = &.{
+            .{ .sub_path = "text", .data = "" },
+            .{ .sub_path = "1", .data = "" },
+            .{ .sub_path = "1.gz", .data = "" },
+            .{ .sub_path = "text.1", .data = "" },
+            .{ .sub_path = "text.1.gz", .data = "" },
+            .{ .sub_path = "text.10", .data = "" },
+            .{ .sub_path = "text.10.gz", .data = "" },
+            .{ .sub_path = "text-0.2.0", .data = "" },
+            .{ .sub_path = "subdir/text", .data = "" },
+            .{ .sub_path = "subdir/1", .data = "" },
+            .{ .sub_path = "subdir/1.gz", .data = "" },
+            .{ .sub_path = "subdir/text.1", .data = "" },
+            .{ .sub_path = "subdir/text.1.gz", .data = "" },
+            .{ .sub_path = "subdir/text.10", .data = "" },
+            .{ .sub_path = "subdir/text.10.gz", .data = "" },
+            .{ .sub_path = "subdir/text-0.2.0", .data = "" },
+        },
+        .expected = &.{
+            "subdir/text.1",
+            "subdir/text.1.gz",
+            "subdir/text.10",
+            "subdir/text.10.gz",
+            "text.1",
+            "text.1.gz",
+            "text.10",
+            "text.10.gz",
         },
     });
 }
@@ -605,7 +743,7 @@ fn findDownloadUrl(options: struct {
         if (ext.ext.len != 0)
             try trim_list.append(ext.ext);
 
-    std.sort.insertion([]const u8, trim_list.slice(), {}, struct {
+    std.mem.sort([]const u8, trim_list.slice(), {}, struct {
         fn lenGt(_: void, a: []const u8, b: []const u8) bool {
             return a.len > b.len;
         }
@@ -964,6 +1102,7 @@ test {
     _ = download;
     _ = fs;
     _ = heap;
+    _ = mem;
 }
 
 const Package = @This();
@@ -974,4 +1113,5 @@ const builtin = @import("builtin");
 const download = @import("download.zig");
 const fs = @import("fs.zig");
 const heap = @import("heap.zig");
+const mem = @import("mem.zig");
 const std = @import("std");
