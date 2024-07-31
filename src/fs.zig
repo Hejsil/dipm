@@ -22,7 +22,7 @@ pub const ZigCacheTmpDir = struct {
     }
 };
 
-pub fn zigCacheTmpDir() !ZigCacheTmpDir {
+pub fn zigCacheTmpDir(open_dir_options: std.fs.Dir.OpenOptions) !ZigCacheTmpDir {
     const zig_cache_path = zigCachePath();
     var zig_cache_dir = try std.fs.cwd().openDir(zig_cache_path, .{});
     defer zig_cache_dir.close();
@@ -31,7 +31,7 @@ pub fn zigCacheTmpDir() !ZigCacheTmpDir {
     var zig_cache_tmp_dir = try zig_cache_dir.openDir(tmp_subdir_name, .{});
     defer zig_cache_tmp_dir.close();
 
-    var res = try tmpDir(zig_cache_tmp_dir, .{});
+    var res = try tmpDir(zig_cache_tmp_dir, open_dir_options);
     errdefer res.dir.close();
 
     return .{
@@ -43,7 +43,7 @@ pub fn zigCacheTmpDir() !ZigCacheTmpDir {
 }
 
 pub fn zigCacheTmpDirPath(allocator: std.mem.Allocator) ![]const u8 {
-    var tmp_dir = try zigCacheTmpDir();
+    var tmp_dir = try zigCacheTmpDir(.{});
     defer tmp_dir.dir.close();
 
     return tmp_dir.path(allocator);

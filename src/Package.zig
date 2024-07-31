@@ -367,7 +367,7 @@ fn testFromGithub(options: struct {
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
-    var tmp_dir = try fs.zigCacheTmpDir();
+    var tmp_dir = try fs.zigCacheTmpDir(.{});
     defer tmp_dir.deleteAndClose();
 
     const tmp_dir_path = try tmp_dir.path(arena);
@@ -529,7 +529,7 @@ fn testFindStaticallyLinkedBinaries(options: struct {
     files: []const std.fs.Dir.WriteFileOptions,
     expected: []const []const u8,
 }) !void {
-    var tmp_dir = try fs.zigCacheTmpDir();
+    var tmp_dir = try fs.zigCacheTmpDir(.{});
     defer tmp_dir.deleteAndClose();
 
     for (options.files) |file_options| {
