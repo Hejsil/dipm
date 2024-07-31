@@ -23,10 +23,7 @@ pub fn init(options: Options) !TestingPackageRepository {
         .maximum_nodes = 0,
     });
 
-    var prefix_dir = try fs.zigCacheTmpDir();
-    defer prefix_dir.dir.close();
-
-    const prefix_path = try prefix_dir.path(allocator);
+    const prefix_path = try fs.zigCacheTmpDirPath(allocator);
     defer allocator.free(prefix_path);
 
     const pkgs_ini_path = try std.fs.path.join(allocator, &.{

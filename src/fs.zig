@@ -42,6 +42,13 @@ pub fn zigCacheTmpDir() !ZigCacheTmpDir {
     };
 }
 
+pub fn zigCacheTmpDirPath(allocator: std.mem.Allocator) ![]const u8 {
+    var tmp_dir = try zigCacheTmpDir();
+    defer tmp_dir.dir.close();
+
+    return tmp_dir.path(allocator);
+}
+
 var zig_cache_path_buf: [std.fs.max_path_bytes]u8 = undefined;
 var zig_cache_path_len: usize = 0;
 var zig_cache_path_once = std.once(zigCachePathOnce);
