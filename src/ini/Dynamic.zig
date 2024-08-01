@@ -63,7 +63,7 @@ pub fn parse(allocator: std.mem.Allocator, string: []const u8, opt: ParseOptions
                 });
             },
             .comment => {},
-            .invalid => unreachable, // TODO: Error
+            .invalid => return error.InvalidString,
         }
     }
 
@@ -105,6 +105,42 @@ pub const Allocate = struct {
 pub const ParseOptions = struct {
     allocate: Allocate = Allocate.all,
 };
+
+fn parseAndWrite(allocator: std.mem.Allocator, string: []const u8) ![]u8 {
+    var out = std.ArrayList(u8).init(allocator);
+    defer out.deinit();
+
+    var dynamic = try parse(allocator, string, .{ .allocate = Allocate.none });
+    defer dynamic.deinit();
+
+    try dynamic.write(out.writer());
+    return out.toOwnedSlice();
+}
+
+test "Dynamic fuzz" {
+    const allocator = std.testing.allocator;
+    const fuzz_input = std.testing.fuzzInput(.{});
+
+    // This fuzz test ensure that once parsed and written out once, doing so again should yield the same result.
+    const stage1 = parseAndWrite(allocator, fuzz_input) catch |err| switch (err) {
+        // Ignore invalid strings produced by the fuzzer. We don't ignore them in stage 2
+        error.InvalidString => return,
+        else => |e| return e,
+    };
+    defer allocator.free(stage1);
+
+    const stage2 = try parseAndWrite(allocator, stage1);
+    defer allocator.free(stage2);
+
+    // Use both expectEqualStrings and expectEqualSlices so that we get both the string and hex diff
+    std.testing.expectEqualStrings(stage1, stage2) catch {};
+    std.testing.expectEqualSlices(u8, stage1, stage2) catch |err| {
+        // Also use the testing api to print out the fuzz input
+        std.testing.expectEqualStrings(stage2, fuzz_input) catch {};
+        std.testing.expectEqualSlices(u8, stage2, fuzz_input) catch {};
+        return err;
+    };
+}
 
 pub const Section = @import("Section.zig");
 
