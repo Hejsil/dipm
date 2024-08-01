@@ -191,7 +191,7 @@ fn installCommand(program: *Program) !void {
     });
     defer installed_packages.deinit();
 
-    var pkgs = try Packages.download(.{
+    var packages = try Packages.download(.{
         .allocator = program.gpa,
         .http_client = &http_client,
         .diagnostics = program.diagnostics,
@@ -199,11 +199,12 @@ fn installCommand(program: *Program) !void {
         .prefix = program.options.prefix,
         .download = .only_if_required,
     });
-    defer pkgs.deinit();
+    defer packages.deinit();
 
     var pm = try PackageManager.init(.{
         .allocator = program.gpa,
         .http_client = &http_client,
+        .packages = &packages,
         .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -211,7 +212,7 @@ fn installCommand(program: *Program) !void {
     });
     defer pm.deinit();
 
-    try pm.installMany(pkgs, packages_to_install.items);
+    try pm.installMany(packages_to_install.items);
     try pm.cleanup();
 }
 
@@ -240,8 +241,13 @@ fn uninstallCommand(program: *Program) !void {
     });
     defer installed_packages.deinit();
 
+    // Uninstall does not need to download packages
+    var packages = Packages.init(program.gpa);
+    defer packages.deinit();
+
     var pm = try PackageManager.init(.{
         .allocator = program.gpa,
+        .packages = &packages,
         .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -283,7 +289,7 @@ fn updateCommand(program: *Program) !void {
     });
     defer installed_packages.deinit();
 
-    var pkgs = try Packages.download(.{
+    var packages = try Packages.download(.{
         .allocator = program.gpa,
         .http_client = &http_client,
         .diagnostics = program.diagnostics,
@@ -291,11 +297,12 @@ fn updateCommand(program: *Program) !void {
         .prefix = program.options.prefix,
         .download = .always,
     });
-    defer pkgs.deinit();
+    defer packages.deinit();
 
     var pm = try PackageManager.init(.{
         .allocator = program.gpa,
         .http_client = &http_client,
+        .packages = &packages,
         .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -304,9 +311,9 @@ fn updateCommand(program: *Program) !void {
     defer pm.deinit();
 
     if (packages_to_update.items.len == 0) {
-        try pm.updateAll(pkgs);
+        try pm.updateAll();
     } else {
-        try pm.updateMany(pkgs, packages_to_update.items);
+        try pm.updateMany(packages_to_update.items);
     }
 
     try pm.cleanup();

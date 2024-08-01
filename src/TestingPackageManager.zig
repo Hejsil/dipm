@@ -51,6 +51,7 @@ pub fn init(options: Options) !TestingPackageManager {
 
     var pm = try PackageManager.init(.{
         .allocator = allocator,
+        .packages = options.packages,
         .installed_packages = installed_pkgs,
         .diagnostics = diag,
         .progress = progress,
@@ -68,6 +69,8 @@ pub fn init(options: Options) !TestingPackageManager {
 }
 
 pub const Options = struct {
+    packages: *const Packages,
+
     allocator: std.mem.Allocator = std.testing.allocator,
     prefix: ?[]const u8 = null,
     installed_file_data: ?[]const u8 = null,

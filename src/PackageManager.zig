@@ -2,6 +2,7 @@ gpa: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 
 http_client: ?*std.http.Client,
+packages: *const Packages,
 installed_packages: *InstalledPackages,
 
 diagnostics: *Diagnostics,
@@ -59,6 +60,7 @@ pub fn init(options: Options) !PackageManager {
         .lib_dir = lib_dir,
         .share_dir = share_dir,
         .own_tmp_dir = own_tmp_dir,
+        .packages = options.packages,
         .installed_packages = options.installed_packages,
     };
 }
@@ -66,6 +68,7 @@ pub fn init(options: Options) !PackageManager {
 pub const Options = struct {
     allocator: std.mem.Allocator,
     http_client: ?*std.http.Client = null,
+    packages: *const Packages,
     installed_packages: *InstalledPackages,
 
     /// Successes and failures are reported to the diagnostics. Set this for more details
@@ -99,12 +102,12 @@ pub fn isInstalled(pm: *const PackageManager, package_name: []const u8) bool {
     return pm.installed_packages.packages.contains(package_name);
 }
 
-pub fn installOne(pm: *PackageManager, packages: Packages, package_name: []const u8) !void {
-    return pm.installMany(packages, &.{package_name});
+pub fn installOne(pm: *PackageManager, package_name: []const u8) !void {
+    return pm.installMany(&.{package_name});
 }
 
-pub fn installMany(pm: *PackageManager, packages: Packages, package_names: []const []const u8) !void {
-    var packages_to_install = try pm.packagesToInstall(packages, package_names);
+pub fn installMany(pm: *PackageManager, package_names: []const []const u8) !void {
+    var packages_to_install = try pm.packagesToInstall(package_names);
     defer packages_to_install.deinit();
 
     const len = packages_to_install.count();
@@ -152,7 +155,6 @@ pub fn installMany(pm: *PackageManager, packages: Packages, package_names: []con
 
 fn packagesToInstall(
     pm: *const PackageManager,
-    packages: Packages,
     package_names: []const []const u8,
 ) !std.StringArrayHashMap(Package.Specific) {
     var packages_to_install = std.StringArrayHashMap(Package.Specific).init(pm.gpa);
@@ -168,7 +170,7 @@ fn packagesToInstall(
     while (i < packages_to_install.count()) {
         const package_name = packages_to_install.keys()[i];
 
-        const package = packages.packages.get(package_name) orelse {
+        const package = pm.packages.packages.get(package_name) orelse {
             try pm.diagnostics.notFound(.{ .name = package_name });
             packages_to_install.swapRemoveAt(i);
             continue;
@@ -399,22 +401,22 @@ fn uninstallOneUnchecked(
     _ = pm.installed_packages.packages.orderedRemove(package_name);
 }
 
-pub fn updateAll(pm: *PackageManager, packages: Packages) !void {
+pub fn updateAll(pm: *PackageManager) !void {
     const installed_packages = pm.installed_packages.packages.keys();
     const packages_to_update = try pm.gpa.dupe([]const u8, installed_packages);
     defer pm.gpa.free(packages_to_update);
 
-    return pm.updatePackages(packages, packages_to_update, .{
+    return pm.updatePackages(packages_to_update, .{
         .up_to_date_diag = false,
     });
 }
 
-pub fn updateOne(pm: *PackageManager, packages: Packages, package_name: []const u8) !void {
-    return pm.updateMany(packages, &.{package_name});
+pub fn updateOne(pm: *PackageManager, package_name: []const u8) !void {
+    return pm.updateMany(&.{package_name});
 }
 
-pub fn updateMany(pm: *PackageManager, packages: Packages, package_names: []const []const u8) !void {
-    return pm.updatePackages(packages, package_names, .{
+pub fn updateMany(pm: *PackageManager, package_names: []const []const u8) !void {
+    return pm.updatePackages(package_names, .{
         .up_to_date_diag = true,
     });
 }
@@ -425,7 +427,6 @@ const UpdatePackagesOptions = struct {
 
 fn updatePackages(
     pm: *PackageManager,
-    packages: Packages,
     package_names: []const []const u8,
     opt: UpdatePackagesOptions,
 ) !void {
@@ -435,7 +436,7 @@ fn updatePackages(
     var packages_to_uninstall = try pm.packagesToUninstall(package_names);
     defer packages_to_uninstall.deinit();
 
-    var packages_to_install = try pm.packagesToInstall(packages, packages_to_uninstall.keys());
+    var packages_to_install = try pm.packagesToInstall(packages_to_uninstall.keys());
     defer packages_to_install.deinit();
 
     // Remove up to date packages from the list
