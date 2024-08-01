@@ -237,7 +237,7 @@ test "update" {
     pm.diag.reset();
 
     pm.pm.packages = &repo_v2.packages;
-    try pm.pm.updateOne("test-xz");
+    try pm.pm.updateOne("test-xz", .{});
     try pm.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
         \\[test-zst]
         \\version = 0.1.0
@@ -300,7 +300,7 @@ test "update all" {
     pm.diag.reset();
 
     pm.pm.packages = &repo_v2.packages;
-    try pm.pm.updateAll();
+    try pm.pm.updateAll(.{});
     try pm.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
         \\[test-xz]
         \\version = 0.2.0
@@ -349,7 +349,7 @@ test "install, update and uninstall many" {
     pm.diag.reset();
 
     pm.pm.packages = &repo_v2.packages;
-    try pm.pm.updateMany(packages);
+    try pm.pm.updateMany(packages, .{});
     try pm.expectDiagnostics(
         \\<B><g>✓<R> <B>test-file 0.1.0 -> 0.2.0<R>
         \\<B><g>✓<R> <B>test-xz 0.1.0 -> 0.2.0<R>
@@ -456,10 +456,26 @@ test "updateOne: dont update up to date packages" {
     try pm.pm.installOne("test-xz");
     pm.diag.reset();
 
-    try pm.pm.updateOne("test-xz");
+    try pm.pm.updateOne("test-xz", .{});
     try pm.expectDiagnostics(
         \\<B><y>⚠<R> <B>test-xz 0.1.0<R>
         \\└── Package is up to date
+        \\
+    );
+    try pm.cleanup();
+}
+
+test "updateOne: force update" {
+    const repo = simple_repository_v1.get();
+    var pm = try TestingPackageManager.init(.{ .packages = &repo.packages });
+    defer pm.deinit();
+
+    try pm.pm.installOne("test-xz");
+    pm.diag.reset();
+
+    try pm.pm.updateOne("test-xz", .{ .force = true });
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-xz 0.1.0 -> 0.1.0<R>
         \\
     );
     try pm.cleanup();
@@ -473,8 +489,24 @@ test "updateAll: dont update up to date packages" {
     try pm.pm.installOne("test-xz");
     pm.diag.reset();
 
-    try pm.pm.updateAll();
+    try pm.pm.updateAll(.{});
     try pm.expectDiagnostics(
+        \\
+    );
+    try pm.cleanup();
+}
+
+test "updateAll: force update" {
+    const repo = simple_repository_v1.get();
+    var pm = try TestingPackageManager.init(.{ .packages = &repo.packages });
+    defer pm.deinit();
+
+    try pm.pm.installOne("test-xz");
+    pm.diag.reset();
+
+    try pm.pm.updateAll(.{ .force = true });
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-xz 0.1.0 -> 0.1.0<R>
         \\
     );
     try pm.cleanup();
@@ -510,7 +542,7 @@ test "update: Do not leave package uninstalled on download fail" {
     });
     defer pm.deinit();
 
-    try pm.pm.updateAll();
+    try pm.pm.updateAll(.{});
     try pm.expectFile("share/dipm/installed.ini",
         \\[fails-download]
         \\version = 0.0.0

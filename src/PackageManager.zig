@@ -401,35 +401,40 @@ fn uninstallOneUnchecked(
     _ = pm.installed_packages.packages.orderedRemove(package_name);
 }
 
-pub fn updateAll(pm: *PackageManager) !void {
+pub fn updateAll(pm: *PackageManager, options: struct {
+    force: bool = false,
+}) !void {
     const installed_packages = pm.installed_packages.packages.keys();
     const packages_to_update = try pm.gpa.dupe([]const u8, installed_packages);
     defer pm.gpa.free(packages_to_update);
 
     return pm.updatePackages(packages_to_update, .{
         .up_to_date_diag = false,
+        .force = options.force,
     });
 }
 
-pub fn updateOne(pm: *PackageManager, package_name: []const u8) !void {
-    return pm.updateMany(&.{package_name});
+pub fn updateOne(pm: *PackageManager, package_name: []const u8, options: struct {
+    force: bool = false,
+}) !void {
+    return pm.updateMany(&.{package_name}, .{
+        .force = options.force,
+    });
 }
 
-pub fn updateMany(pm: *PackageManager, package_names: []const []const u8) !void {
+pub fn updateMany(pm: *PackageManager, package_names: []const []const u8, options: struct {
+    force: bool = false,
+}) !void {
     return pm.updatePackages(package_names, .{
         .up_to_date_diag = true,
+        .force = options.force,
     });
 }
 
-const UpdatePackagesOptions = struct {
+fn updatePackages(pm: *PackageManager, package_names: []const []const u8, options: struct {
     up_to_date_diag: bool,
-};
-
-fn updatePackages(
-    pm: *PackageManager,
-    package_names: []const []const u8,
-    opt: UpdatePackagesOptions,
-) !void {
+    force: bool,
+}) !void {
     if (package_names.len == 0)
         return;
 
@@ -439,21 +444,20 @@ fn updatePackages(
     var packages_to_install = try pm.packagesToInstall(packages_to_uninstall.keys());
     defer packages_to_install.deinit();
 
-    // Remove up to date packages from the list
-    for (
-        packages_to_uninstall.keys(),
-        packages_to_uninstall.values(),
-    ) |package_name, installed_package| {
-        const updated_package = packages_to_install.get(package_name) orelse continue;
-        if (!std.mem.eql(u8, installed_package.version, updated_package.info.version))
-            continue;
+    if (!options.force) {
+        // Remove up to date packages from the list if we're not force updating
+        for (packages_to_uninstall.keys(), packages_to_uninstall.values()) |package_name, installed_package| {
+            const updated_package = packages_to_install.get(package_name) orelse continue;
+            if (!std.mem.eql(u8, installed_package.version, updated_package.info.version))
+                continue;
 
-        _ = packages_to_install.swapRemove(package_name);
-        if (opt.up_to_date_diag)
-            try pm.diagnostics.upToDate(.{
-                .name = package_name,
-                .version = installed_package.version,
-            });
+            _ = packages_to_install.swapRemove(package_name);
+            if (options.up_to_date_diag)
+                try pm.diagnostics.upToDate(.{
+                    .name = package_name,
+                    .version = installed_package.version,
+                });
+        }
     }
 
     var downloads = try DownloadAndExtractJobs.init(.{

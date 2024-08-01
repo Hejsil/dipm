@@ -265,15 +265,19 @@ const update_usage =
     \\  dipm update [options]
     \\
     \\Options:
+    \\  -f, --force         Force update of packages even if they're up to date
     \\  -h, --help          Display this message
     \\
 ;
 
 fn updateCommand(program: *Program) !void {
+    var force_update = false;
     var packages_to_update = std.ArrayList([]const u8).init(program.arena);
     try packages_to_update.ensureTotalCapacity(program.args.args.len);
 
     while (program.args.next()) {
+        if (program.args.flag(&.{ "-f", "--force" }))
+            force_update = true;
         if (program.args.flag(&.{ "-h", "--help" }))
             return program.stdout.writeAll(update_usage);
         if (program.args.positional()) |name|
@@ -311,9 +315,11 @@ fn updateCommand(program: *Program) !void {
     defer pm.deinit();
 
     if (packages_to_update.items.len == 0) {
-        try pm.updateAll();
+        try pm.updateAll(.{ .force = force_update });
     } else {
-        try pm.updateMany(packages_to_update.items);
+        try pm.updateMany(packages_to_update.items, .{
+            .force = force_update,
+        });
     }
 
     try pm.cleanup();
