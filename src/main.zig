@@ -465,7 +465,7 @@ const pkgs_update_usage =
     \\
     \\Options:
     \\  -f, --pkgs-file     Path to pkgs.ini (default: ./pkgs.ini)
-    \\  -c, --commit        Commit each package updateed to pkgs.ini
+    \\  -c, --commit        Commit each package updated to pkgs.ini
     \\  -h, --help          Display this message
     \\
 ;
