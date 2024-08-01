@@ -1,6 +1,5 @@
 allocator: std.mem.Allocator,
 diag: *Diagnostics,
-progress: *Progress,
 
 pkgs_ini_path: []const u8,
 pkgs_dir_path: []const u8,
@@ -12,16 +11,6 @@ pub fn init(options: Options) !TestingPackageRepository {
     const diag = try allocator.create(Diagnostics);
     errdefer allocator.destroy(diag);
     diag.* = Diagnostics.init(allocator);
-
-    // Progress is required, but these tests don't test it. Just set maximum_node to 0, so that
-    // nothing is allocatated or progressed on.
-    const progress = try allocator.create(Progress);
-    errdefer allocator.destroy(progress);
-    progress.* = try Progress.init(.{
-        .allocator = allocator,
-        .maximum_node_name_len = 0,
-        .maximum_nodes = 0,
-    });
 
     const prefix_path = try fs.zigCacheTmpDirPath(allocator);
     defer allocator.free(prefix_path);
@@ -83,7 +72,7 @@ pub fn init(options: Options) !TestingPackageRepository {
     var packages = try Packages.download(.{
         .allocator = allocator,
         .diagnostics = diag,
-        .progress = progress,
+        .progress = &Progress.dummy,
         .prefix = prefix_path,
         .download = .only_if_required,
 
@@ -96,7 +85,6 @@ pub fn init(options: Options) !TestingPackageRepository {
     return .{
         .allocator = allocator,
         .diag = diag,
-        .progress = progress,
         .pkgs_ini_path = pkgs_ini_path,
         .pkgs_dir_path = pkgs_dir_path,
         .packages = packages,

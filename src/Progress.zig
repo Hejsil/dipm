@@ -1,6 +1,8 @@
 nodes: []NodeState,
 maximum_node_name_len: u32,
 
+pub var dummy = Progress{.nodes = &.{}, .maximum_node_name_len = 0};
+
 pub const Node = enum(usize) {
     none = 0,
     _,

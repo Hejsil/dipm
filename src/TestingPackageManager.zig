@@ -1,6 +1,5 @@
 pm: PackageManager,
 diag: *Diagnostics,
-progress: *Progress,
 
 pub fn init(options: Options) !TestingPackageManager {
     const allocator = options.allocator;
@@ -11,16 +10,6 @@ pub fn init(options: Options) !TestingPackageManager {
     const diag = try allocator.create(Diagnostics);
     errdefer allocator.destroy(diag);
     diag.* = Diagnostics.init(allocator);
-
-    // Progress is required, but these tests don't test it. Just set maximum_node to 0, so that
-    // nothing is allocatated or progressed on.
-    const progress = try allocator.create(Progress);
-    errdefer allocator.destroy(progress);
-    progress.* = try Progress.init(.{
-        .allocator = allocator,
-        .maximum_node_name_len = 0,
-        .maximum_nodes = 0,
-    });
 
     const cwd = std.fs.cwd();
     const prefix = if (options.prefix) |prefix| prefix else random_prefix_path;
@@ -54,7 +43,7 @@ pub fn init(options: Options) !TestingPackageManager {
         .packages = options.packages,
         .installed_packages = installed_pkgs,
         .diagnostics = diag,
-        .progress = progress,
+        .progress = &Progress.dummy,
         .prefix = prefix,
         .arch = .x86_64,
         .os = .linux,
@@ -64,7 +53,6 @@ pub fn init(options: Options) !TestingPackageManager {
     return .{
         .pm = pm,
         .diag = diag,
-        .progress = progress,
     };
 }
 
@@ -83,9 +71,6 @@ pub fn deinit(pm: *TestingPackageManager) void {
 
     pm.diag.deinit();
     allocator.destroy(pm.diag);
-
-    pm.progress.deinit(allocator);
-    allocator.destroy(pm.progress);
 
     pm.pm.deinit();
 
