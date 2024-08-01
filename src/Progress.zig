@@ -1,7 +1,7 @@
 nodes: []NodeState,
 maximum_node_name_len: u32,
 
-pub var dummy = Progress{.nodes = &.{}, .maximum_node_name_len = 0};
+pub var dummy = Progress{ .nodes = &.{}, .maximum_node_name_len = 0 };
 
 pub const Node = enum(usize) {
     none = 0,
@@ -208,8 +208,9 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
         }
         if (remaining_width >= 4) {
             const curr: u64 = node.curr;
-            const max: u64 = node.max;
+            const max: u64 = @max(1, node.max);
             const percent = (curr * 100) / max;
+
             try writer.writeByteNTimes(' ', progress.maximum_node_name_len - node_name_len);
             try writer.print(" {d:>3}", .{percent});
             remaining_width -= 4;
@@ -220,7 +221,11 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
         }
         if (remaining_width >= bar_start.len + bar_end.len + 1) {
             remaining_width -= bar_start.len + bar_end.len;
-            const filled = (node.curr * remaining_width) / node.max;
+
+            const curr: u64 = node.curr;
+            const max: u64 = @max(1, node.max);
+            const filled = (curr * remaining_width) / max;
+
             try writer.writeAll(bar_start);
             try writer.writeByteNTimes('=', @min(filled, remaining_width));
             try writer.writeByteNTimes(' ', remaining_width -| filled);
@@ -499,6 +504,20 @@ test "render: max greater than curr" {
         \\
     ,
         &.{.{ .name = "node 0", .curr = 20, .max = 10 }},
+        .{ .width = 25, .height = 1 },
+        .{
+            .allocator = std.testing.allocator,
+            .maximum_node_name_len = 7,
+        },
+    );
+}
+
+test "render: max is 0" {
+    try expectRender(
+        \\node 0    0% [          ]
+        \\
+    ,
+        &.{.{ .name = "node 0", .curr = 0, .max = 0 }},
         .{ .width = 25, .height = 1 },
         .{
             .allocator = std.testing.allocator,
