@@ -328,6 +328,49 @@ test "update all" {
     try pm.cleanup();
 }
 
+test "install, update and uninstall many" {
+    const repo_v1 = simple_repository_v1.get();
+    const repo_v2 = simple_repository_v2.get();
+    var pm = try TestingPackageManager.init(.{ .packages = &repo_v1.packages });
+    defer pm.deinit();
+
+    const packages: []const []const u8 = &.{
+        "test-file", "test-xz",
+        "test-gz",   "test-zst",
+    };
+    try pm.pm.installMany(packages);
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-file 0.1.0<R>
+        \\<B><g>✓<R> <B>test-xz 0.1.0<R>
+        \\<B><g>✓<R> <B>test-gz 0.1.0<R>
+        \\<B><g>✓<R> <B>test-zst 0.1.0<R>
+        \\
+    );
+    pm.diag.reset();
+
+    pm.pm.packages = &repo_v2.packages;
+    try pm.pm.updateMany(packages);
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-file 0.1.0 -> 0.2.0<R>
+        \\<B><g>✓<R> <B>test-xz 0.1.0 -> 0.2.0<R>
+        \\<B><g>✓<R> <B>test-gz 0.1.0 -> 0.2.0<R>
+        \\<B><g>✓<R> <B>test-zst 0.1.0 -> 0.2.0<R>
+        \\
+    );
+    pm.diag.reset();
+
+    try pm.pm.uninstallMany(packages);
+    try pm.expectDiagnostics(
+        \\<B><g>✓<R> <B>test-file 0.2.0 -> ✗<R>
+        \\<B><g>✓<R> <B>test-xz 0.2.0 -> ✗<R>
+        \\<B><g>✓<R> <B>test-gz 0.2.0 -> ✗<R>
+        \\<B><g>✓<R> <B>test-zst 0.2.0 -> ✗<R>
+        \\
+    );
+
+    try pm.cleanup();
+}
+
 test "cleanup" {
     const repo = simple_repository_v1.get();
     var pm = try TestingPackageManager.init(.{ .packages = &repo.packages });
