@@ -6,26 +6,6 @@ pub fn deinit(dynamic: Dynamic) void {
     dynamic.arena.deinit();
 }
 
-pub const GetOrPutResult = struct {
-    found_existing: bool,
-    section: *Section,
-};
-
-pub fn getOrPutSection(dynamic: *Dynamic, name: []const u8) !GetOrPutResult {
-    const entry = try dynamic.sections.getOrPut(dynamic.arena.allocator(), name);
-    if (!entry.found_existing)
-        entry.value_ptr.* = Section.empty;
-
-    return .{
-        .found_existing = entry.found_existing,
-        .section = entry.value_ptr,
-    };
-}
-
-pub fn addProperty(dynamic: *Dynamic, section: *Section, name: []const u8, value: []const u8) !void {
-    try section.properties.append(dynamic.arena.allocator(), .{ .name = name, .value = value });
-}
-
 pub fn parse(allocator: std.mem.Allocator, string: []const u8, opt: ParseOptions) !Dynamic {
     var res = Dynamic{
         .arena = std.heap.ArenaAllocator.init(allocator),
