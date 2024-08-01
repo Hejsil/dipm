@@ -20,13 +20,18 @@ pub fn next(parser: *Parser) Result {
         property_value_end,
     } = .start;
 
+    var invalid_start: u32 = parser.index;
     var start: u32 = parser.index;
     var end: u32 = parser.index;
     while (parser.index < parser.string.len) : (parser.index += 1) switch (state) {
         .start => switch (parser.string[parser.index]) {
-            ' ', '\t', '\n', '\r' => start += 1,
+            ' ', '\t', '\n', '\r' => {
+                start += 1;
+                invalid_start += 1;
+            },
             ';', '#' => state = .comment,
             '[' => state = .section_inner_start,
+            '=' => state = .invalid,
             else => state = .property_name,
         },
         .comment => switch (parser.string[parser.index]) {
@@ -39,7 +44,7 @@ pub fn next(parser: *Parser) Result {
         .section_inner_start => switch (parser.string[parser.index]) {
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .invalid, .start = start, .end = parser.index };
+                return .{ .kind = .invalid, .start = invalid_start, .end = parser.index };
             },
             ']' => {
                 start = parser.index;
@@ -55,7 +60,7 @@ pub fn next(parser: *Parser) Result {
         .section_inner => switch (parser.string[parser.index]) {
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .invalid, .start = start, .end = parser.index };
+                return .{ .kind = .invalid, .start = invalid_start, .end = parser.index };
             },
             ']' => {
                 end = parser.index;
@@ -70,7 +75,7 @@ pub fn next(parser: *Parser) Result {
         .section_inner_end => switch (parser.string[parser.index]) {
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .invalid, .start = start, .end = parser.index };
+                return .{ .kind = .invalid, .start = invalid_start, .end = parser.index };
             },
             ']' => state = .section_end,
             ' ', '\t' => {},
@@ -90,6 +95,10 @@ pub fn next(parser: *Parser) Result {
                 return .{ .kind = .property, .start = start, .end = parser.index };
             },
             '=' => state = .property_value,
+            ' ', '\t' => {
+                end = parser.index;
+                state = .property_name_end;
+            },
             else => {},
         },
         .property_name_end => switch (parser.string[parser.index]) {
@@ -99,7 +108,7 @@ pub fn next(parser: *Parser) Result {
             },
             '=' => state = .property_value,
             ' ', '\t' => {},
-            else => state = .property_name_end,
+            else => state = .property_name,
         },
         .property_value => switch (parser.string[parser.index]) {
             '\n' => {
@@ -123,7 +132,7 @@ pub fn next(parser: *Parser) Result {
         .invalid => switch (parser.string[parser.index]) {
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .invalid, .start = start, .end = parser.index };
+                return .{ .kind = .invalid, .start = invalid_start, .end = parser.index };
             },
             else => {},
         },
@@ -132,15 +141,15 @@ pub fn next(parser: *Parser) Result {
     switch (state) {
         .start => return .{ .kind = .end, .start = start, .end = parser.index },
         .comment => return .{ .kind = .comment, .start = start, .end = parser.index },
-        .section_inner_start => return .{ .kind = .invalid, .start = start, .end = parser.index },
-        .section_inner => return .{ .kind = .invalid, .start = start, .end = parser.index },
-        .section_inner_end => return .{ .kind = .invalid, .start = start, .end = parser.index },
+        .section_inner_start => return .{ .kind = .invalid, .start = invalid_start, .end = parser.index },
+        .section_inner => return .{ .kind = .invalid, .start = invalid_start, .end = parser.index },
+        .section_inner_end => return .{ .kind = .invalid, .start = invalid_start, .end = parser.index },
         .section_end => return .{ .kind = .section, .start = start, .end = end },
         .property_name => return .{ .kind = .property, .start = start, .end = parser.index },
         .property_name_end => return .{ .kind = .property, .start = start, .end = end },
         .property_value => return .{ .kind = .property, .start = start, .end = parser.index },
         .property_value_end => return .{ .kind = .property, .start = start, .end = end },
-        .invalid => return .{ .kind = .invalid, .start = start, .end = parser.index },
+        .invalid => return .{ .kind = .invalid, .start = invalid_start, .end = parser.index },
     }
 }
 
@@ -161,7 +170,7 @@ fn expectedParsedInner(string: []const u8, expected: []const Result.Kind) !void 
     try std.testing.expectEqual(parser.index, parser.string.len);
 }
 
-test Parser {
+test "Parser tokens" {
     try expectedParsed(
         \\
     ,
@@ -327,6 +336,57 @@ test Parser {
             .end,
         },
     );
+    try expectedParsed(
+        \\=
+    ,
+        &.{
+            .invalid,
+            .end,
+        },
+    );
+    try expectedParsed(
+        \\= test
+    ,
+        &.{
+            .invalid,
+            .end,
+        },
+    );
+}
+
+fn parseAndWrite(allocator: std.mem.Allocator, string: []const u8) ![]u8 {
+    var parser = Parser.init(string);
+    var out = std.ArrayList(u8).init(allocator);
+    defer out.deinit();
+
+    while (true) {
+        const result = parser.next();
+        if (result.kind == .end)
+            return out.toOwnedSlice();
+
+        try result.write(string, out.writer());
+    }
+}
+
+test "Parser fuzz" {
+    const allocator = std.testing.allocator;
+    const fuzz_input = std.testing.fuzzInput(.{});
+
+    // This fuzz test ensure that once parsed and written out once, doing so again should yield the same result.
+    const stage1 = try parseAndWrite(allocator, fuzz_input);
+    defer allocator.free(stage1);
+
+    const stage2 = try parseAndWrite(allocator, stage1);
+    defer allocator.free(stage2);
+
+    // Use both expectEqualStrings and expectEqualSlices so that we get both the string and hex diff
+    std.testing.expectEqualStrings(stage1, stage2) catch {};
+    std.testing.expectEqualSlices(u8, stage1, stage2) catch |err| {
+        // Also use the testing api to print out the fuzz input
+        std.testing.expectEqualStrings(stage2, fuzz_input) catch {};
+        std.testing.expectEqualSlices(u8, stage2, fuzz_input) catch {};
+        return err;
+    };
 }
 
 pub const Result = struct {
@@ -341,7 +401,7 @@ pub const Result = struct {
     pub fn property(result: Result, string: []const u8) ?Property {
         if (result.kind != .property) return null;
 
-        const content = string[result.start..result.end];
+        const content = result.slice(string);
         const equal_index = std.mem.indexOfScalar(u8, content, '=') orelse return .{
             .name = content,
             .value = content[0..0],
@@ -354,7 +414,33 @@ pub const Result = struct {
 
     pub fn section(result: Result, string: []const u8) ?Section {
         if (result.kind != .section) return null;
-        return .{ .name = string[result.start..result.end] };
+        return .{ .name = result.slice(string) };
+    }
+
+    pub fn write(result: Result, string: []const u8, writer: anytype) !void {
+        switch (result.kind) {
+            .comment, .invalid => {
+                try writer.writeAll(result.slice(string));
+                try writer.writeAll("\n");
+            },
+            .section => {
+                try writer.writeAll("[");
+                try writer.writeAll(result.section(string).?.name);
+                try writer.writeAll("]\n");
+            },
+            .property => {
+                const prop = result.property(string).?;
+                try writer.writeAll(prop.name);
+
+                if (prop.value.len != 0) {
+                    try writer.writeAll(" = ");
+                    try writer.writeAll(prop.value);
+                }
+
+                try writer.writeAll("\n");
+            },
+            .end => {},
+        }
     }
 
     pub const Kind = enum {
@@ -375,15 +461,18 @@ pub const Result = struct {
     };
 };
 
-fn expectProperty(string: []const u8, result: Result, expected: Result.Property) !void {
-    const property = result.property(string);
-
+fn expectResult(string: []const u8, result: Result) !void {
     var parser = Parser.init(string);
     const actual = parser.next();
     try std.testing.expectEqual(result.kind, actual.kind);
     try std.testing.expectEqual(result.start, actual.start);
     try std.testing.expectEqual(result.end, actual.end);
+}
 
+fn expectProperty(string: []const u8, result: Result, expected: Result.Property) !void {
+    try expectResult(string, result);
+
+    const property = result.property(string);
     try std.testing.expect(property != null);
     try std.testing.expectEqualStrings(expected.name, property.?.name);
     try std.testing.expectEqualStrings(expected.value, property.?.value);
@@ -391,42 +480,73 @@ fn expectProperty(string: []const u8, result: Result, expected: Result.Property)
 
 test "Result.property" {
     try expectProperty(
-        \\test=test
-    ,
+        "test=test",
         .{ .kind = .property, .start = 0, .end = 9 },
         .{ .name = "test", .value = "test" },
     );
     try expectProperty(
-        \\test= test
-    ,
+        "test= test",
         .{ .kind = .property, .start = 0, .end = 10 },
         .{ .name = "test", .value = "test" },
     );
     try expectProperty(
-        \\test = test
-    ,
+        "test = test",
         .{ .kind = .property, .start = 0, .end = 11 },
         .{ .name = "test", .value = "test" },
     );
     try expectProperty(
-        \\test = test = test
-    ,
+        "test = test = test",
         .{ .kind = .property, .start = 0, .end = 18 },
         .{ .name = "test", .value = "test = test" },
+    );
+    try expectProperty(
+        "test =",
+        .{ .kind = .property, .start = 0, .end = 6 },
+        .{ .name = "test", .value = "" },
+    );
+    try expectProperty(
+        " test =",
+        .{ .kind = .property, .start = 1, .end = 7 },
+        .{ .name = "test", .value = "" },
+    );
+    try expectProperty(
+        " test = ",
+        .{ .kind = .property, .start = 1, .end = 7 },
+        .{ .name = "test", .value = "" },
+    );
+    try expectProperty(
+        "test = ",
+        .{ .kind = .property, .start = 0, .end = 6 },
+        .{ .name = "test", .value = "" },
+    );
+    try expectProperty(
+        "test",
+        .{ .kind = .property, .start = 0, .end = 4 },
+        .{ .name = "test", .value = "" },
+    );
+    try expectProperty(
+        " test",
+        .{ .kind = .property, .start = 1, .end = 5 },
+        .{ .name = "test", .value = "" },
+    );
+    try expectProperty(
+        " test ",
+        .{ .kind = .property, .start = 1, .end = 5 },
+        .{ .name = "test", .value = "" },
+    );
+    try expectProperty(
+        "test ",
+        .{ .kind = .property, .start = 0, .end = 4 },
+        .{ .name = "test", .value = "" },
     );
 }
 
 fn expectSection(string: []const u8, result: Result, expected: Result.Section) !void {
-    const property = result.section(string);
+    try expectResult(string, result);
 
-    var parser = Parser.init(string);
-    const actual = parser.next();
-    try std.testing.expectEqual(result.kind, actual.kind);
-    try std.testing.expectEqual(result.start, actual.start);
-    try std.testing.expectEqual(result.end, actual.end);
-
-    try std.testing.expect(property != null);
-    try std.testing.expectEqualStrings(expected.name, property.?.name);
+    const section = result.section(string);
+    try std.testing.expect(section != null);
+    try std.testing.expectEqualStrings(expected.name, section.?.name);
 }
 
 test "Result.section" {
@@ -465,6 +585,19 @@ test "Result.section" {
     ,
         .{ .kind = .section, .start = 1, .end = 5 },
         .{ .name = "test" },
+    );
+}
+
+test "Result.invalid" {
+    try expectResult(
+        \\[
+    ,
+        .{ .kind = .invalid, .start = 0, .end = 1 },
+    );
+    try expectResult(
+        \\[ty=;i>
+    ,
+        .{ .kind = .invalid, .start = 0, .end = 7 },
     );
 }
 
