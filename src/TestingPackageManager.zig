@@ -127,6 +127,7 @@ pub fn expectDiagnostics(pm: TestingPackageManager, expected: []const u8) !void 
             .yellow = "<y>",
             .red = "<r>",
             .bold = "<B>",
+            .dim = "<D>",
             .reset = "<R>",
         },
     });
