@@ -104,6 +104,8 @@ const main_usage =
     \\Usage: dipm [options] [command]
     \\
     \\Commands:
+    \\  donate [pkg]...     Show donate links for packages
+    \\  donate              Show donate links for installed packages
     \\  install [pkg]...    Install packages
     \\  uninstall [pkg]...  Uninstall packages
     \\  update [pkg]...     Update packages
@@ -126,6 +128,8 @@ pub fn mainCommand(program: *Program) !void {
     while (program.args.next()) {
         if (program.args.option(&.{ "-p", "--prefix" })) |prefix|
             program.options.prefix = prefix;
+        if (program.args.flag(&.{"donate"}))
+            return program.donateCommand();
         if (program.args.flag(&.{"install"}))
             return program.installCommand();
         if (program.args.flag(&.{"uninstall"}))
@@ -162,6 +166,64 @@ args: ArgParser,
 options: struct {
     prefix: []const u8,
 },
+
+const donate_usage =
+    \\Usage: dipm donate [options] [pkg]...
+    \\
+    \\Options:
+    \\  -h, --help          Display this message
+    \\
+;
+
+fn donateCommand(program: *Program) !void {
+    var packages_to_show_hm = std.StringArrayHashMap(void).init(program.arena);
+    try packages_to_show_hm.ensureTotalCapacity(program.args.args.len);
+
+    while (program.args.next()) {
+        if (program.args.flag(&.{ "-h", "--help" }))
+            return program.stdout.writeAll(install_usage);
+        if (program.args.positional()) |name|
+            packages_to_show_hm.putAssumeCapacity(name, {});
+    }
+
+    var http_client = std.http.Client{ .allocator = program.gpa };
+    defer http_client.deinit();
+
+    var installed_packages = try InstalledPackages.open(.{
+        .allocator = program.gpa,
+        .prefix = program.options.prefix,
+    });
+    defer installed_packages.deinit();
+
+    var packages = try Packages.download(.{
+        .allocator = program.gpa,
+        .http_client = &http_client,
+        .diagnostics = program.diagnostics,
+        .progress = program.progress,
+        .prefix = program.options.prefix,
+        .download = .only_if_required,
+    });
+    defer packages.deinit();
+
+    var packages_to_show = packages_to_show_hm.keys();
+    if (packages_to_show.len == 0)
+        packages_to_show = installed_packages.packages.keys();
+
+    for (packages_to_show) |package_name| {
+        const package = packages.packages.get(package_name) orelse {
+            try program.diagnostics.notFound(.{ .name = package_name });
+            continue;
+        };
+        if (package.info.donate.len == 0)
+            continue;
+
+        try program.diagnostics.donate(.{
+            .name = package_name,
+            .version = package.info.version,
+            .donate = package.info.donate,
+        });
+    }
+}
 
 const install_usage =
     \\Usage: dipm install [options] [pkg]...

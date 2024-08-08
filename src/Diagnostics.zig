@@ -2,6 +2,7 @@ arena: std.heap.ArenaAllocator,
 lock: std.Thread.Mutex,
 
 successes: struct {
+    donate: std.ArrayListUnmanaged(PackageDonate),
     installs: std.ArrayListUnmanaged(PackageVersion),
     updates: std.ArrayListUnmanaged(PackageFromTo),
     uninstalls: std.ArrayListUnmanaged(PackageVersion),
@@ -27,6 +28,7 @@ pub fn init(allocator: std.mem.Allocator) Diagnostics {
         .arena = std.heap.ArenaAllocator.init(allocator),
         .lock = .{},
         .successes = .{
+            .donate = .{},
             .installs = .{},
             .updates = .{},
             .uninstalls = .{},
@@ -72,13 +74,18 @@ pub fn deinit(diagnostics: *Diagnostics) void {
 pub fn reportToFile(diagnostics: *Diagnostics, file: std.fs.File) !void {
     var buffered = std.io.bufferedWriter(file.writer());
 
-    const escapes = if (file.supportsAnsiEscapeCodes()) Escapes.ansi else Escapes.none;
-    try diagnostics.report(buffered.writer(), .{ .escapes = escapes });
+    const is_tty = file.supportsAnsiEscapeCodes();
+    const escapes = if (is_tty) Escapes.ansi else Escapes.none;
+    try diagnostics.report(buffered.writer(), .{
+        .is_tty = is_tty,
+        .escapes = escapes,
+    });
 
     try buffered.flush();
 }
 
 pub const ReportOptions = struct {
+    is_tty: bool = false,
     escapes: Escapes = Escapes.none,
 };
 
@@ -232,6 +239,37 @@ pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !v
         });
         try writer.print("└── No version found: {s}\n", .{@errorName(no_version.err)});
     }
+    for (diagnostics.successes.donate.items) |package| {
+        try writer.print("{s} {s}{s} {s}{s}\n", .{
+            success,
+            esc.bold,
+            package.name,
+            package.version,
+            esc.reset,
+        });
+        for (package.donate, 0..) |d, i| {
+            const prefix = if (i == package.donate.len - 1)
+                "└──"
+            else
+                "│  ";
+            try writer.print("{s} {s}\n", .{ prefix, d });
+        }
+    }
+
+    const show_donate_reminder = opt.is_tty and !diagnostics.hasFailed() and
+        (diagnostics.successes.installs.items.len != 0 or
+        diagnostics.successes.updates.items.len != 0);
+
+    if (show_donate_reminder) {
+        try writer.writeAll("\n");
+        try writer.writeAll(esc.dim);
+        try writer.writeAll(
+            \\Consider donating to the open source software you use.
+            \\└── see dipm donate
+            \\
+        );
+        try writer.writeAll(esc.reset);
+    }
 }
 
 pub fn hasFailed(diagnostics: Diagnostics) bool {
@@ -241,6 +279,22 @@ pub fn hasFailed(diagnostics: Diagnostics) bool {
     }
 
     return false;
+}
+
+pub fn donate(diagnostics: *Diagnostics, package: PackageDonate) !void {
+    diagnostics.lock.lock();
+    defer diagnostics.lock.unlock();
+
+    const arena = diagnostics.arena.allocator();
+    const donate_duped = try arena.dupe([]const u8, package.donate);
+    for (donate_duped, package.donate) |*res, d|
+        res.* = try arena.dupe(u8, d);
+
+    return diagnostics.successes.donate.append(diagnostics.gpa(), .{
+        .name = try arena.dupe(u8, package.name),
+        .version = try arena.dupe(u8, package.version),
+        .donate = donate_duped,
+    });
 }
 
 pub fn installSucceeded(diagnostics: *Diagnostics, package: PackageVersion) !void {
@@ -382,6 +436,12 @@ pub fn downloadFailedWithStatus(
 
 pub const Package = struct {
     name: []const u8,
+};
+
+pub const PackageDonate = struct {
+    name: []const u8,
+    version: []const u8,
+    donate: []const []const u8,
 };
 
 pub const PackageVersion = struct {

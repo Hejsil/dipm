@@ -145,6 +145,12 @@ pub fn parseInto(packages: *Packages, tmp_allocator: std.mem.Allocator, string: 
         const info_section = dynamic.sections.get(tmp_buffer.items) orelse return error.NoInfoSectionFound;
         const info_version = info_section.get("version", .{}) orelse return error.NoInfoVersionFound;
 
+        var info_donate = std.ArrayListUnmanaged([]const u8){};
+        for (info_section.properties.items) |property| {
+            if (std.mem.eql(u8, property.name, "donate"))
+                try info_donate.append(arena, try arena.dupe(u8, property.value));
+        }
+
         tmp_buffer.shrinkRetainingCapacity(0);
         try tmp_buffer.writer().print("{s}.update", .{package_name});
         const update_section = dynamic.sections.get(tmp_buffer.items) orelse return error.NoUpdateSectionFound;
@@ -170,7 +176,10 @@ pub fn parseInto(packages: *Packages, tmp_allocator: std.mem.Allocator, string: 
         }
 
         try packages.packages.putNoClobber(gpa, package_name, .{
-            .info = .{ .version = try arena.dupe(u8, info_version) },
+            .info = .{
+                .version = try arena.dupe(u8, info_version),
+                .donate = try info_donate.toOwnedSlice(arena),
+            },
             .update = .{ .github = try arena.dupe(u8, update_github) },
             .linux_x86_64 = .{
                 .url = try arena.dupe(u8, linux_x86_64_url),
@@ -355,7 +364,10 @@ test update {
     try packages.update(.{
         .name = "test",
         .package = .{
-            .info = .{ .version = "0.1.0" },
+            .info = .{
+                .version = "0.1.0",
+                .donate = &.{ "donate-link", "donate-link" },
+            },
             .update = .{ .github = "test/test" },
             .linux_x86_64 = .{
                 .bin = &.{
@@ -372,6 +384,8 @@ test update {
     try expectWrite(&packages,
         \\[test.info]
         \\version = 0.1.0
+        \\donate = donate-link
+        \\donate = donate-link
         \\
         \\[test.update]
         \\github = test/test
@@ -405,6 +419,8 @@ test update {
     try expectWrite(&packages,
         \\[test.info]
         \\version = 0.2.0
+        \\donate = donate-link
+        \\donate = donate-link
         \\
         \\[test.update]
         \\github = test/test

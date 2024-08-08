@@ -4,6 +4,7 @@ linux_x86_64: InstallArch,
 
 const Info = struct {
     version: []const u8,
+    donate: []const []const u8 = &.{},
 };
 
 const Update = struct {
@@ -95,7 +96,12 @@ pub fn specific(
 
 pub fn write(package: Package, name: []const u8, writer: anytype) !void {
     try writer.print("[{s}.info]\n", .{name});
-    try writer.print("version = {s}\n\n", .{package.info.version});
+    try writer.print("version = {s}\n", .{package.info.version});
+
+    for (package.info.donate) |donate|
+        try writer.print("donate = {s}\n", .{donate});
+    try writer.writeAll("\n");
+
     try writer.print("[{s}.update]\n", .{name});
     try writer.print("github = {s}\n\n", .{package.update.github});
     try writer.print("[{s}.linux_x86_64]\n", .{name});
