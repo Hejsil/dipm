@@ -455,23 +455,28 @@ pub fn findOutdatedPackages(
     );
     defer options.allocator.free(results);
 
-    var thread_pool: std.Thread.Pool = undefined;
-    try thread_pool.init(.{ .allocator = options.allocator });
-    defer thread_pool.deinit();
+    {
+        var thread_pool: std.Thread.Pool = undefined;
+        try thread_pool.init(.{ .allocator = options.allocator });
+        defer thread_pool.deinit();
 
-    for (results, packages_to_check) |*result, package_name| {
-        try thread_pool.spawn(struct {
-            fn run(out: *FindOutdatedPackagesJobReturnType, job: FindOutdatedPackagesJob) void {
-                out.* = findOutdatedPackagesJob(job);
-            }
-        }.run, .{ result, FindOutdatedPackagesJob{
-            .packages = packages,
-            .package_name = package_name,
-            .allocator = options.allocator,
-            .http_client = options.http_client,
-            .progress = options.progress,
-            .diagnostics = options.diagnostics,
-        } });
+        for (results, packages_to_check) |*result, package_name| {
+            try thread_pool.spawn(struct {
+                fn run(
+                    out: *FindOutdatedPackagesJobReturnType,
+                    job: FindOutdatedPackagesJob,
+                ) void {
+                    out.* = findOutdatedPackagesJob(job);
+                }
+            }.run, .{ result, FindOutdatedPackagesJob{
+                .packages = packages,
+                .package_name = package_name,
+                .allocator = options.allocator,
+                .http_client = options.http_client,
+                .progress = options.progress,
+                .diagnostics = options.diagnostics,
+            } });
+        }
     }
 
     for (results) |result|

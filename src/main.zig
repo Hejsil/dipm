@@ -1,4 +1,4 @@
-pub fn main() u8 {
+pub fn main() !u8 {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
     const gpa = gpa_state.allocator();
     defer _ = gpa_state.deinit();
@@ -12,6 +12,9 @@ pub fn main() u8 {
     }) catch |err| switch (err) {
         DiagnosticsError.DiagnosticFailure => return 1,
         else => |e| {
+            if (builtin.mode == .Debug)
+                return e;
+
             std.log.err("{s}", .{@errorName(e)});
             return 1;
         },
