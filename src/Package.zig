@@ -102,10 +102,12 @@ pub fn write(package: Package, name: []const u8, writer: anytype) !void {
         try writer.print("donate = {s}\n", .{donate});
     try writer.writeAll("\n");
 
-    try writer.print("[{s}.update]\n", .{name});
-    try writer.print("github = {s}\n\n", .{package.update.github});
-    try writer.print("[{s}.linux_x86_64]\n", .{name});
+    if (package.update.github.len != 0) {
+        try writer.print("[{s}.update]\n", .{name});
+        try writer.print("github = {s}\n\n", .{package.update.github});
+    }
 
+    try writer.print("[{s}.linux_x86_64]\n", .{name});
     for (package.linux_x86_64.bin) |install|
         try writer.print("install_bin = {s}\n", .{install});
     for (package.linux_x86_64.lib) |install|

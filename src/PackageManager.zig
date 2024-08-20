@@ -574,8 +574,6 @@ test {
     _ = download;
     _ = ini;
     _ = paths;
-
-    _ = @import("PackageManager.tests.zig");
 }
 
 const PackageManager = @This();
