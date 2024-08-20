@@ -31,7 +31,8 @@ pub const MainOptions = struct {
     allocator: std.mem.Allocator,
     args: []const []const u8,
 
-    stdin: std.fs.File = std.io.getStdIn(),
+    forced_prefix: ?[]const u8 = null,
+    forced_pkgs_uri: ?[]const u8 = null,
     stdout: std.fs.File = std.io.getStdOut(),
     stderr: std.fs.File = std.io.getStdErr(),
 };
@@ -57,21 +58,24 @@ pub fn mainFull(options: MainOptions) !void {
         .arena = arena,
         .progress = &progress,
         .diagnostics = &diag,
-        .stdin = options.stdin,
         .stdout = options.stdout,
         .stderr = options.stderr,
 
         .args = .{ .args = options.args },
         .options = .{
+            .forced_prefix = options.forced_prefix,
             .prefix = local_home_path,
+            .forced_pkgs_uri = options.forced_pkgs_uri,
         },
     };
 
     // We don't really care to store the thread. Just let the os clean it up
-    _ = std.Thread.spawn(.{}, renderThread, .{&program}) catch |err| blk: {
-        std.log.warn("failed to spawn rendering thread: {}", .{err});
-        break :blk null;
-    };
+    if (program.stderr.supportsAnsiEscapeCodes()) {
+        _ = std.Thread.spawn(.{}, renderThread, .{&program}) catch |err| blk: {
+            std.log.warn("failed to spawn rendering thread: {}", .{err});
+            break :blk null;
+        };
+    }
 
     const res = program.mainCommand();
 
@@ -90,9 +94,6 @@ fn renderThread(program: *Program) void {
     const fps = 15;
     const delay = std.time.ns_per_s / fps;
     const initial_delay = std.time.ns_per_s / 4;
-
-    if (!program.stderr.supportsAnsiEscapeCodes())
-        return;
 
     std.time.sleep(initial_delay);
     while (true) {
@@ -129,8 +130,8 @@ const main_usage =
 
 pub fn mainCommand(program: *Program) !void {
     while (program.args.next()) {
-        if (program.args.option(&.{ "-p", "--prefix" })) |prefix|
-            program.options.prefix = prefix;
+        if (program.args.option(&.{ "-p", "--prefix" })) |p|
+            program.options.prefix = p;
         if (program.args.flag(&.{"donate"}))
             return program.donateCommand();
         if (program.args.flag(&.{"install"}))
@@ -161,14 +162,28 @@ progress: *Progress,
 diagnostics: *Diagnostics,
 
 io_lock: std.Thread.Mutex = .{},
-stdin: std.fs.File,
 stdout: std.fs.File,
 stderr: std.fs.File,
 
 args: ArgParser,
 options: struct {
+    /// If set, this prefix will be used instead of `prefix`. Unlike `prefix` this options cannot
+    /// be set by command line arguments.
+    forced_prefix: ?[]const u8 = null,
     prefix: []const u8,
+    /// If set, this pkgs_uri will be used instead of `pkgs_uri`. Unlike `prefix` this options
+    /// cannot be set by command line arguments.
+    forced_pkgs_uri: ?[]const u8 = null,
+    pkgs_uri: []const u8 = "https://github.com/Hejsil/dipm-pkgs/raw/master/pkgs.ini",
 },
+
+fn prefix(program: Program) []const u8 {
+    return program.options.forced_prefix orelse program.options.prefix;
+}
+
+fn pkgsUri(program: Program) []const u8 {
+    return program.options.forced_pkgs_uri orelse program.options.pkgs_uri;
+}
 
 const donate_usage =
     \\Usage: dipm donate [options] [pkg]...
@@ -194,7 +209,7 @@ fn donateCommand(program: *Program) !void {
 
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
-        .prefix = program.options.prefix,
+        .prefix = program.prefix(),
     });
     defer installed_packages.deinit();
 
@@ -203,7 +218,8 @@ fn donateCommand(program: *Program) !void {
         .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
-        .prefix = program.options.prefix,
+        .prefix = program.prefix(),
+        .pkgs_uri = program.pkgsUri(),
         .download = .only_if_required,
     });
     defer packages.deinit();
@@ -252,7 +268,7 @@ fn installCommand(program: *Program) !void {
 
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
-        .prefix = program.options.prefix,
+        .prefix = program.prefix(),
     });
     defer installed_packages.deinit();
 
@@ -261,7 +277,8 @@ fn installCommand(program: *Program) !void {
         .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
-        .prefix = program.options.prefix,
+        .prefix = program.prefix(),
+        .pkgs_uri = program.pkgsUri(),
         .download = .only_if_required,
     });
     defer packages.deinit();
@@ -273,7 +290,7 @@ fn installCommand(program: *Program) !void {
         .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
-        .prefix = program.options.prefix,
+        .prefix = program.prefix(),
     });
     defer pm.deinit();
 
@@ -302,7 +319,7 @@ fn uninstallCommand(program: *Program) !void {
 
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
-        .prefix = program.options.prefix,
+        .prefix = program.prefix(),
     });
     defer installed_packages.deinit();
 
@@ -316,7 +333,7 @@ fn uninstallCommand(program: *Program) !void {
         .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
-        .prefix = program.options.prefix,
+        .prefix = program.prefix(),
     });
     defer pm.deinit();
 
@@ -354,7 +371,7 @@ fn updateCommand(program: *Program) !void {
 
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
-        .prefix = program.options.prefix,
+        .prefix = program.prefix(),
     });
     defer installed_packages.deinit();
 
@@ -363,7 +380,8 @@ fn updateCommand(program: *Program) !void {
         .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
-        .prefix = program.options.prefix,
+        .prefix = program.prefix(),
+        .pkgs_uri = program.pkgsUri(),
         .download = .always,
     });
     defer packages.deinit();
@@ -375,7 +393,7 @@ fn updateCommand(program: *Program) !void {
         .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
-        .prefix = program.options.prefix,
+        .prefix = program.prefix(),
     });
     defer pm.deinit();
 
@@ -436,7 +454,7 @@ fn listInstalledCommand(program: *Program) !void {
 
     var installed_packages = try InstalledPackages.open(.{
         .allocator = program.gpa,
-        .prefix = program.options.prefix,
+        .prefix = program.prefix(),
     });
     defer installed_packages.deinit();
 
@@ -479,7 +497,8 @@ fn listAllCommand(program: *Program) !void {
         .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
-        .prefix = program.options.prefix,
+        .prefix = program.prefix(),
+        .pkgs_uri = program.pkgsUri(),
         .download = .only_if_required,
     });
     defer pkgs.deinit();
@@ -506,6 +525,13 @@ const pkgs_usage =
 ;
 
 fn pkgsCommand(program: *Program) !void {
+    if (builtin.is_test) {
+        // `pkgs` subcommand is disabled in tests because there are no ways to avoid downloads
+        // running these commands.
+        try program.stderr.writeAll(pkgs_usage);
+        return error.InvalidArgument;
+    }
+
     while (program.args.next()) {
         if (program.args.flag(&.{"update"}))
             return program.pkgsUpdateCommand();
@@ -782,6 +808,8 @@ test {
 
     _ = download;
     _ = fs;
+
+    _ = @import("testing.zig");
 }
 
 const ArgParser = @import("ArgParser.zig");

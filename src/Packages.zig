@@ -22,7 +22,7 @@ const DownloadOptions = struct {
     prefix: []const u8,
 
     /// The URI where the package manager will download the pkgs.ini
-    pkgs_uri: []const u8 = "https://github.com/Hejsil/dipm-pkgs/raw/master/pkgs.ini",
+    pkgs_uri: []const u8,
 
     /// The download behavior of the index.
     download: enum {
@@ -153,8 +153,10 @@ pub fn parseInto(packages: *Packages, tmp_allocator: std.mem.Allocator, string: 
 
         tmp_buffer.shrinkRetainingCapacity(0);
         try tmp_buffer.writer().print("{s}.update", .{package_name});
-        const update_section = dynamic.sections.get(tmp_buffer.items) orelse return error.NoUpdateSectionFound;
-        const update_github = update_section.get("github", .{}) orelse return error.NoUpdateGithubFound;
+        const update_github = blk: {
+            const update_section = dynamic.sections.get(tmp_buffer.items) orelse break :blk "";
+            break :blk update_section.get("github", .{}) orelse "";
+        };
 
         tmp_buffer.shrinkRetainingCapacity(0);
         try tmp_buffer.writer().print("{s}.linux_x86_64", .{package_name});

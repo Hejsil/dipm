@@ -122,9 +122,6 @@ const start_sync = "\x1b[?2026h";
 const up_one_line = "\x1bM";
 
 pub fn renderToTty(progress: Progress, tty: std.fs.File) !void {
-    if (!tty.supportsAnsiEscapeCodes())
-        return;
-
     var winsize: std.posix.winsize = .{
         .row = 0,
         .col = 0,
