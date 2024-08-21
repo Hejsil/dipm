@@ -102,10 +102,6 @@ pub fn isInstalled(pm: *const PackageManager, package_name: []const u8) bool {
     return pm.installed_packages.packages.contains(package_name);
 }
 
-pub fn installOne(pm: *PackageManager, package_name: []const u8) !void {
-    return pm.installMany(&.{package_name});
-}
-
 pub fn installMany(pm: *PackageManager, package_names: []const []const u8) !void {
     var packages_to_install = try pm.packagesToInstall(package_names);
     defer packages_to_install.deinit();
@@ -345,10 +341,6 @@ fn installGeneric(the_install: Package.Install, from_dir: std.fs.Dir, to_dir: st
     }
 }
 
-pub fn uninstallOne(pm: *PackageManager, package_name: []const u8) !void {
-    return pm.uninstallMany(&.{package_name});
-}
-
 pub fn uninstallMany(pm: *PackageManager, package_names: []const []const u8) !void {
     var packages_to_uninstall = try pm.packagesToUninstall(package_names);
     defer packages_to_uninstall.deinit();
@@ -410,14 +402,6 @@ pub fn updateAll(pm: *PackageManager, options: struct {
 
     return pm.updatePackages(packages_to_update, .{
         .up_to_date_diag = false,
-        .force = options.force,
-    });
-}
-
-pub fn updateOne(pm: *PackageManager, package_name: []const u8, options: struct {
-    force: bool = false,
-}) !void {
-    return pm.updateMany(&.{package_name}, .{
         .force = options.force,
     });
 }

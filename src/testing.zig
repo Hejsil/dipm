@@ -492,6 +492,36 @@ test "dipm install fails-download" {
     );
 }
 
+test "fuzz" {
+    const input = std.testing.fuzzInput(.{ .corpus = &.{
+        "install test-file",
+        "uninstall test-file",
+        "update test-file",
+        "donate test-file",
+        "list",
+        "pkgs",
+        "help",
+    } });
+
+    var args = std.ArrayList([]const u8).init(std.testing.allocator);
+    defer args.deinit();
+
+    var args_it = try std.process.ArgIteratorGeneral(.{}).init(std.testing.allocator, input);
+    defer args_it.deinit();
+
+    while (args_it.next()) |arg|
+        try args.append(arg);
+
+    var prefix = try setupPrefix(.{ .version = "0.1.0" });
+    defer prefix.deinit();
+
+    runMain(.{ .prefix = prefix, .args = args.items }) catch |err| switch (err) {
+        error.DiagnosticFailure => {},
+        error.InvalidArgument => {},
+        else => try std.testing.expect(false),
+    };
+}
+
 pub fn runMain(options: struct {
     allocator: std.mem.Allocator = std.testing.allocator,
     args: []const []const u8,
