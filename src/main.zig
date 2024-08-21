@@ -6,10 +6,7 @@ pub fn main() !u8 {
     const args = std.process.argsAlloc(gpa) catch @panic("OOM");
     defer std.process.argsFree(gpa, args);
 
-    mainFull(.{
-        .allocator = gpa,
-        .args = args[1..],
-    }) catch |err| switch (err) {
+    mainFull(.{ .allocator = gpa, .args = args[1..] }) catch |err| switch (err) {
         DiagnosticsError.DiagnosticFailure => return 1,
         else => |e| {
             if (builtin.mode == .Debug)
