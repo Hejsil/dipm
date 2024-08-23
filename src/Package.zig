@@ -725,12 +725,19 @@ fn findDownloadUrl(options: struct {
     try trim_list.append("_");
     try trim_list.append("-");
     try trim_list.append(".");
-    try trim_list.append("unknown");
+
     try trim_list.append("musl");
     try trim_list.append("static");
+
+    // Some rust projects append `rs` to the end of their binary names even if the project name
+    // itself does not have this suffix
+    try trim_list.append("rs");
+
+    try trim_list.append("unknown");
     try trim_list.append(@tagName(options.arch));
     try trim_list.append(@tagName(options.os));
 
+    // Some arch have varius names that people use
     switch (options.arch) {
         .x86_64 => {
             try trim_list.append("amd64");
@@ -788,10 +795,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/fzf-0.54.0-linux_amd64.tar.gz", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{
-            "fzf",
-            "0.54.0",
-        },
+        .extra_strings_to_trim = &.{ "fzf", "0.54.0" },
         .urls = &.{
             "/fzf-0.54.0-darwin_amd64.zip",
             "/fzf-0.54.0-darwin_arm64.zip",
@@ -816,10 +820,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/fzf-0.54.0-windows_amd64.zip", try findDownloadUrl(.{
         .os = .windows,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{
-            "fzf",
-            "0.54.0",
-        },
+        .extra_strings_to_trim = &.{ "fzf", "0.54.0" },
         .urls = &.{
             "/fzf-0.54.0-darwin_amd64.zip",
             "/fzf-0.54.0-darwin_arm64.zip",
@@ -844,10 +845,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/gophish-v0.12.1-linux-64bit.zip", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{
-            "gophish",
-            "v0.12.1",
-        },
+        .extra_strings_to_trim = &.{ "gophish", "v0.12.1" },
         .urls = &.{
             "/gophish-v0.12.1-linux-32bit.zip",
             "/gophish-v0.12.1-linux-64bit.zip",
@@ -858,10 +856,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/gophish-v0.12.1-windows-64bit.zip", try findDownloadUrl(.{
         .os = .windows,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{
-            "gophish",
-            "v0.12.1",
-        },
+        .extra_strings_to_trim = &.{ "gophish", "v0.12.1" },
         .urls = &.{
             "/gophish-v0.12.1-linux-32bit.zip",
             "/gophish-v0.12.1-linux-64bit.zip",
@@ -872,10 +867,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/gophish-v0.12.1-linux-32bit.zip", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86,
-        .extra_strings_to_trim = &.{
-            "gophish",
-            "v0.12.1",
-        },
+        .extra_strings_to_trim = &.{ "gophish", "v0.12.1" },
         .urls = &.{
             "/gophish-v0.12.1-linux-32bit.zip",
             "/gophish-v0.12.1-linux-64bit.zip",
@@ -886,9 +878,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/wasmer-linux-musl-amd64.tar.gz", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{
-            "wasmer",
-        },
+        .extra_strings_to_trim = &.{"wasmer"},
         .urls = &.{
             "/wasmer-darwin-amd64.tar.gz",
             "/wasmer-darwin-arm64.tar.gz",
@@ -904,10 +894,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/mise-v2024.7.4-linux-x64-musl.tar.gz", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{
-            "mise",
-            "v2024.7.4",
-        },
+        .extra_strings_to_trim = &.{ "mise", "v2024.7.4" },
         .urls = &.{
             "/mise-v2024.7.4-linux-arm64",
             "/mise-v2024.7.4-linux-arm64-musl",
@@ -940,10 +927,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/shadowsocks-v1.20.3.x86_64-unknown-linux-musl.tar.xz", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{
-            "shadowsocks",
-            "v1.20.3",
-        },
+        .extra_strings_to_trim = &.{ "shadowsocks", "v1.20.3" },
         .urls = &.{
             "/shadowsocks-v1.20.3.aarch64-apple-darwin.tar.xz",
             "/shadowsocks-v1.20.3.aarch64-apple-darwin.tar.xz.sha256",
@@ -975,6 +959,27 @@ test findDownloadUrl {
             "/shadowsocks-v1.20.3.x86_64-unknown-linux-gnu.tar.xz.sha256",
             "/shadowsocks-v1.20.3.x86_64-unknown-linux-musl.tar.xz",
             "/shadowsocks-v1.20.3.x86_64-unknown-linux-musl.tar.xz.sha256",
+        },
+    }));
+    try std.testing.expectEqualStrings("/sigrs-x86_64-unknown-linux-musl.tar.xz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings_to_trim = &.{"sig"},
+        .urls = &.{
+            "/dist-manifest.json",
+            "/sigrs-aarch64-apple-darwin.tar.xz",
+            "/sigrs-aarch64-apple-darwin.tar.xz.sha256",
+            "/sigrs-x86_64-apple-darwin.tar.xz",
+            "/sigrs-x86_64-apple-darwin.tar.xz.sha256",
+            "/sigrs-x86_64-pc-windows-msvc.zip",
+            "/sigrs-x86_64-pc-windows-msvc.zip.sha256",
+            "/sigrs-x86_64-unknown-linux-gnu.tar.xz",
+            "/sigrs-x86_64-unknown-linux-gnu.tar.xz.sha256",
+            "/sigrs-x86_64-unknown-linux-musl.tar.xz",
+            "/sigrs-x86_64-unknown-linux-musl.tar.xz.sha256",
+            "/sigrs.rb",
+            "/source.tar.gz",
+            "/source.tar.gz.sha256",
         },
     }));
 
