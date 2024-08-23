@@ -213,10 +213,6 @@ pub fn fromGithub(options: struct {
         assets: []const struct {
             browser_download_url: []const u8,
         },
-
-        fn version(release: @This()) []const u8 {
-            return std.mem.trimLeft(u8, release.tag_name, "v");
-        }
     };
 
     const latest_release_value = try std.json.parseFromSlice(
@@ -230,16 +226,7 @@ pub fn fromGithub(options: struct {
     const name = try options.allocator.dupe(u8, options.name orelse options.repo);
     errdefer options.allocator.free(name);
 
-    const version = blk: {
-        var version = latest_release.tag_name;
-        if (std.mem.startsWith(u8, version, name))
-            version = version[name.len..];
-        if (std.mem.startsWith(u8, version, "-"))
-            version = version["-".len..];
-        if (std.mem.startsWith(u8, version, "v"))
-            version = version["v".len..];
-        break :blk try options.allocator.dupe(u8, version);
-    };
+    const version = try options.allocator.dupe(u8, trimVersion(latest_release.tag_name, name));
     errdefer options.allocator.free(version);
 
     const download_url = try findDownloadUrl(.{
@@ -1072,7 +1059,7 @@ fn newestUpstreamVersionFromGithubRelease(string: []const u8) ![]const u8 {
         if (std.mem.endsWith(u8, version, "."))
             continue;
 
-        return version;
+        return trimVersion(version, "");
     }
 
     return error.NoVersionFound;
@@ -1107,6 +1094,34 @@ test newestUpstreamVersionFromGithubRelease {
         \\    <id>tag:github.com,2008:Repository/268129020/v2021_10_16</id>
         \\
     ));
+    try std.testing.expectEqualStrings("0.8.0", try newestUpstreamVersionFromGithubRelease(
+        \\  <id>tag:github.com,2008:https://github.com/oxc-project/oxc/releases</id>
+        \\    <id>tag:github.com,2008:Repository/599431918/oxlint_v0.8.0</id>
+        \\    <id>tag:github.com,2008:Repository/599431918/crates_v0.25.0</id>
+        \\    <id>tag:github.com,2008:Repository/599431918/crates_v0.24.3</id>
+        \\    <id>tag:github.com,2008:Repository/599431918/oxlint_v0.7.2</id>
+        \\    <id>tag:github.com,2008:Repository/599431918/oxlint_v0.7.1</id>
+        \\    <id>tag:github.com,2008:Repository/599431918/crates_v0.24.2</id>
+        \\    <id>tag:github.com,2008:Repository/599431918/crates_v0.24.1</id>
+        \\    <id>tag:github.com,2008:Repository/599431918/crates_v0.24.0</id>
+        \\    <id>tag:github.com,2008:Repository/599431918/oxlint_v0.7.0</id>
+        \\    <id>tag:github.com,2008:Repository/599431918/crates_v0.23.0</id>
+        \\
+    ));
+}
+
+fn trimVersion(str: []const u8, name: []const u8) []const u8 {
+    var res = str;
+    if (std.mem.startsWith(u8, res, name))
+        res = res[name.len..];
+    if (std.mem.startsWith(u8, res, "-"))
+        res = res["-".len..];
+    if (std.mem.startsWith(u8, res, "_"))
+        res = res["_".len..];
+    if (std.mem.startsWith(u8, res, "v"))
+        res = res["v".len..];
+
+    return res;
 }
 
 test {
