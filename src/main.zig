@@ -603,7 +603,7 @@ fn pkgsUpdateCommand(program: *Program) !void {
 }
 
 const pkgs_add_usage =
-    \\Usage: dipm pkgs add [options] [[name:]url]...
+    \\Usage: dipm pkgs add [options] [[name=]url]...
     \\
     \\Options:
     \\  -f, --pkgs-file     Path to pkgs.ini (default: ./pkgs.ini)
@@ -648,13 +648,39 @@ const UrlAndName = struct {
     name: ?[]const u8 = null,
 
     pub fn fromString(string: []const u8) UrlAndName {
-        const colon = std.mem.indexOfScalar(u8, string, ':') orelse return .{ .url = string };
-        return .{
-            .name = string[0..colon],
-            .url = string[colon + 1 ..],
+        for (string, 0..) |c, i| switch (c) {
+            '=' => return .{
+                .name = string[0..i],
+                .url = string[i + 1 ..],
+            },
+            'a'...'z', 'A'...'Z', '-' => {},
+            else => break,
         };
+
+        return .{ .url = string };
     }
 };
+
+fn testUrlAndNameFromString(string: []const u8, expected: UrlAndName) !void {
+    const url_and_name = UrlAndName.fromString(string);
+    try std.testing.expectEqualStrings(expected.url, url_and_name.url);
+    if (expected.name) |name| {
+        try std.testing.expect(url_and_name.name != null);
+        try std.testing.expectEqualStrings(name, url_and_name.name.?);
+    } else {
+        try std.testing.expect(url_and_name.name == null);
+    }
+}
+
+test "UrlAndName.fromString" {
+    try testUrlAndNameFromString("https://github.com/oxc-project/oxc", .{
+        .url = "https://github.com/oxc-project/oxc",
+    });
+    try testUrlAndNameFromString("oxlint=https://github.com/oxc-project/oxc", .{
+        .name = "oxlint",
+        .url = "https://github.com/oxc-project/oxc",
+    });
+}
 
 fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     var http_client = std.http.Client{ .allocator = program.gpa };
