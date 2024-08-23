@@ -603,7 +603,7 @@ fn pkgsUpdateCommand(program: *Program) !void {
 }
 
 const pkgs_add_usage =
-    \\Usage: dipm pkgs add [options] [url]...
+    \\Usage: dipm pkgs add [options] [[name:]url]...
     \\
     \\Options:
     \\  -f, --pkgs-file     Path to pkgs.ini (default: ./pkgs.ini)
@@ -629,7 +629,7 @@ fn pkgsAddCommand(program: *Program) !void {
         if (program.args.flag(&.{ "-h", "--help" }))
             return program.stdout.writeAll(pkgs_add_usage);
         if (program.args.positional()) |url|
-            try urls.append(.{ .url = url, .name = null });
+            try urls.append(UrlAndName.fromString(url));
     }
 
     options.urls = urls.items;
@@ -645,7 +645,15 @@ const PackagesAddOptions = struct {
 
 const UrlAndName = struct {
     url: []const u8,
-    name: ?[]const u8,
+    name: ?[]const u8 = null,
+
+    pub fn fromString(string: []const u8) UrlAndName {
+        const colon = std.mem.indexOfScalar(u8, string, ':') orelse return .{ .url = string };
+        return .{
+            .name = string[0..colon],
+            .url = string[colon + 1 ..],
+        };
+    }
 };
 
 fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
