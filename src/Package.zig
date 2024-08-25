@@ -727,9 +727,10 @@ fn findDownloadUrl(options: struct {
     // Some arch have varius names that people use
     switch (options.arch) {
         .x86_64 => {
-            try trim_list.append("amd64");
             try trim_list.append("64bit");
+            try trim_list.append("amd64");
             try trim_list.append("x64");
+            try trim_list.append("x86-64");
         },
         .x86 => {
             try trim_list.append("32bit");
@@ -967,6 +968,16 @@ test findDownloadUrl {
             "/sigrs.rb",
             "/source.tar.gz",
             "/source.tar.gz.sha256",
+        },
+    }));
+    try std.testing.expectEqualStrings("/dockerc_x86-64", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings_to_trim = &.{"dockerc"},
+        .urls = &.{
+            "/dockerc_aarch64",
+            "/dockerc_x86-64",
+            "/dockerc_x86-64-gnu",
         },
     }));
 
