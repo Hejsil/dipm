@@ -263,6 +263,96 @@ test "parse" {
     );
 }
 
+pub fn sort(packages: *Packages) void {
+    packages.packages.sort(struct {
+        keys: []const []const u8,
+
+        pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+            return std.mem.lessThan(u8, ctx.keys[a_index], ctx.keys[b_index]);
+        }
+    }{ .keys = packages.packages.keys() });
+}
+
+test sort {
+    var packages = Packages.init(std.testing.allocator);
+    defer packages.deinit();
+
+    try packages.update(.{
+        .name = "btest",
+        .package = .{
+            .info = .{ .version = "0.2.0" },
+            .update = .{ .github = "test/test" },
+            .linux_x86_64 = .{
+                .bin = &.{},
+                .lib = &.{},
+                .share = &.{},
+                .hash = "test_hash",
+                .url = "test_url",
+            },
+        },
+    });
+    try packages.update(.{
+        .name = "atest",
+        .package = .{
+            .info = .{ .version = "0.2.0" },
+            .update = .{ .github = "test/test" },
+            .linux_x86_64 = .{
+                .bin = &.{},
+                .lib = &.{},
+                .share = &.{},
+                .hash = "test_hash",
+                .url = "test_url",
+            },
+        },
+    });
+    try expectWrite(&packages,
+        \\[btest.info]
+        \\version = 0.2.0
+        \\
+        \\[btest.update]
+        \\github = test/test
+        \\
+        \\[btest.linux_x86_64]
+        \\url = test_url
+        \\hash = test_hash
+        \\
+        \\[atest.info]
+        \\version = 0.2.0
+        \\
+        \\[atest.update]
+        \\github = test/test
+        \\
+        \\[atest.linux_x86_64]
+        \\url = test_url
+        \\hash = test_hash
+        \\
+    );
+
+    packages.sort();
+    try expectWrite(&packages,
+        \\[atest.info]
+        \\version = 0.2.0
+        \\
+        \\[atest.update]
+        \\github = test/test
+        \\
+        \\[atest.linux_x86_64]
+        \\url = test_url
+        \\hash = test_hash
+        \\
+        \\[btest.info]
+        \\version = 0.2.0
+        \\
+        \\[btest.update]
+        \\github = test/test
+        \\
+        \\[btest.linux_x86_64]
+        \\url = test_url
+        \\hash = test_hash
+        \\
+    );
+}
+
 /// Update a package. If it doesn't exist it is added.
 pub fn update(packages: *Packages, package: Package.Named) !void {
     const gpa = packages.arena.child_allocator;

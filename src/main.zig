@@ -718,6 +718,7 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
         try packages.update(package);
 
         if (options.commit) {
+            packages.sort();
             try packages.writeToFileOverride(pkgs_ini_file);
             try pkgs_ini_file.sync();
 
@@ -741,6 +742,7 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
         }
     }
 
+    packages.sort();
     try packages.writeToFileOverride(pkgs_ini_file);
 }
 
