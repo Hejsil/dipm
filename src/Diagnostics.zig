@@ -60,11 +60,11 @@ fn gpa(diagnostics: *Diagnostics) std.mem.Allocator {
 }
 
 pub fn deinit(diagnostics: *Diagnostics) void {
-    inline for (@typeInfo(@TypeOf(diagnostics.successes)).Struct.fields) |field|
+    inline for (@typeInfo(@TypeOf(diagnostics.successes)).@"struct".fields) |field|
         @field(diagnostics.successes, field.name).deinit(diagnostics.gpa());
-    inline for (@typeInfo(@TypeOf(diagnostics.warnings)).Struct.fields) |field|
+    inline for (@typeInfo(@TypeOf(diagnostics.warnings)).@"struct".fields) |field|
         @field(diagnostics.warnings, field.name).deinit(diagnostics.gpa());
-    inline for (@typeInfo(@TypeOf(diagnostics.failures)).Struct.fields) |field|
+    inline for (@typeInfo(@TypeOf(diagnostics.failures)).@"struct".fields) |field|
         @field(diagnostics.failures, field.name).deinit(diagnostics.gpa());
 
     diagnostics.arena.deinit();
@@ -273,7 +273,7 @@ pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !v
 }
 
 pub fn hasFailed(diagnostics: Diagnostics) bool {
-    inline for (@typeInfo(@TypeOf(diagnostics.failures)).Struct.fields) |field| {
+    inline for (@typeInfo(@TypeOf(diagnostics.failures)).@"struct".fields) |field| {
         if (@field(diagnostics.failures, field.name).items.len != 0)
             return true;
     }

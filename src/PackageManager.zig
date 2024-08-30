@@ -189,7 +189,8 @@ fn packagesToInstall(
     return packages_to_install;
 }
 
-const DownloadAndExtractReturnType = @typeInfo(@TypeOf(downloadAndExtractPackage)).Fn.return_type.?;
+const DownloadAndExtractReturnType =
+    @typeInfo(@TypeOf(downloadAndExtractPackage)).@"fn".return_type.?;
 
 fn downloadAndExtractPackage(
     pm: *const PackageManager,

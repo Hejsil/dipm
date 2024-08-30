@@ -585,7 +585,7 @@ const FindOutdatedPackagesJob = struct {
 };
 
 const FindOutdatedPackagesJobReturnType =
-    @typeInfo(@TypeOf(findOutdatedPackagesJob)).Fn.return_type.?;
+    @typeInfo(@TypeOf(findOutdatedPackagesJob)).@"fn".return_type.?;
 
 fn findOutdatedPackagesJob(job: FindOutdatedPackagesJob) !void {
     const package = job.packages.packages.get(job.package_name) orelse {
