@@ -226,7 +226,7 @@ pub fn fromGithub(options: struct {
     const name = try options.allocator.dupe(u8, options.name orelse options.repo);
     errdefer options.allocator.free(name);
 
-    const version = try options.allocator.dupe(u8, trimVersion(latest_release.tag_name, name));
+    const version = try options.allocator.dupe(u8, versionFromTag(latest_release.tag_name));
     errdefer options.allocator.free(version);
 
     const download_url = try findDownloadUrl(.{
@@ -1070,7 +1070,7 @@ fn newestUpstreamVersionFromGithubRelease(string: []const u8) ![]const u8 {
         if (std.mem.endsWith(u8, version, "."))
             continue;
 
-        return trimVersion(version, "");
+        return versionFromTag(version);
     }
 
     return error.NoVersionFound;
@@ -1121,18 +1121,46 @@ test newestUpstreamVersionFromGithubRelease {
     ));
 }
 
-fn trimVersion(str: []const u8, name: []const u8) []const u8 {
-    var res = str;
-    if (std.mem.startsWith(u8, res, name))
-        res = res[name.len..];
-    if (std.mem.startsWith(u8, res, "-"))
-        res = res["-".len..];
-    if (std.mem.startsWith(u8, res, "_"))
-        res = res["_".len..];
-    if (std.mem.startsWith(u8, res, "v"))
-        res = res["v".len..];
+fn versionFromTag(tag: []const u8) []const u8 {
+    var state: enum {
+        start,
+        sep,
+        number,
+    } = .start;
 
-    return res;
+    for (0..tag.len) |i_forward| {
+        const i_backward = (tag.len - i_forward) - 1;
+        const c = tag[i_backward];
+        switch (state) {
+            .start => switch (c) {
+                '0'...'9' => state = .number,
+                else => return tag,
+            },
+            .sep => switch (c) {
+                '0'...'9' => state = .number,
+                else => return tag[i_backward + 2 ..],
+            },
+            .number => switch (c) {
+                '0'...'9' => {},
+                '.', '_' => state = .sep,
+                else => return tag[i_backward + 1 ..],
+            },
+        }
+    }
+
+    switch (state) {
+        .start, .number => return tag,
+        .sep => return tag[1..],
+    }
+}
+
+test versionFromTag {
+    try std.testing.expectEqualStrings("1.8.3", versionFromTag("cli/v1.8.3"));
+    try std.testing.expectEqualStrings("2024_01_01", versionFromTag("year-2024_01_01"));
+    try std.testing.expectEqualStrings("2024_01_01", versionFromTag("year_2024_01_01"));
+    try std.testing.expectEqualStrings("2024_01_01", versionFromTag("_2024_01_01"));
+    try std.testing.expectEqualStrings("2024_01_01", versionFromTag(".2024_01_01"));
+    try std.testing.expectEqualStrings("test", versionFromTag("test"));
 }
 
 test {
