@@ -1,5 +1,4 @@
 gpa: std.mem.Allocator,
-arena: std.heap.ArenaAllocator,
 
 http_client: ?*std.http.Client,
 packages: *const Packages,
@@ -11,7 +10,6 @@ progress: *Progress,
 os: std.Target.Os.Tag,
 arch: std.Target.Cpu.Arch,
 
-prefix_path: []const u8,
 prefix_dir: std.fs.Dir,
 bin_dir: std.fs.Dir,
 lib_dir: std.fs.Dir,
@@ -22,15 +20,9 @@ own_tmp_dir: std.fs.Dir,
 pub fn init(options: Options) !PackageManager {
     const allocator = options.allocator;
 
-    var arena_state = std.heap.ArenaAllocator.init(allocator);
-    const arena = arena_state.allocator();
-    errdefer arena_state.deinit();
-
     const cwd = std.fs.cwd();
     var prefix_dir = try cwd.makeOpenPath(options.prefix, .{});
     errdefer prefix_dir.close();
-
-    const prefix_path = try prefix_dir.realpathAlloc(arena, ".");
 
     var bin_dir = try prefix_dir.makeOpenPath(paths.bin_subpath, .{});
     errdefer bin_dir.close();
@@ -48,13 +40,11 @@ pub fn init(options: Options) !PackageManager {
 
     return PackageManager{
         .gpa = allocator,
-        .arena = arena_state,
         .http_client = options.http_client,
         .diagnostics = options.diagnostics,
         .progress = options.progress,
         .os = options.os,
         .arch = options.arch,
-        .prefix_path = prefix_path,
         .prefix_dir = prefix_dir,
         .bin_dir = bin_dir,
         .lib_dir = lib_dir,
@@ -94,8 +84,6 @@ pub fn deinit(pm: *PackageManager) void {
     pm.lib_dir.close();
     pm.prefix_dir.close();
     pm.share_dir.close();
-
-    pm.arena.deinit();
 }
 
 pub fn isInstalled(pm: *const PackageManager, package_name: []const u8) bool {
@@ -265,7 +253,6 @@ fn installExtractedPackage(
         const the_install = Package.Install.fromString(install_field);
         try installBin(the_install, from_dir, pm.bin_dir);
         try locations.append(try std.fs.path.join(installed_arena, &.{
-            pm.prefix_path,
             paths.bin_subpath,
             the_install.to,
         }));
@@ -274,7 +261,6 @@ fn installExtractedPackage(
         const the_install = Package.Install.fromString(install_field);
         try installGeneric(the_install, from_dir, pm.lib_dir);
         try locations.append(try std.fs.path.join(installed_arena, &.{
-            pm.prefix_path,
             paths.lib_subpath,
             the_install.to,
         }));
@@ -283,7 +269,6 @@ fn installExtractedPackage(
         const the_install = Package.Install.fromString(install_field);
         try installGeneric(the_install, from_dir, pm.share_dir);
         try locations.append(try std.fs.path.join(installed_arena, &.{
-            pm.prefix_path,
             paths.share_subpath,
             the_install.to,
         }));
@@ -387,9 +372,8 @@ fn uninstallOneUnchecked(
     package_name: []const u8,
     package: InstalledPackage,
 ) !void {
-    const cwd = std.fs.cwd();
     for (package.locations) |location|
-        try cwd.deleteTree(location);
+        try pm.prefix_dir.deleteTree(location);
 
     _ = pm.installed_packages.packages.orderedRemove(package_name);
 }

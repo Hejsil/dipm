@@ -13,17 +13,16 @@ test "dipm install test-file" {
     try prefix.expectFile("share/test-file", "Binary");
     try prefix.expectFile("share/subdir/test-file", "Binary");
 
-    var buf: [std.mem.page_size]u8 = undefined;
-    try prefix.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+    try prefix.expectFile("share/dipm/installed.ini",
         \\[test-file]
         \\version = 0.1.0
-        \\location = {[prefix]s}/bin/test-file
-        \\location = {[prefix]s}/lib/test-file
-        \\location = {[prefix]s}/lib/subdir/test-file
-        \\location = {[prefix]s}/share/test-file
-        \\location = {[prefix]s}/share/subdir/test-file
+        \\location = bin/test-file
+        \\location = lib/test-file
+        \\location = lib/subdir/test-file
+        \\location = share/test-file
+        \\location = share/subdir/test-file
         \\
-    , .{ .prefix = prefix.prefix }));
+    );
 }
 
 test "dipm install test-xz" {
@@ -41,17 +40,16 @@ test "dipm install test-xz" {
     try prefix.expectFile("share/test-xz", "");
     try prefix.expectFile("share/test-xz-dir/file", "");
 
-    var buf: [std.mem.page_size]u8 = undefined;
-    try prefix.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+    try prefix.expectFile("share/dipm/installed.ini",
         \\[test-xz]
         \\version = 0.1.0
-        \\location = {[prefix]s}/bin/test-xz
-        \\location = {[prefix]s}/lib/test-xz-dir
-        \\location = {[prefix]s}/lib/test-xz
-        \\location = {[prefix]s}/share/test-xz-dir
-        \\location = {[prefix]s}/share/test-xz
+        \\location = bin/test-xz
+        \\location = lib/test-xz-dir
+        \\location = lib/test-xz
+        \\location = share/test-xz-dir
+        \\location = share/test-xz
         \\
-    , .{ .prefix = prefix.prefix }));
+    );
 }
 
 test "dipm install test-gz" {
@@ -69,17 +67,16 @@ test "dipm install test-gz" {
     try prefix.expectFile("share/test-gz", "");
     try prefix.expectFile("share/test-gz-dir/file", "");
 
-    var buf: [std.mem.page_size]u8 = undefined;
-    try prefix.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+    try prefix.expectFile("share/dipm/installed.ini",
         \\[test-gz]
         \\version = 0.1.0
-        \\location = {[prefix]s}/bin/test-gz
-        \\location = {[prefix]s}/lib/test-gz-dir
-        \\location = {[prefix]s}/lib/test-gz
-        \\location = {[prefix]s}/share/test-gz-dir
-        \\location = {[prefix]s}/share/test-gz
+        \\location = bin/test-gz
+        \\location = lib/test-gz-dir
+        \\location = lib/test-gz
+        \\location = share/test-gz-dir
+        \\location = share/test-gz
         \\
-    , .{ .prefix = prefix.prefix }));
+    );
 }
 
 test "install test-zst" {
@@ -97,17 +94,16 @@ test "install test-zst" {
     try prefix.expectFile("share/test-zst", "");
     try prefix.expectFile("share/test-zst-dir/file", "");
 
-    var buf: [std.mem.page_size]u8 = undefined;
-    try prefix.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+    try prefix.expectFile("share/dipm/installed.ini",
         \\[test-zst]
         \\version = 0.1.0
-        \\location = {[prefix]s}/bin/test-zst
-        \\location = {[prefix]s}/lib/test-zst-dir
-        \\location = {[prefix]s}/lib/test-zst
-        \\location = {[prefix]s}/share/test-zst-dir
-        \\location = {[prefix]s}/share/test-zst
+        \\location = bin/test-zst
+        \\location = lib/test-zst-dir
+        \\location = lib/test-zst
+        \\location = share/test-zst-dir
+        \\location = share/test-zst
         \\
-    , .{ .prefix = prefix.prefix }));
+    );
 }
 
 test "dipm install test-zst test-zst test-xz test-xz" {
@@ -213,25 +209,24 @@ test "dipm install test-xz test-zst && dipm update test-xz" {
         \\
     );
 
-    var buf: [std.mem.page_size]u8 = undefined;
-    try prefix.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+    try prefix.expectFile("share/dipm/installed.ini",
         \\[test-xz]
         \\version = 0.1.0
-        \\location = {[prefix]s}/bin/test-xz
-        \\location = {[prefix]s}/lib/test-xz-dir
-        \\location = {[prefix]s}/lib/test-xz
-        \\location = {[prefix]s}/share/test-xz-dir
-        \\location = {[prefix]s}/share/test-xz
+        \\location = bin/test-xz
+        \\location = lib/test-xz-dir
+        \\location = lib/test-xz
+        \\location = share/test-xz-dir
+        \\location = share/test-xz
         \\
         \\[test-zst]
         \\version = 0.1.0
-        \\location = {[prefix]s}/bin/test-zst
-        \\location = {[prefix]s}/lib/test-zst-dir
-        \\location = {[prefix]s}/lib/test-zst
-        \\location = {[prefix]s}/share/test-zst-dir
-        \\location = {[prefix]s}/share/test-zst
+        \\location = bin/test-zst
+        \\location = lib/test-zst-dir
+        \\location = lib/test-zst
+        \\location = share/test-zst-dir
+        \\location = share/test-zst
         \\
-    , .{ .prefix = prefix.prefix }));
+    );
 
     // Override version of packages in prefix
     var prefix_v2 = try setupPrefix(.{ .version = "0.2.0", .prefix = prefix.prefix });
@@ -242,24 +237,24 @@ test "dipm install test-xz test-zst && dipm update test-xz" {
         \\✓ test-xz 0.1.0 -> 0.2.0
         \\
     );
-    try prefix.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+    try prefix.expectFile("share/dipm/installed.ini",
         \\[test-zst]
         \\version = 0.1.0
-        \\location = {[prefix]s}/bin/test-zst
-        \\location = {[prefix]s}/lib/test-zst-dir
-        \\location = {[prefix]s}/lib/test-zst
-        \\location = {[prefix]s}/share/test-zst-dir
-        \\location = {[prefix]s}/share/test-zst
+        \\location = bin/test-zst
+        \\location = lib/test-zst-dir
+        \\location = lib/test-zst
+        \\location = share/test-zst-dir
+        \\location = share/test-zst
         \\
         \\[test-xz]
         \\version = 0.2.0
-        \\location = {[prefix]s}/bin/test-xz
-        \\location = {[prefix]s}/lib/test-xz-dir
-        \\location = {[prefix]s}/lib/test-xz
-        \\location = {[prefix]s}/share/test-xz-dir
-        \\location = {[prefix]s}/share/test-xz
+        \\location = bin/test-xz
+        \\location = lib/test-xz-dir
+        \\location = lib/test-xz
+        \\location = share/test-xz-dir
+        \\location = share/test-xz
         \\
-    , .{ .prefix = prefix.prefix }));
+    );
 }
 
 test "dipm install test-xz test-zst && dipm update" {
@@ -273,25 +268,24 @@ test "dipm install test-xz test-zst && dipm update" {
         \\
     );
 
-    var buf: [std.mem.page_size]u8 = undefined;
-    try prefix.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+    try prefix.expectFile("share/dipm/installed.ini",
         \\[test-xz]
         \\version = 0.1.0
-        \\location = {[prefix]s}/bin/test-xz
-        \\location = {[prefix]s}/lib/test-xz-dir
-        \\location = {[prefix]s}/lib/test-xz
-        \\location = {[prefix]s}/share/test-xz-dir
-        \\location = {[prefix]s}/share/test-xz
+        \\location = bin/test-xz
+        \\location = lib/test-xz-dir
+        \\location = lib/test-xz
+        \\location = share/test-xz-dir
+        \\location = share/test-xz
         \\
         \\[test-zst]
         \\version = 0.1.0
-        \\location = {[prefix]s}/bin/test-zst
-        \\location = {[prefix]s}/lib/test-zst-dir
-        \\location = {[prefix]s}/lib/test-zst
-        \\location = {[prefix]s}/share/test-zst-dir
-        \\location = {[prefix]s}/share/test-zst
+        \\location = bin/test-zst
+        \\location = lib/test-zst-dir
+        \\location = lib/test-zst
+        \\location = share/test-zst-dir
+        \\location = share/test-zst
         \\
-    , .{ .prefix = prefix.prefix }));
+    );
 
     // Override version of packages in prefix
     var prefix_v2 = try setupPrefix(.{ .version = "0.2.0", .prefix = prefix.prefix });
@@ -303,24 +297,24 @@ test "dipm install test-xz test-zst && dipm update" {
         \\✓ test-zst 0.1.0 -> 0.2.0
         \\
     );
-    try prefix.expectFile("share/dipm/installed.ini", try std.fmt.bufPrint(&buf,
+    try prefix.expectFile("share/dipm/installed.ini",
         \\[test-xz]
         \\version = 0.2.0
-        \\location = {[prefix]s}/bin/test-xz
-        \\location = {[prefix]s}/lib/test-xz-dir
-        \\location = {[prefix]s}/lib/test-xz
-        \\location = {[prefix]s}/share/test-xz-dir
-        \\location = {[prefix]s}/share/test-xz
+        \\location = bin/test-xz
+        \\location = lib/test-xz-dir
+        \\location = lib/test-xz
+        \\location = share/test-xz-dir
+        \\location = share/test-xz
         \\
         \\[test-zst]
         \\version = 0.2.0
-        \\location = {[prefix]s}/bin/test-zst
-        \\location = {[prefix]s}/lib/test-zst-dir
-        \\location = {[prefix]s}/lib/test-zst
-        \\location = {[prefix]s}/share/test-zst-dir
-        \\location = {[prefix]s}/share/test-zst
+        \\location = bin/test-zst
+        \\location = lib/test-zst-dir
+        \\location = lib/test-zst
+        \\location = share/test-zst-dir
+        \\location = share/test-zst
         \\
-    , .{ .prefix = prefix.prefix }));
+    );
 }
 
 test "dipm install test-xz test-gz && dipm update && dipm uninstall test-xz test-gz" {
