@@ -731,6 +731,13 @@ fn findDownloadUrl(options: struct {
             try trim_list.append("amd64");
             try trim_list.append("x64");
             try trim_list.append("x86-64");
+
+            switch (options.os) {
+                .linux => {
+                    try trim_list.append("linux64");
+                },
+                else => {},
+            }
         },
         .x86 => {
             try trim_list.append("32bit");
@@ -978,6 +985,15 @@ test findDownloadUrl {
             "/dockerc_aarch64",
             "/dockerc_x86-64",
             "/dockerc_x86-64-gnu",
+        },
+    }));
+    try std.testing.expectEqualStrings("/micro-2.0.14-linux64-static.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings_to_trim = &.{ "micro", "2.0.14" },
+        .urls = &.{
+            "/micro-2.0.14-linux64-static.tar.gz",
+            "/micro-2.0.14-linux64.tar.gz",
         },
     }));
 
