@@ -182,17 +182,26 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
         const node_name = node.name orelse continue;
 
         nodes_printed += 1;
-        const node_name_len = @min(node_name.len, options.width, progress.maximum_node_name_len);
 
         const bar_start = " [";
         const bar_end = "]";
 
-        if (node_name.len == node_name_len) {
+        const node_name_len = std.unicode.utf8CountCodepoints(node_name) catch continue;
+        const codepoints_to_write = @min(node_name_len, options.width, progress.maximum_node_name_len);
+
+        if (node_name_len == codepoints_to_write) {
             try writer.writeAll(node_name);
-        } else switch (node_name_len) {
-            0...3 => try writer.writeByteNTimes('.', node_name_len),
+        } else switch (codepoints_to_write) {
+            0...3 => try writer.writeByteNTimes('.', codepoints_to_write),
             else => {
-                try writer.writeAll(node_name[0 .. node_name_len - 3]);
+                const view = std.unicode.Utf8View.init(node_name) catch continue;
+                var it = view.iterator();
+                var i: usize = 0;
+                while (i < codepoints_to_write - 3) : (i += 1) {
+                    // We counted the codepoints above with `utf8CountCodepoints`, so
+                    // `nextCodepointSlice` should never return null
+                    try writer.writeAll(it.nextCodepointSlice().?);
+                }
                 try writer.writeAll("...");
             },
         }
@@ -208,7 +217,7 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
             const max: u64 = @max(1, node.max);
             const percent = (curr * 100) / max;
 
-            try writer.writeByteNTimes(' ', progress.maximum_node_name_len - node_name_len);
+            try writer.writeByteNTimes(' ', progress.maximum_node_name_len - codepoints_to_write);
             try writer.print(" {d:>3}", .{percent});
             remaining_width -= 4;
         }
@@ -487,6 +496,29 @@ test "render: no room for name" {
         \\
     ,
         &.{.{ .name = "node 0", .curr = 0, .max = 10 }},
+        .{ .width = 25, .height = 4 },
+        .{
+            .allocator = std.testing.allocator,
+            .maximum_node_name_len = 6,
+        },
+    );
+
+    try expectRender(
+        \\↓ ...   0% [            ]
+        \\
+    ,
+        &.{.{ .name = "↓ node", .curr = 0, .max = 10 }},
+        .{ .width = 25, .height = 4 },
+        .{
+            .allocator = std.testing.allocator,
+            .maximum_node_name_len = 5,
+        },
+    );
+    try expectRender(
+        \\↓ node   0% [           ]
+        \\
+    ,
+        &.{.{ .name = "↓ node", .curr = 0, .max = 10 }},
         .{ .width = 25, .height = 4 },
         .{
             .allocator = std.testing.allocator,
