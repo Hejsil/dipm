@@ -56,7 +56,7 @@ pub fn download(options: DownloadOptions) !Packages {
         .only_if_required => (try pkgs_file.getEndPos()) == 0,
     };
     if (needs_download) {
-        const download_node = options.progress.start("pkgs.ini", 1);
+        const download_node = options.progress.start("↓ pkgs.ini", 1);
         defer options.progress.end(download_node);
 
         const result = try @import("download.zig").download(pkgs_file.writer(), .{

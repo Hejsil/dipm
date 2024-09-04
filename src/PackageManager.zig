@@ -185,9 +185,6 @@ fn downloadAndExtractPackage(
     dir: std.fs.Dir,
     package: Package.Specific,
 ) !void {
-    const progress = pm.progress.start(package.name, 1);
-    defer pm.progress.end(progress);
-
     const downloaded_file_name = std.fs.path.basename(package.install.url);
     const downloaded_file = try dir.createFile(downloaded_file_name, .{ .read = true });
     defer downloaded_file.close();
@@ -196,44 +193,58 @@ fn downloadAndExtractPackage(
     var download_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const downloaded_path = try dir.realpath(downloaded_file_name, &download_path_buf);
 
-    const download_result = download.download(downloaded_file.writer(), .{
-        .client = pm.http_client,
-        .uri_str = package.install.url,
-        .progress = progress,
-    }) catch |err| {
-        try pm.diagnostics.downloadFailed(.{
-            .name = package.name,
-            .version = package.info.version,
-            .url = package.install.url,
-            .err = err,
-        });
-        return DiagnosticError.DiagnosticsDownloadFailed;
-    };
-    if (download_result.status != .ok) {
-        try pm.diagnostics.downloadFailedWithStatus(.{
-            .name = package.name,
-            .version = package.info.version,
-            .url = package.install.url,
-            .status = download_result.status,
-        });
-        return DiagnosticError.DiagnosticsDownloadFailed;
+    {
+        const download_name = try std.fmt.allocPrint(pm.gpa, "↓ {s}", .{package.name});
+        defer pm.gpa.free(download_name);
+
+        const download_progress = pm.progress.start(download_name, 1);
+        defer pm.progress.end(download_progress);
+
+        const download_result = download.download(downloaded_file.writer(), .{
+            .client = pm.http_client,
+            .uri_str = package.install.url,
+            .progress = download_progress,
+        }) catch |err| {
+            try pm.diagnostics.downloadFailed(.{
+                .name = package.name,
+                .version = package.info.version,
+                .url = package.install.url,
+                .err = err,
+            });
+            return DiagnosticError.DiagnosticsDownloadFailed;
+        };
+        if (download_result.status != .ok) {
+            try pm.diagnostics.downloadFailedWithStatus(.{
+                .name = package.name,
+                .version = package.info.version,
+                .url = package.install.url,
+                .status = download_result.status,
+            });
+            return DiagnosticError.DiagnosticsDownloadFailed;
+        }
+
+        const actual_hash = std.fmt.bytesToHex(download_result.hash, .lower);
+        if (!std.mem.eql(u8, package.install.hash, &actual_hash)) {
+            try pm.diagnostics.hashMismatch(.{
+                .name = package.name,
+                .version = package.info.version,
+                .expected_hash = package.install.hash,
+                .actual_hash = &actual_hash,
+            });
+            return DiagnosticError.DiagnosticsInvalidHash;
+        }
     }
 
-    const actual_hash = std.fmt.bytesToHex(download_result.hash, .lower);
-    if (!std.mem.eql(u8, package.install.hash, &actual_hash)) {
-        try pm.diagnostics.hashMismatch(.{
-            .name = package.name,
-            .version = package.info.version,
-            .expected_hash = package.install.hash,
-            .actual_hash = &actual_hash,
-        });
-        return DiagnosticError.DiagnosticsInvalidHash;
-    }
+    const extract_name = try std.fmt.allocPrint(pm.gpa, "⎋ {s}", .{package.name});
+    defer pm.gpa.free(extract_name);
+
+    const extract_progress = pm.progress.start(extract_name, 1);
+    defer pm.progress.end(extract_progress);
 
     try downloaded_file.seekTo(0);
     try fs.extract(.{
         .allocator = pm.gpa,
-        .node = progress,
+        .node = extract_progress,
         .input_name = downloaded_path,
         .input_file = downloaded_file,
         .output_dir = dir,
