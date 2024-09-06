@@ -536,8 +536,6 @@ fn pkgsCommand(program: *Program) !void {
             return program.pkgsAddCommand();
         if (program.args.flag(&.{"make"}))
             return program.pkgsMakeCommand();
-        if (program.args.flag(&.{"outdated"}))
-            return program.pkgsOutdatedCommand();
         if (program.args.flag(&.{ "-h", "--help", "help" }))
             return program.stdout.writeAll(pkgs_usage);
         if (program.args.positional()) |_|
@@ -787,47 +785,6 @@ fn pkgsMakeCommand(program: *Program) !void {
     }
 
     try stdout_buffered.flush();
-}
-
-const pkgs_outdated_usage =
-    \\Usage: dipm pkgs outdated [options] [url]...
-    \\
-    \\Options:
-    \\  -f, --pkgs-file     Path to pkgs.ini (default: ./pkgs.ini)
-    \\  -h, --help          Display this message
-    \\
-;
-
-fn pkgsOutdatedCommand(program: *Program) !void {
-    var pkgs_ini_path: []const u8 = "./pkgs.ini";
-    var packages_to_check_map = std.StringArrayHashMap(void).init(program.arena);
-
-    while (program.args.next()) {
-        if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
-            pkgs_ini_path = file;
-        if (program.args.flag(&.{ "-h", "--help" }))
-            return program.stdout.writeAll(pkgs_outdated_usage);
-        if (program.args.positional()) |package|
-            try packages_to_check_map.put(package, {});
-    }
-
-    var http_client = std.http.Client{ .allocator = program.gpa };
-    defer http_client.deinit();
-
-    const cwd = std.fs.cwd();
-    var packages = try Packages.parseFromPath(program.gpa, cwd, pkgs_ini_path);
-    defer packages.deinit();
-
-    try packages.findOutdatedPackages(.{
-        .allocator = program.gpa,
-        .http_client = &http_client,
-        .diagnostics = program.diagnostics,
-        .progress = program.progress,
-        .packages_to_check = if (packages_to_check_map.count() == 0)
-            null
-        else
-            packages_to_check_map.keys(),
-    });
 }
 
 test {
