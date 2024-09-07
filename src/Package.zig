@@ -206,7 +206,7 @@ pub fn fromGithub(options: struct {
         .progress = options.progress,
     });
     if (release_download_result.status != .ok)
-        return error.DownloadFailed;
+        return error.LatestReleaseDownloadFailed;
 
     const LatestRelease = struct {
         tag_name: []const u8,
@@ -268,7 +268,7 @@ pub fn fromGithub(options: struct {
         .progress = options.progress,
     });
     if (package_download_result.status != .ok)
-        return error.DownloadFailed;
+        return error.FileDownloadFailed;
 
     // TODO: Get rid of this once we have support for bz2 compression
     var download_path_buf: [std.fs.max_path_bytes]u8 = undefined;
