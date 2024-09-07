@@ -256,7 +256,7 @@ pub fn fromGithub(options: struct {
     defer global_tmp_dir.close();
 
     var tmp_dir = try fs.tmpDir(global_tmp_dir, .{ .iterate = true });
-    defer tmp_dir.dir.close();
+    defer tmp_dir.deleteAndClose();
 
     const downloaded_file_name = std.fs.path.basename(download_url);
     const downloaded_file = try tmp_dir.dir.createFile(downloaded_file_name, .{ .read = true });

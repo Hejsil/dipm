@@ -88,6 +88,15 @@ pub fn tmpName() [tmp_dir_name_len]u8 {
 pub const TmpDir = struct {
     dir: std.fs.Dir,
     name: [tmp_dir_name_len]u8,
+
+    pub fn deleteAndClose(dir: *TmpDir) void {
+        defer dir.dir.close();
+
+        var parent_dir = dir.dir.openDir("..", .{}) catch return;
+        defer parent_dir.close();
+
+        parent_dir.deleteTree(&dir.name) catch {};
+    }
 };
 
 pub fn tmpDir(dir: std.fs.Dir, open_dir_options: std.fs.Dir.OpenOptions) !TmpDir {
