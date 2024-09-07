@@ -270,10 +270,14 @@ pub fn fromGithub(options: struct {
     if (package_download_result.status != .ok)
         return error.DownloadFailed;
 
+    // TODO: Get rid of this once we have support for bz2 compression
+    var download_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const downloaded_path = try tmp_dir.dir.realpath(downloaded_file_name, &download_path_buf);
+
     try downloaded_file.seekTo(0);
     try fs.extract(.{
         .allocator = arena,
-        .input_name = downloaded_file_name,
+        .input_name = downloaded_path,
         .input_file = downloaded_file,
         .output_dir = tmp_dir.dir,
     });
