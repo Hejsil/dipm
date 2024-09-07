@@ -242,6 +242,11 @@ pub fn fromGithub(options: struct {
             name,
             version,
             latest_release.tag_name,
+
+            // Handle packages line ripgrep-all, whos name has a dash, but the download url has
+            // ripgrep_all in the filename instead.
+            try std.mem.replaceOwned(u8, arena, name, "-", "_"),
+            try std.mem.replaceOwned(u8, arena, name, "_", "-"),
         },
         // This is only save because `assets` only have the field `browser_download_url`
         .urls = @ptrCast(latest_release.assets),
