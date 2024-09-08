@@ -193,20 +193,45 @@ pub fn fromGithub(options: struct {
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
+    const api_uri_prefix = "https://api.github.com/";
     const latest_release_uri = options.latest_release_uri orelse try std.fmt.allocPrint(
         arena,
-        "https://api.github.com/repos/{s}/{s}/releases/latest",
-        .{ options.user, options.repo },
+        "{s}repos/{s}/{s}/releases/latest",
+        .{ api_uri_prefix, options.user, options.repo },
     );
 
     var latest_release_json = std.ArrayList(u8).init(arena);
-    const release_download_result = try download.download(latest_release_json.writer(), .{
-        .client = options.http_client,
-        .uri_str = latest_release_uri,
-        .progress = options.progress,
-    });
-    if (release_download_result.status != .ok)
-        return error.LatestReleaseDownloadFailed;
+    if (std.mem.startsWith(u8, latest_release_uri, api_uri_prefix)) {
+        // For `api.github.com`, use the `gh` program instead of our own `download` function. No
+        // need to implement authentication in `dipm` itself.
+        // TODO: Fallback to own `download` if `gh` is not installed
+        const endpoint = latest_release_uri[api_uri_prefix.len..];
+        var gh_process = std.process.Child.init(&.{ "gh", "api", endpoint }, arena);
+        gh_process.stdin_behavior = .Ignore;
+        gh_process.stdout_behavior = .Pipe;
+        gh_process.stderr_behavior = .Pipe;
+
+        try gh_process.spawn();
+
+        var stderr = std.ArrayList(u8).init(arena);
+        try gh_process.collectOutput(&latest_release_json, &stderr, std.math.maxInt(usize));
+
+        const term = try gh_process.wait();
+        switch (term) {
+            .Exited => |exitcode| if (exitcode != 0) {
+                return error.LatestReleaseDownloadFailed;
+            },
+            .Signal, .Stopped, .Unknown => return error.LatestReleaseDownloadFailed,
+        }
+    } else {
+        const release_download_result = try download.download(latest_release_json.writer(), .{
+            .client = options.http_client,
+            .uri_str = latest_release_uri,
+            .progress = options.progress,
+        });
+        if (release_download_result.status != .ok)
+            return error.LatestReleaseDownloadFailed;
+    }
 
     const LatestRelease = struct {
         tag_name: []const u8,
