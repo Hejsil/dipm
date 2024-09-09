@@ -257,21 +257,14 @@ pub fn fromGithub(options: struct {
     const download_url = try findDownloadUrl(.{
         .os = options.os,
         .arch = options.arch,
-        .extra_strings_to_trim = &.{
-            options.user,
-            options.repo,
-            // A lot of tools have a full name (like nushell) but uses a shorthand for the actual
-            // program (nu for nushell)
-            options.repo[0..@min(2, options.repo.len)],
-            options.repo[0..@min(3, options.repo.len)],
+        .extra_strings = &.{
             name,
-            version,
-            latest_release.tag_name,
 
-            // Handle packages line ripgrep-all, whos name has a dash, but the download url has
-            // ripgrep_all in the filename instead.
-            try std.mem.replaceOwned(u8, arena, name, "-", "_"),
-            try std.mem.replaceOwned(u8, arena, name, "_", "-"),
+            // Pick `sccache-v0.8.1` over `sccache-dist-v0.8.1`
+            try std.fmt.allocPrint(arena, "{s}-{s}", .{ name, version }),
+            try std.fmt.allocPrint(arena, "{s}_{s}", .{ name, version }),
+            try std.fmt.allocPrint(arena, "{s}-{s}", .{ name, latest_release.tag_name }),
+            try std.fmt.allocPrint(arena, "{s}_{s}", .{ name, latest_release.tag_name }),
         },
         // This is only save because `assets` only have the field `browser_download_url`
         .urls = @ptrCast(latest_release.assets),
@@ -734,97 +727,122 @@ test findManPages {
 fn findDownloadUrl(options: struct {
     os: std.Target.Os.Tag,
     arch: std.Target.Cpu.Arch,
-    extra_strings_to_trim: []const []const u8,
+    extra_strings: []const []const u8 = &.{},
     urls: []const []const u8,
 }) ![]const u8 {
-    // To find the download url, a trim list is constructed. It contains only things that are
-    // expected to be in file name. Each url is the continuesly trimmed until either:
-    // * `/` is reach. This means it is the download url
-    // * Nothing was trimmed. The file name contains something unwanted
+    if (options.urls.len == 0)
+        return error.DownloadUrlNotFound;
 
-    var trim_list = std.BoundedArray([]const u8, 128){};
-    try trim_list.append("_");
-    try trim_list.append("-");
-    try trim_list.append(".");
+    var best_score: usize = 0;
+    var best_index: usize = 0;
 
-    try trim_list.append("musl");
-    try trim_list.append("static");
+    for (options.urls, 0..) |url, i| {
+        const basename = std.fs.path.basename(url);
+        var this_score: usize = 0;
 
-    // Some rust projects append `rs` to the end of their binary names even if the project name
-    // itself does not have this suffix
-    try trim_list.append("rs");
+        this_score += std.mem.count(u8, basename, @tagName(options.arch));
+        this_score += std.mem.count(u8, basename, @tagName(options.os));
 
-    try trim_list.append("unknown");
-    try trim_list.append(@tagName(options.arch));
-    try trim_list.append(@tagName(options.os));
+        switch (options.os) {
+            .linux => {
+                this_score += std.mem.count(u8, basename, "Linux");
 
-    // Some arch have varius names that people use
-    switch (options.arch) {
-        .x86_64 => {
-            try trim_list.append("64bit");
-            try trim_list.append("amd64");
-            try trim_list.append("x64");
-            try trim_list.append("x86-64");
-
-            switch (options.os) {
-                .linux => {
-                    try trim_list.append("linux64");
-                },
-                else => {},
-            }
-        },
-        .x86 => {
-            try trim_list.append("32bit");
-        },
-        else => {},
-    }
-
-    for (options.extra_strings_to_trim) |item|
-        if (item.len != 0)
-            try trim_list.append(item);
-
-    for (fs.FileType.extensions) |ext|
-        if (ext.ext.len != 0)
-            try trim_list.append(ext.ext);
-
-    std.mem.sort([]const u8, trim_list.slice(), {}, struct {
-        fn lenGt(_: void, a: []const u8, b: []const u8) bool {
-            return a.len > b.len;
+                // Targeting musl abi or the alpine distro tends mean the executable is statically
+                // linked
+                this_score += std.mem.count(u8, basename, "alpine");
+                this_score += std.mem.count(u8, basename, "musl");
+            },
+            else => {},
         }
-    }.lenGt);
 
-    var best_match: ?usize = null;
+        switch (options.arch) {
+            .x86_64 => {
+                this_score += std.mem.count(u8, basename, "64bit");
+                this_score += std.mem.count(u8, basename, "amd64");
+                this_score += std.mem.count(u8, basename, "x64");
+                this_score += std.mem.count(u8, basename, "x86-64");
 
-    outer: for (options.urls, 0..) |url, i| {
-        var download_url = url;
-        inner: while (!std.mem.endsWith(u8, download_url, "/")) {
-            for (trim_list.slice()) |trim| {
-                std.debug.assert(trim.len != 0);
-                if (std.ascii.endsWithIgnoreCase(download_url, trim)) {
-                    download_url.len -= trim.len;
-                    continue :inner;
+                switch (options.os) {
+                    .linux => {
+                        this_score += std.mem.count(u8, basename, "linux64");
+                    },
+                    else => {},
                 }
-            }
-
-            continue :outer;
+            },
+            .x86 => {
+                this_score += std.mem.count(u8, basename, "32bit");
+            },
+            else => {},
         }
 
-        const old_match = if (best_match) |b| options.urls[b] else "";
-        if (url.len > old_match.len)
-            best_match = i;
+        // The above rules are the most important
+        this_score *= 10;
+
+        var buf: [std.mem.page_size]u8 = undefined;
+        for (options.extra_strings) |string| {
+            this_score += std.mem.count(u8, basename, string);
+            // We wonna pick `tau` instead of `taucorder`. Most of the time, these names are
+            // separated with `_` or `-`
+            this_score += std.mem.count(u8, basename, try std.fmt.bufPrint(&buf, "{s}_", .{string}));
+            this_score += std.mem.count(u8, basename, try std.fmt.bufPrint(&buf, "{s}-", .{string}));
+            this_score += std.mem.count(u8, basename, try std.fmt.bufPrint(&buf, "_{s}", .{string}));
+            this_score += std.mem.count(u8, basename, try std.fmt.bufPrint(&buf, "-{s}", .{string}));
+            this_score += std.mem.count(u8, basename, try std.fmt.bufPrint(&buf, "_{s}_", .{string}));
+            this_score += std.mem.count(u8, basename, try std.fmt.bufPrint(&buf, "-{s}-", .{string}));
+        }
+
+        // Certain extensions indicate means the link downloads a signature, deb package or other
+        // none useful resources to `dipm`
+        const deprioritized_extensions = [_][]const u8{
+            ".asc",
+            ".b3",
+            ".deb",
+            ".json",
+            ".pem",
+            ".proof",
+            ".rpm",
+            ".sbom",
+            ".sha",
+            ".sha256",
+            ".sha256sum",
+            ".sha512",
+            ".sha512sum",
+            ".sig",
+        };
+        for (deprioritized_extensions) |ext|
+            this_score -|= @as(usize, @intFromBool(std.mem.endsWith(u8, basename, ext))) * 1000;
+
+        // Avoid debug builds of binaries
+        this_score -|= std.mem.count(u8, basename, "debug");
+
+        switch (options.os) {
+            .linux => {
+                // Targeting the gnu abi tends to not be statically linked
+                this_score -|= std.mem.count(u8, basename, "gnu");
+            },
+            else => {},
+        }
+
+        if (this_score > best_score) {
+            best_score = this_score;
+            best_index = i;
+        }
+
+        // If scores are equal, use the length of the url as a tiebreaker
+        if (this_score == best_score and url.len > options.urls[best_index].len) {
+            best_score = this_score;
+            best_index = i;
+        }
     }
 
-    if (best_match) |res|
-        return options.urls[res];
-
-    return error.DownloadUrlNotFound;
+    return options.urls[best_index];
 }
 
 test findDownloadUrl {
     try std.testing.expectEqualStrings("/fzf-0.54.0-linux_amd64.tar.gz", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{ "fzf", "0.54.0" },
+        .extra_strings = &.{"fzf"},
         .urls = &.{
             "/fzf-0.54.0-darwin_amd64.zip",
             "/fzf-0.54.0-darwin_arm64.zip",
@@ -849,7 +867,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/fzf-0.54.0-windows_amd64.zip", try findDownloadUrl(.{
         .os = .windows,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{ "fzf", "0.54.0" },
+        .extra_strings = &.{"fzf"},
         .urls = &.{
             "/fzf-0.54.0-darwin_amd64.zip",
             "/fzf-0.54.0-darwin_arm64.zip",
@@ -874,7 +892,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/gophish-v0.12.1-linux-64bit.zip", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{ "gophish", "v0.12.1" },
+        .extra_strings = &.{"gophish"},
         .urls = &.{
             "/gophish-v0.12.1-linux-32bit.zip",
             "/gophish-v0.12.1-linux-64bit.zip",
@@ -885,7 +903,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/gophish-v0.12.1-windows-64bit.zip", try findDownloadUrl(.{
         .os = .windows,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{ "gophish", "v0.12.1" },
+        .extra_strings = &.{"gophish"},
         .urls = &.{
             "/gophish-v0.12.1-linux-32bit.zip",
             "/gophish-v0.12.1-linux-64bit.zip",
@@ -896,7 +914,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/gophish-v0.12.1-linux-32bit.zip", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86,
-        .extra_strings_to_trim = &.{ "gophish", "v0.12.1" },
+        .extra_strings = &.{"gophish"},
         .urls = &.{
             "/gophish-v0.12.1-linux-32bit.zip",
             "/gophish-v0.12.1-linux-64bit.zip",
@@ -907,7 +925,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/wasmer-linux-musl-amd64.tar.gz", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{"wasmer"},
+        .extra_strings = &.{"wasmer"},
         .urls = &.{
             "/wasmer-darwin-amd64.tar.gz",
             "/wasmer-darwin-arm64.tar.gz",
@@ -923,7 +941,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/mise-v2024.7.4-linux-x64-musl.tar.gz", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{ "mise", "v2024.7.4" },
+        .extra_strings = &.{"mise"},
         .urls = &.{
             "/mise-v2024.7.4-linux-arm64",
             "/mise-v2024.7.4-linux-arm64-musl",
@@ -956,7 +974,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/shadowsocks-v1.20.3.x86_64-unknown-linux-musl.tar.xz", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{ "shadowsocks", "v1.20.3" },
+        .extra_strings = &.{"shadowsocks"},
         .urls = &.{
             "/shadowsocks-v1.20.3.aarch64-apple-darwin.tar.xz",
             "/shadowsocks-v1.20.3.aarch64-apple-darwin.tar.xz.sha256",
@@ -993,7 +1011,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/sigrs-x86_64-unknown-linux-musl.tar.xz", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{"sig"},
+        .extra_strings = &.{"sigrs"},
         .urls = &.{
             "/dist-manifest.json",
             "/sigrs-aarch64-apple-darwin.tar.xz",
@@ -1014,7 +1032,7 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/dockerc_x86-64", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{"dockerc"},
+        .extra_strings = &.{"dockerc"},
         .urls = &.{
             "/dockerc_aarch64",
             "/dockerc_x86-64",
@@ -1024,17 +1042,751 @@ test findDownloadUrl {
     try std.testing.expectEqualStrings("/micro-2.0.14-linux64-static.tar.gz", try findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{ "micro", "2.0.14" },
+        .extra_strings = &.{"micro"},
         .urls = &.{
             "/micro-2.0.14-linux64-static.tar.gz",
             "/micro-2.0.14-linux64.tar.gz",
+        },
+    }));
+    try std.testing.expectEqualStrings("/jq-linux64", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"jq"},
+        .urls = &.{
+            "/jq-1.7.1.tar.gz",
+            "/jq-1.7.1.zip",
+            "/jq-linux-amd64",
+            "/jq-linux-arm64",
+            "/jq-linux-armel",
+            "/jq-linux-armhf",
+            "/jq-linux-i386",
+            "/jq-linux-mips",
+            "/jq-linux-mips64",
+            "/jq-linux-mips64el",
+            "/jq-linux-mips64r6",
+            "/jq-linux-mips64r6el",
+            "/jq-linux-mipsel",
+            "/jq-linux-mipsr6",
+            "/jq-linux-mipsr6el",
+            "/jq-linux-powerpc",
+            "/jq-linux-ppc64el",
+            "/jq-linux-riscv64",
+            "/jq-linux-s390x",
+            "/jq-linux64",
+            "/jq-macos-amd64",
+            "/jq-macos-arm64",
+            "/jq-osx-amd64",
+            "/jq-win64.exe",
+            "/jq-windows-amd64.exe",
+            "/jq-windows-i386.exe",
+            "/sha256sum.txt",
+            "/jq-1.7.1.tar.gz",
+        },
+    }));
+    try std.testing.expectEqualStrings("/act_Linux_x86_64.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"act"},
+        .urls = &.{
+            "/act_Darwin_arm64.tar.gz",
+            "/act_Darwin_x86_64.tar.gz",
+            "/act_Linux_arm64.tar.gz",
+            "/act_Linux_armv6.tar.gz",
+            "/act_Linux_armv7.tar.gz",
+            "/act_Linux_i386.tar.gz",
+            "/act_Linux_riscv64.tar.gz",
+            "/act_Linux_x86_64.tar.gz",
+            "/act_Windows_arm64.zip",
+            "/act_Windows_armv7.zip",
+            "/act_Windows_i386.zip",
+            "/act_Windows_x86_64.zip",
+            "/checksums.txt",
+        },
+    }));
+    try std.testing.expectEqualStrings("/age-v1.2.0-linux-amd64.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"age"},
+        .urls = &.{
+            "/age-v1.2.0-darwin-amd64.tar.gz",
+            "/age-v1.2.0-darwin-amd64.tar.gz.proof",
+            "/age-v1.2.0-darwin-arm64.tar.gz",
+            "/age-v1.2.0-darwin-arm64.tar.gz.proof",
+            "/age-v1.2.0-freebsd-amd64.tar.gz",
+            "/age-v1.2.0-freebsd-amd64.tar.gz.proof",
+            "/age-v1.2.0-linux-amd64.tar.gz",
+            "/age-v1.2.0-linux-amd64.tar.gz.proof",
+            "/age-v1.2.0-linux-arm.tar.gz",
+            "/age-v1.2.0-linux-arm.tar.gz.proof",
+            "/age-v1.2.0-linux-arm64.tar.gz",
+            "/age-v1.2.0-linux-arm64.tar.gz.proof",
+            "/age-v1.2.0-windows-amd64.zip",
+            "/age-v1.2.0-windows-amd64.zip.proof",
+        },
+    }));
+    try std.testing.expectEqualStrings("/caddy_2.8.4_linux_amd64.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"caddy"},
+        .urls = &.{
+            "/caddy_2.8.4_buildable-artifact.pem",
+            "/caddy_2.8.4_buildable-artifact.tar.gz",
+            "/caddy_2.8.4_buildable-artifact.tar.gz.sig",
+            "/caddy_2.8.4_checksums.txt",
+            "/caddy_2.8.4_checksums.txt.pem",
+            "/caddy_2.8.4_checksums.txt.sig",
+            "/caddy_2.8.4_freebsd_amd64.pem",
+            "/caddy_2.8.4_freebsd_amd64.sbom",
+            "/caddy_2.8.4_freebsd_amd64.sbom.pem",
+            "/caddy_2.8.4_freebsd_amd64.sbom.sig",
+            "/caddy_2.8.4_freebsd_amd64.tar.gz",
+            "/caddy_2.8.4_freebsd_amd64.tar.gz.sig",
+            "/caddy_2.8.4_freebsd_arm64.pem",
+            "/caddy_2.8.4_freebsd_arm64.sbom",
+            "/caddy_2.8.4_freebsd_arm64.sbom.pem",
+            "/caddy_2.8.4_freebsd_arm64.sbom.sig",
+            "/caddy_2.8.4_freebsd_arm64.tar.gz",
+            "/caddy_2.8.4_freebsd_arm64.tar.gz.sig",
+            "/caddy_2.8.4_freebsd_armv6.pem",
+            "/caddy_2.8.4_freebsd_armv6.sbom",
+            "/caddy_2.8.4_freebsd_armv6.sbom.pem",
+            "/caddy_2.8.4_freebsd_armv6.sbom.sig",
+            "/caddy_2.8.4_freebsd_armv6.tar.gz",
+            "/caddy_2.8.4_freebsd_armv6.tar.gz.sig",
+            "/caddy_2.8.4_freebsd_armv7.pem",
+            "/caddy_2.8.4_freebsd_armv7.sbom",
+            "/caddy_2.8.4_freebsd_armv7.sbom.pem",
+            "/caddy_2.8.4_freebsd_armv7.sbom.sig",
+            "/caddy_2.8.4_freebsd_armv7.tar.gz",
+            "/caddy_2.8.4_freebsd_armv7.tar.gz.sig",
+            "/caddy_2.8.4_linux_amd64.deb",
+            "/caddy_2.8.4_linux_amd64.deb.pem",
+            "/caddy_2.8.4_linux_amd64.deb.sig",
+            "/caddy_2.8.4_linux_amd64.pem",
+            "/caddy_2.8.4_linux_amd64.sbom",
+            "/caddy_2.8.4_linux_amd64.sbom.pem",
+            "/caddy_2.8.4_linux_amd64.sbom.sig",
+            "/caddy_2.8.4_linux_amd64.tar.gz",
+            "/caddy_2.8.4_linux_amd64.tar.gz.sig",
+            "/caddy_2.8.4_linux_arm64.deb",
+            "/caddy_2.8.4_linux_arm64.deb.pem",
+            "/caddy_2.8.4_linux_arm64.deb.sig",
+            "/caddy_2.8.4_linux_arm64.pem",
+            "/caddy_2.8.4_linux_arm64.sbom",
+            "/caddy_2.8.4_linux_arm64.sbom.pem",
+            "/caddy_2.8.4_linux_arm64.sbom.sig",
+            "/caddy_2.8.4_linux_arm64.tar.gz",
+            "/caddy_2.8.4_linux_arm64.tar.gz.sig",
+            "/caddy_2.8.4_linux_armv5.deb",
+            "/caddy_2.8.4_linux_armv5.deb.pem",
+            "/caddy_2.8.4_linux_armv5.deb.sig",
+            "/caddy_2.8.4_linux_armv5.pem",
+            "/caddy_2.8.4_linux_armv5.sbom",
+            "/caddy_2.8.4_linux_armv5.sbom.pem",
+            "/caddy_2.8.4_linux_armv5.sbom.sig",
+            "/caddy_2.8.4_linux_armv5.tar.gz",
+            "/caddy_2.8.4_linux_armv5.tar.gz.sig",
+            "/caddy_2.8.4_linux_armv6.deb",
+            "/caddy_2.8.4_linux_armv6.deb.pem",
+            "/caddy_2.8.4_linux_armv6.deb.sig",
+            "/caddy_2.8.4_linux_armv6.pem",
+            "/caddy_2.8.4_linux_armv6.sbom",
+            "/caddy_2.8.4_linux_armv6.sbom.pem",
+            "/caddy_2.8.4_linux_armv6.sbom.sig",
+            "/caddy_2.8.4_linux_armv6.tar.gz",
+            "/caddy_2.8.4_linux_armv6.tar.gz.sig",
+            "/caddy_2.8.4_linux_armv7.deb",
+            "/caddy_2.8.4_linux_armv7.deb.pem",
+            "/caddy_2.8.4_linux_armv7.deb.sig",
+            "/caddy_2.8.4_linux_armv7.pem",
+            "/caddy_2.8.4_linux_armv7.sbom",
+            "/caddy_2.8.4_linux_armv7.sbom.pem",
+            "/caddy_2.8.4_linux_armv7.sbom.sig",
+            "/caddy_2.8.4_linux_armv7.tar.gz",
+            "/caddy_2.8.4_linux_armv7.tar.gz.sig",
+            "/caddy_2.8.4_linux_ppc64le.deb",
+            "/caddy_2.8.4_linux_ppc64le.deb.pem",
+            "/caddy_2.8.4_linux_ppc64le.deb.sig",
+            "/caddy_2.8.4_linux_ppc64le.pem",
+            "/caddy_2.8.4_linux_ppc64le.sbom",
+            "/caddy_2.8.4_linux_ppc64le.sbom.pem",
+            "/caddy_2.8.4_linux_ppc64le.sbom.sig",
+            "/caddy_2.8.4_linux_ppc64le.tar.gz",
+            "/caddy_2.8.4_linux_ppc64le.tar.gz.sig",
+            "/caddy_2.8.4_linux_riscv64.deb",
+            "/caddy_2.8.4_linux_riscv64.deb.pem",
+            "/caddy_2.8.4_linux_riscv64.deb.sig",
+            "/caddy_2.8.4_linux_riscv64.pem",
+            "/caddy_2.8.4_linux_riscv64.sbom",
+            "/caddy_2.8.4_linux_riscv64.sbom.pem",
+            "/caddy_2.8.4_linux_riscv64.sbom.sig",
+            "/caddy_2.8.4_linux_riscv64.tar.gz",
+            "/caddy_2.8.4_linux_riscv64.tar.gz.sig",
+            "/caddy_2.8.4_linux_s390x.deb",
+            "/caddy_2.8.4_linux_s390x.deb.pem",
+            "/caddy_2.8.4_linux_s390x.deb.sig",
+            "/caddy_2.8.4_linux_s390x.pem",
+            "/caddy_2.8.4_linux_s390x.sbom",
+            "/caddy_2.8.4_linux_s390x.sbom.pem",
+            "/caddy_2.8.4_linux_s390x.sbom.sig",
+            "/caddy_2.8.4_linux_s390x.tar.gz",
+            "/caddy_2.8.4_linux_s390x.tar.gz.sig",
+            "/caddy_2.8.4_mac_amd64.pem",
+            "/caddy_2.8.4_mac_amd64.sbom",
+            "/caddy_2.8.4_mac_amd64.sbom.pem",
+            "/caddy_2.8.4_mac_amd64.sbom.sig",
+            "/caddy_2.8.4_mac_amd64.tar.gz",
+            "/caddy_2.8.4_mac_amd64.tar.gz.sig",
+            "/caddy_2.8.4_mac_arm64.pem",
+            "/caddy_2.8.4_mac_arm64.sbom",
+            "/caddy_2.8.4_mac_arm64.sbom.pem",
+            "/caddy_2.8.4_mac_arm64.sbom.sig",
+            "/caddy_2.8.4_mac_arm64.tar.gz",
+            "/caddy_2.8.4_mac_arm64.tar.gz.sig",
+            "/caddy_2.8.4_src.pem",
+            "/caddy_2.8.4_src.tar.gz",
+            "/caddy_2.8.4_src.tar.gz.sig",
+            "/caddy_2.8.4_windows_amd64.pem",
+            "/caddy_2.8.4_windows_amd64.sbom",
+            "/caddy_2.8.4_windows_amd64.sbom.pem",
+            "/caddy_2.8.4_windows_amd64.sbom.sig",
+            "/caddy_2.8.4_windows_amd64.zip",
+            "/caddy_2.8.4_windows_amd64.zip.sig",
+            "/caddy_2.8.4_windows_arm64.pem",
+            "/caddy_2.8.4_windows_arm64.sbom",
+            "/caddy_2.8.4_windows_arm64.sbom.pem",
+            "/caddy_2.8.4_windows_arm64.sbom.sig",
+            "/caddy_2.8.4_windows_arm64.zip",
+            "/caddy_2.8.4_windows_arm64.zip.sig",
+            "/caddy_2.8.4_windows_armv5.pem",
+            "/caddy_2.8.4_windows_armv5.sbom",
+            "/caddy_2.8.4_windows_armv5.sbom.pem",
+            "/caddy_2.8.4_windows_armv5.sbom.sig",
+            "/caddy_2.8.4_windows_armv5.zip",
+            "/caddy_2.8.4_windows_armv5.zip.sig",
+            "/caddy_2.8.4_windows_armv6.pem",
+            "/caddy_2.8.4_windows_armv6.sbom",
+            "/caddy_2.8.4_windows_armv6.sbom.pem",
+            "/caddy_2.8.4_windows_armv6.sbom.sig",
+            "/caddy_2.8.4_windows_armv6.zip",
+            "/caddy_2.8.4_windows_armv6.zip.sig",
+            "/caddy_2.8.4_windows_armv7.pem",
+            "/caddy_2.8.4_windows_armv7.sbom",
+            "/caddy_2.8.4_windows_armv7.sbom.pem",
+            "/caddy_2.8.4_windows_armv7.sbom.sig",
+            "/caddy_2.8.4_windows_armv7.zip",
+            "/caddy_2.8.4_windows_armv7.zip.sig",
+        },
+    }));
+    try std.testing.expectEqualStrings("/glow_2.0.0_Linux_x86_64.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"glow"},
+        .urls = &.{
+            "/checksums.txt",
+            "/checksums.txt.pem",
+            "/checksums.txt.sig",
+            "/glow-2.0.0-1.aarch64.rpm",
+            "/glow-2.0.0-1.armv7hl.rpm",
+            "/glow-2.0.0-1.i386.rpm",
+            "/glow-2.0.0-1.x86_64.rpm",
+            "/glow-2.0.0.tar.gz",
+            "/glow-2.0.0.tar.gz.sbom.json",
+            "/glow_2.0.0_aarch64.apk",
+            "/glow_2.0.0_amd64.deb",
+            "/glow_2.0.0_arm64.deb",
+            "/glow_2.0.0_armhf.deb",
+            "/glow_2.0.0_armv7.apk",
+            "/glow_2.0.0_Darwin_arm64.tar.gz",
+            "/glow_2.0.0_Darwin_arm64.tar.gz.sbom.json",
+            "/glow_2.0.0_Darwin_x86_64.tar.gz",
+            "/glow_2.0.0_Darwin_x86_64.tar.gz.sbom.json",
+            "/glow_2.0.0_Freebsd_arm.tar.gz",
+            "/glow_2.0.0_Freebsd_arm.tar.gz.sbom.json",
+            "/glow_2.0.0_Freebsd_arm64.tar.gz",
+            "/glow_2.0.0_Freebsd_arm64.tar.gz.sbom.json",
+            "/glow_2.0.0_Freebsd_i386.tar.gz",
+            "/glow_2.0.0_Freebsd_i386.tar.gz.sbom.json",
+            "/glow_2.0.0_Freebsd_x86_64.tar.gz",
+            "/glow_2.0.0_Freebsd_x86_64.tar.gz.sbom.json",
+            "/glow_2.0.0_i386.deb",
+            "/glow_2.0.0_Linux_arm.tar.gz",
+            "/glow_2.0.0_Linux_arm.tar.gz.sbom.json",
+            "/glow_2.0.0_Linux_arm64.tar.gz",
+            "/glow_2.0.0_Linux_arm64.tar.gz.sbom.json",
+            "/glow_2.0.0_Linux_i386.tar.gz",
+            "/glow_2.0.0_Linux_i386.tar.gz.sbom.json",
+            "/glow_2.0.0_Linux_x86_64.tar.gz",
+            "/glow_2.0.0_Linux_x86_64.tar.gz.sbom.json",
+            "/glow_2.0.0_Netbsd_arm.tar.gz",
+            "/glow_2.0.0_Netbsd_arm.tar.gz.sbom.json",
+            "/glow_2.0.0_Netbsd_arm64.tar.gz",
+            "/glow_2.0.0_Netbsd_arm64.tar.gz.sbom.json",
+            "/glow_2.0.0_Netbsd_i386.tar.gz",
+            "/glow_2.0.0_Netbsd_i386.tar.gz.sbom.json",
+            "/glow_2.0.0_Netbsd_x86_64.tar.gz",
+            "/glow_2.0.0_Netbsd_x86_64.tar.gz.sbom.json",
+            "/glow_2.0.0_Openbsd_arm.tar.gz",
+            "/glow_2.0.0_Openbsd_arm.tar.gz.sbom.json",
+            "/glow_2.0.0_Openbsd_arm64.tar.gz",
+            "/glow_2.0.0_Openbsd_arm64.tar.gz.sbom.json",
+            "/glow_2.0.0_Openbsd_i386.tar.gz",
+            "/glow_2.0.0_Openbsd_i386.tar.gz.sbom.json",
+            "/glow_2.0.0_Openbsd_x86_64.tar.gz",
+            "/glow_2.0.0_Openbsd_x86_64.tar.gz.sbom.json",
+            "/glow_2.0.0_Windows_i386.zip",
+            "/glow_2.0.0_Windows_i386.zip.sbom.json",
+            "/glow_2.0.0_Windows_x86_64.zip",
+            "/glow_2.0.0_Windows_x86_64.zip.sbom.json",
+            "/glow_2.0.0_x86.apk",
+            "/glow_2.0.0_x86_64.apk",
+        },
+    }));
+    try std.testing.expectEqualStrings("/iamb-x86_64-unknown-linux-musl.tgz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"iamb"},
+        .urls = &.{
+            "/iamb-aarch64-apple-darwin.tgz",
+            "/iamb-aarch64-unknown-linux-gnu.deb",
+            "/iamb-aarch64-unknown-linux-gnu.rpm",
+            "/iamb-aarch64-unknown-linux-gnu.tgz",
+            "/iamb-x86_64-apple-darwin.tgz",
+            "/iamb-x86_64-pc-windows-msvc.zip",
+            "/iamb-x86_64-unknown-linux-musl.deb",
+            "/iamb-x86_64-unknown-linux-musl.rpm",
+            "/iamb-x86_64-unknown-linux-musl.tgz",
+        },
+    }));
+    try std.testing.expectEqualStrings("/linutil", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"linutil"},
+        .urls = &.{
+            "/linutil",
+            "/start.sh",
+            "/startdev.sh",
+        },
+    }));
+    try std.testing.expectEqualStrings("/ownserver_v0.6.0_x86_64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"ownserver"},
+        .urls = &.{
+            "/ownserver_v0.6.0_x86_64-apple-darwin.zip",
+            "/ownserver_v0.6.0_x86_64-apple-darwin.zip.sha256sum",
+            "/ownserver_v0.6.0_x86_64-pc-windows-gnu.zip",
+            "/ownserver_v0.6.0_x86_64-pc-windows-gnu.zip.sha256sum",
+            "/ownserver_v0.6.0_x86_64-unknown-linux-musl.tar.gz",
+            "/ownserver_v0.6.0_x86_64-unknown-linux-musl.tar.gz.sha256sum",
+            "/ownserver_v0.6.0_x86_64-unknown-linux-musl.tar.xz",
+            "/ownserver_v0.6.0_x86_64-unknown-linux-musl.tar.xz.sha256sum",
+        },
+    }));
+    try std.testing.expectEqualStrings("/presenterm-0.8.0-x86_64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"presenterm"},
+        .urls = &.{
+            "/presenterm-0.8.0-aarch64-apple-darwin.tar.gz",
+            "/presenterm-0.8.0-aarch64-apple-darwin.tar.gz.sha512",
+            "/presenterm-0.8.0-aarch64-unknown-linux-gnu.tar.gz",
+            "/presenterm-0.8.0-aarch64-unknown-linux-gnu.tar.gz.sha512",
+            "/presenterm-0.8.0-aarch64-unknown-linux-musl.tar.gz",
+            "/presenterm-0.8.0-aarch64-unknown-linux-musl.tar.gz.sha512",
+            "/presenterm-0.8.0-armv5te-unknown-linux-gnueabi.tar.gz",
+            "/presenterm-0.8.0-armv5te-unknown-linux-gnueabi.tar.gz.sha512",
+            "/presenterm-0.8.0-armv7-unknown-linux-gnueabihf.tar.gz",
+            "/presenterm-0.8.0-armv7-unknown-linux-gnueabihf.tar.gz.sha512",
+            "/presenterm-0.8.0-i686-pc-windows-msvc.zip",
+            "/presenterm-0.8.0-i686-pc-windows-msvc.zip.sha512",
+            "/presenterm-0.8.0-i686-unknown-linux-gnu.tar.gz",
+            "/presenterm-0.8.0-i686-unknown-linux-gnu.tar.gz.sha512",
+            "/presenterm-0.8.0-i686-unknown-linux-musl.tar.gz",
+            "/presenterm-0.8.0-i686-unknown-linux-musl.tar.gz.sha512",
+            "/presenterm-0.8.0-x86_64-apple-darwin.tar.gz",
+            "/presenterm-0.8.0-x86_64-apple-darwin.tar.gz.sha512",
+            "/presenterm-0.8.0-x86_64-pc-windows-msvc.zip",
+            "/presenterm-0.8.0-x86_64-pc-windows-msvc.zip.sha512",
+            "/presenterm-0.8.0-x86_64-unknown-linux-gnu.tar.gz",
+            "/presenterm-0.8.0-x86_64-unknown-linux-gnu.tar.gz.sha512",
+            "/presenterm-0.8.0-x86_64-unknown-linux-musl.tar.gz",
+            "/presenterm-0.8.0-x86_64-unknown-linux-musl.tar.gz.sha512",
+        },
+    }));
+    try std.testing.expectEqualStrings("/rustic-v0.8.0-x86_64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"rustic"},
+        .urls = &.{
+            "/rustic-v0.8.0-aarch64-apple-darwin.tar.gz",
+            "/rustic-v0.8.0-aarch64-apple-darwin.tar.gz.asc",
+            "/rustic-v0.8.0-aarch64-apple-darwin.tar.gz.sha256",
+            "/rustic-v0.8.0-aarch64-apple-darwin.tar.gz.sig",
+            "/rustic-v0.8.0-aarch64-unknown-linux-gnu.tar.gz",
+            "/rustic-v0.8.0-aarch64-unknown-linux-gnu.tar.gz.asc",
+            "/rustic-v0.8.0-aarch64-unknown-linux-gnu.tar.gz.sha256",
+            "/rustic-v0.8.0-aarch64-unknown-linux-gnu.tar.gz.sig",
+            "/rustic-v0.8.0-armv7-unknown-linux-gnueabihf.tar.gz",
+            "/rustic-v0.8.0-armv7-unknown-linux-gnueabihf.tar.gz.asc",
+            "/rustic-v0.8.0-armv7-unknown-linux-gnueabihf.tar.gz.sha256",
+            "/rustic-v0.8.0-armv7-unknown-linux-gnueabihf.tar.gz.sig",
+            "/rustic-v0.8.0-i686-unknown-linux-gnu.tar.gz",
+            "/rustic-v0.8.0-i686-unknown-linux-gnu.tar.gz.asc",
+            "/rustic-v0.8.0-i686-unknown-linux-gnu.tar.gz.sha256",
+            "/rustic-v0.8.0-i686-unknown-linux-gnu.tar.gz.sig",
+            "/rustic-v0.8.0-x86_64-apple-darwin.tar.gz",
+            "/rustic-v0.8.0-x86_64-apple-darwin.tar.gz.asc",
+            "/rustic-v0.8.0-x86_64-apple-darwin.tar.gz.sha256",
+            "/rustic-v0.8.0-x86_64-apple-darwin.tar.gz.sig",
+            "/rustic-v0.8.0-x86_64-pc-windows-gnu.tar.gz",
+            "/rustic-v0.8.0-x86_64-pc-windows-gnu.tar.gz.asc",
+            "/rustic-v0.8.0-x86_64-pc-windows-gnu.tar.gz.sha256",
+            "/rustic-v0.8.0-x86_64-pc-windows-gnu.tar.gz.sig",
+            "/rustic-v0.8.0-x86_64-pc-windows-msvc.tar.gz",
+            "/rustic-v0.8.0-x86_64-pc-windows-msvc.tar.gz.asc",
+            "/rustic-v0.8.0-x86_64-pc-windows-msvc.tar.gz.sha256",
+            "/rustic-v0.8.0-x86_64-pc-windows-msvc.tar.gz.sig",
+            "/rustic-v0.8.0-x86_64-unknown-linux-gnu.tar.gz",
+            "/rustic-v0.8.0-x86_64-unknown-linux-gnu.tar.gz.asc",
+            "/rustic-v0.8.0-x86_64-unknown-linux-gnu.tar.gz.sha256",
+            "/rustic-v0.8.0-x86_64-unknown-linux-gnu.tar.gz.sig",
+            "/rustic-v0.8.0-x86_64-unknown-linux-musl.tar.gz",
+            "/rustic-v0.8.0-x86_64-unknown-linux-musl.tar.gz.asc",
+            "/rustic-v0.8.0-x86_64-unknown-linux-musl.tar.gz.sha256",
+            "/rustic-v0.8.0-x86_64-unknown-linux-musl.tar.gz.sig",
+        },
+    }));
+    try std.testing.expectEqualStrings("/watchexec-2.1.2-x86_64-unknown-linux-musl.tar.xz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"watchexec"},
+        .urls = &.{
+            "/B3SUMS",
+            "/dist-manifest.json",
+            "/SHA256SUMS",
+            "/SHA512SUMS",
+            "/watchexec-2.1.2-aarch64-apple-darwin.tar.xz",
+            "/watchexec-2.1.2-aarch64-apple-darwin.tar.xz.b3",
+            "/watchexec-2.1.2-aarch64-apple-darwin.tar.xz.sha256",
+            "/watchexec-2.1.2-aarch64-apple-darwin.tar.xz.sha512",
+            "/watchexec-2.1.2-aarch64-unknown-linux-gnu.deb",
+            "/watchexec-2.1.2-aarch64-unknown-linux-gnu.deb.b3",
+            "/watchexec-2.1.2-aarch64-unknown-linux-gnu.deb.sha256",
+            "/watchexec-2.1.2-aarch64-unknown-linux-gnu.deb.sha512",
+            "/watchexec-2.1.2-aarch64-unknown-linux-gnu.rpm",
+            "/watchexec-2.1.2-aarch64-unknown-linux-gnu.rpm.b3",
+            "/watchexec-2.1.2-aarch64-unknown-linux-gnu.rpm.sha256",
+            "/watchexec-2.1.2-aarch64-unknown-linux-gnu.rpm.sha512",
+            "/watchexec-2.1.2-aarch64-unknown-linux-gnu.tar.xz",
+            "/watchexec-2.1.2-aarch64-unknown-linux-gnu.tar.xz.b3",
+            "/watchexec-2.1.2-aarch64-unknown-linux-gnu.tar.xz.sha256",
+            "/watchexec-2.1.2-aarch64-unknown-linux-gnu.tar.xz.sha512",
+            "/watchexec-2.1.2-aarch64-unknown-linux-musl.deb",
+            "/watchexec-2.1.2-aarch64-unknown-linux-musl.deb.b3",
+            "/watchexec-2.1.2-aarch64-unknown-linux-musl.deb.sha256",
+            "/watchexec-2.1.2-aarch64-unknown-linux-musl.deb.sha512",
+            "/watchexec-2.1.2-aarch64-unknown-linux-musl.rpm",
+            "/watchexec-2.1.2-aarch64-unknown-linux-musl.rpm.b3",
+            "/watchexec-2.1.2-aarch64-unknown-linux-musl.rpm.sha256",
+            "/watchexec-2.1.2-aarch64-unknown-linux-musl.rpm.sha512",
+            "/watchexec-2.1.2-aarch64-unknown-linux-musl.tar.xz",
+            "/watchexec-2.1.2-aarch64-unknown-linux-musl.tar.xz.b3",
+            "/watchexec-2.1.2-aarch64-unknown-linux-musl.tar.xz.sha256",
+            "/watchexec-2.1.2-aarch64-unknown-linux-musl.tar.xz.sha512",
+            "/watchexec-2.1.2-armv7-unknown-linux-gnueabihf.deb",
+            "/watchexec-2.1.2-armv7-unknown-linux-gnueabihf.deb.b3",
+            "/watchexec-2.1.2-armv7-unknown-linux-gnueabihf.deb.sha256",
+            "/watchexec-2.1.2-armv7-unknown-linux-gnueabihf.deb.sha512",
+            "/watchexec-2.1.2-armv7-unknown-linux-gnueabihf.rpm",
+            "/watchexec-2.1.2-armv7-unknown-linux-gnueabihf.rpm.b3",
+            "/watchexec-2.1.2-armv7-unknown-linux-gnueabihf.rpm.sha256",
+            "/watchexec-2.1.2-armv7-unknown-linux-gnueabihf.rpm.sha512",
+            "/watchexec-2.1.2-armv7-unknown-linux-gnueabihf.tar.xz",
+            "/watchexec-2.1.2-armv7-unknown-linux-gnueabihf.tar.xz.b3",
+            "/watchexec-2.1.2-armv7-unknown-linux-gnueabihf.tar.xz.sha256",
+            "/watchexec-2.1.2-armv7-unknown-linux-gnueabihf.tar.xz.sha512",
+            "/watchexec-2.1.2-i686-unknown-linux-musl.deb",
+            "/watchexec-2.1.2-i686-unknown-linux-musl.deb.b3",
+            "/watchexec-2.1.2-i686-unknown-linux-musl.deb.sha256",
+            "/watchexec-2.1.2-i686-unknown-linux-musl.deb.sha512",
+            "/watchexec-2.1.2-i686-unknown-linux-musl.rpm",
+            "/watchexec-2.1.2-i686-unknown-linux-musl.rpm.b3",
+            "/watchexec-2.1.2-i686-unknown-linux-musl.rpm.sha256",
+            "/watchexec-2.1.2-i686-unknown-linux-musl.rpm.sha512",
+            "/watchexec-2.1.2-i686-unknown-linux-musl.tar.xz",
+            "/watchexec-2.1.2-i686-unknown-linux-musl.tar.xz.b3",
+            "/watchexec-2.1.2-i686-unknown-linux-musl.tar.xz.sha256",
+            "/watchexec-2.1.2-i686-unknown-linux-musl.tar.xz.sha512",
+            "/watchexec-2.1.2-powerpc64le-unknown-linux-gnu.deb",
+            "/watchexec-2.1.2-powerpc64le-unknown-linux-gnu.deb.b3",
+            "/watchexec-2.1.2-powerpc64le-unknown-linux-gnu.deb.sha256",
+            "/watchexec-2.1.2-powerpc64le-unknown-linux-gnu.deb.sha512",
+            "/watchexec-2.1.2-powerpc64le-unknown-linux-gnu.rpm",
+            "/watchexec-2.1.2-powerpc64le-unknown-linux-gnu.rpm.b3",
+            "/watchexec-2.1.2-powerpc64le-unknown-linux-gnu.rpm.sha256",
+            "/watchexec-2.1.2-powerpc64le-unknown-linux-gnu.rpm.sha512",
+            "/watchexec-2.1.2-powerpc64le-unknown-linux-gnu.tar.xz",
+            "/watchexec-2.1.2-powerpc64le-unknown-linux-gnu.tar.xz.b3",
+            "/watchexec-2.1.2-powerpc64le-unknown-linux-gnu.tar.xz.sha256",
+            "/watchexec-2.1.2-powerpc64le-unknown-linux-gnu.tar.xz.sha512",
+            "/watchexec-2.1.2-s390x-unknown-linux-gnu.deb",
+            "/watchexec-2.1.2-s390x-unknown-linux-gnu.deb.b3",
+            "/watchexec-2.1.2-s390x-unknown-linux-gnu.deb.sha256",
+            "/watchexec-2.1.2-s390x-unknown-linux-gnu.deb.sha512",
+            "/watchexec-2.1.2-s390x-unknown-linux-gnu.rpm",
+            "/watchexec-2.1.2-s390x-unknown-linux-gnu.rpm.b3",
+            "/watchexec-2.1.2-s390x-unknown-linux-gnu.rpm.sha256",
+            "/watchexec-2.1.2-s390x-unknown-linux-gnu.rpm.sha512",
+            "/watchexec-2.1.2-s390x-unknown-linux-gnu.tar.xz",
+            "/watchexec-2.1.2-s390x-unknown-linux-gnu.tar.xz.b3",
+            "/watchexec-2.1.2-s390x-unknown-linux-gnu.tar.xz.sha256",
+            "/watchexec-2.1.2-s390x-unknown-linux-gnu.tar.xz.sha512",
+            "/watchexec-2.1.2-x86_64-apple-darwin.tar.xz",
+            "/watchexec-2.1.2-x86_64-apple-darwin.tar.xz.b3",
+            "/watchexec-2.1.2-x86_64-apple-darwin.tar.xz.sha256",
+            "/watchexec-2.1.2-x86_64-apple-darwin.tar.xz.sha512",
+            "/watchexec-2.1.2-x86_64-pc-windows-msvc.zip",
+            "/watchexec-2.1.2-x86_64-pc-windows-msvc.zip.b3",
+            "/watchexec-2.1.2-x86_64-pc-windows-msvc.zip.sha256",
+            "/watchexec-2.1.2-x86_64-pc-windows-msvc.zip.sha512",
+            "/watchexec-2.1.2-x86_64-unknown-linux-gnu.deb",
+            "/watchexec-2.1.2-x86_64-unknown-linux-gnu.deb.b3",
+            "/watchexec-2.1.2-x86_64-unknown-linux-gnu.deb.sha256",
+            "/watchexec-2.1.2-x86_64-unknown-linux-gnu.deb.sha512",
+            "/watchexec-2.1.2-x86_64-unknown-linux-gnu.rpm",
+            "/watchexec-2.1.2-x86_64-unknown-linux-gnu.rpm.b3",
+            "/watchexec-2.1.2-x86_64-unknown-linux-gnu.rpm.sha256",
+            "/watchexec-2.1.2-x86_64-unknown-linux-gnu.rpm.sha512",
+            "/watchexec-2.1.2-x86_64-unknown-linux-gnu.tar.xz",
+            "/watchexec-2.1.2-x86_64-unknown-linux-gnu.tar.xz.b3",
+            "/watchexec-2.1.2-x86_64-unknown-linux-gnu.tar.xz.sha256",
+            "/watchexec-2.1.2-x86_64-unknown-linux-gnu.tar.xz.sha512",
+            "/watchexec-2.1.2-x86_64-unknown-linux-musl.deb",
+            "/watchexec-2.1.2-x86_64-unknown-linux-musl.deb.b3",
+            "/watchexec-2.1.2-x86_64-unknown-linux-musl.deb.sha256",
+            "/watchexec-2.1.2-x86_64-unknown-linux-musl.deb.sha512",
+            "/watchexec-2.1.2-x86_64-unknown-linux-musl.rpm",
+            "/watchexec-2.1.2-x86_64-unknown-linux-musl.rpm.b3",
+            "/watchexec-2.1.2-x86_64-unknown-linux-musl.rpm.sha256",
+            "/watchexec-2.1.2-x86_64-unknown-linux-musl.rpm.sha512",
+            "/watchexec-2.1.2-x86_64-unknown-linux-musl.tar.xz",
+            "/watchexec-2.1.2-x86_64-unknown-linux-musl.tar.xz.b3",
+            "/watchexec-2.1.2-x86_64-unknown-linux-musl.tar.xz.sha256",
+            "/watchexec-2.1.2-x86_64-unknown-linux-musl.tar.xz.sha512",
+        },
+    }));
+    try std.testing.expectEqualStrings("/tigerbeetle-x86_64-linux.zip", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"tigerbeetle"},
+        .urls = &.{
+            "/tigerbeetle-aarch64-linux-debug.zip",
+            "/tigerbeetle-aarch64-linux.zip",
+            "/tigerbeetle-universal-macos-debug.zip",
+            "/tigerbeetle-universal-macos.zip",
+            "/tigerbeetle-x86_64-linux-debug.zip",
+            "/tigerbeetle-x86_64-linux.zip",
+            "/tigerbeetle-x86_64-windows-debug.zip",
+            "/tigerbeetle-x86_64-windows.zip",
+        },
+    }));
+    try std.testing.expectEqualStrings("/tau_1.1.5_linux_amd64.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"tau"},
+        .urls = &.{
+            "/dream_1.1.5_darwin_amd64.tar.gz",
+            "/dream_1.1.5_darwin_arm64.tar.gz",
+            "/dream_1.1.5_linux_amd64.tar.gz",
+            "/dream_1.1.5_linux_arm64.tar.gz",
+            "/dream_1.1.5_windows_amd64.tar.gz",
+            "/taucorder_1.1.5_darwin_amd64.tar.gz",
+            "/taucorder_1.1.5_darwin_arm64.tar.gz",
+            "/taucorder_1.1.5_linux_amd64.tar.gz",
+            "/taucorder_1.1.5_linux_arm64.tar.gz",
+            "/taucorder_1.1.5_windows_amd64.tar.gz",
+            "/tau_1.1.5_darwin_amd64.tar.gz",
+            "/tau_1.1.5_darwin_arm64.tar.gz",
+            "/tau_1.1.5_linux_amd64.tar.gz",
+            "/tau_1.1.5_linux_arm64.tar.gz",
+            "/tau_1.1.5_windows_amd64.tar.gz",
+        },
+    }));
+    try std.testing.expectEqualStrings("/sccache-dist-v0.8.1-x86_64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"sccache"},
+        .urls = &.{
+            "/sccache-dist-v0.8.1-x86_64-unknown-linux-musl.tar.gz",
+            "/sccache-dist-v0.8.1-x86_64-unknown-linux-musl.tar.gz.sha256",
+            "/sccache-v0.8.1-aarch64-apple-darwin.tar.gz",
+            "/sccache-v0.8.1-aarch64-apple-darwin.tar.gz.sha256",
+            "/sccache-v0.8.1-aarch64-unknown-linux-musl.tar.gz",
+            "/sccache-v0.8.1-aarch64-unknown-linux-musl.tar.gz.sha256",
+            "/sccache-v0.8.1-armv7-unknown-linux-musleabi.tar.gz",
+            "/sccache-v0.8.1-armv7-unknown-linux-musleabi.tar.gz.sha256",
+            "/sccache-v0.8.1-i686-unknown-linux-musl.tar.gz",
+            "/sccache-v0.8.1-i686-unknown-linux-musl.tar.gz.sha256",
+            "/sccache-v0.8.1-x86_64-apple-darwin.tar.gz",
+            "/sccache-v0.8.1-x86_64-apple-darwin.tar.gz.sha256",
+            "/sccache-v0.8.1-x86_64-pc-windows-msvc.tar.gz",
+            "/sccache-v0.8.1-x86_64-pc-windows-msvc.tar.gz.sha256",
+            "/sccache-v0.8.1-x86_64-pc-windows-msvc.zip",
+            "/sccache-v0.8.1-x86_64-pc-windows-msvc.zip.sha256",
+            "/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz",
+            "/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz.sha256",
+        },
+    }));
+    try std.testing.expectEqualStrings("/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{ "sccache", "sccache-v0.8.1" },
+        .urls = &.{
+            "/sccache-dist-v0.8.1-x86_64-unknown-linux-musl.tar.gz",
+            "/sccache-dist-v0.8.1-x86_64-unknown-linux-musl.tar.gz.sha256",
+            "/sccache-v0.8.1-aarch64-apple-darwin.tar.gz",
+            "/sccache-v0.8.1-aarch64-apple-darwin.tar.gz.sha256",
+            "/sccache-v0.8.1-aarch64-unknown-linux-musl.tar.gz",
+            "/sccache-v0.8.1-aarch64-unknown-linux-musl.tar.gz.sha256",
+            "/sccache-v0.8.1-armv7-unknown-linux-musleabi.tar.gz",
+            "/sccache-v0.8.1-armv7-unknown-linux-musleabi.tar.gz.sha256",
+            "/sccache-v0.8.1-i686-unknown-linux-musl.tar.gz",
+            "/sccache-v0.8.1-i686-unknown-linux-musl.tar.gz.sha256",
+            "/sccache-v0.8.1-x86_64-apple-darwin.tar.gz",
+            "/sccache-v0.8.1-x86_64-apple-darwin.tar.gz.sha256",
+            "/sccache-v0.8.1-x86_64-pc-windows-msvc.tar.gz",
+            "/sccache-v0.8.1-x86_64-pc-windows-msvc.tar.gz.sha256",
+            "/sccache-v0.8.1-x86_64-pc-windows-msvc.zip",
+            "/sccache-v0.8.1-x86_64-pc-windows-msvc.zip.sha256",
+            "/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz",
+            "/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz.sha256",
+        },
+    }));
+    try std.testing.expectEqualStrings("/dns53_0.11.0_linux-x86_64.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"dns53"},
+        .urls = &.{
+            "/checksums.txt",
+            "/checksums.txt.pem",
+            "/checksums.txt.sig",
+            "/dns53-0.11.0-1.aarch64.rpm",
+            "/dns53-0.11.0-1.armv7hl.rpm",
+            "/dns53-0.11.0-1.i386.rpm",
+            "/dns53-0.11.0-1.x86_64.rpm",
+            "/dns53_0.11.0_aarch64.apk",
+            "/dns53_0.11.0_amd64.deb",
+            "/dns53_0.11.0_arm64.deb",
+            "/dns53_0.11.0_armhf.deb",
+            "/dns53_0.11.0_armv7.apk",
+            "/dns53_0.11.0_darwin-arm64.tar.gz",
+            "/dns53_0.11.0_darwin-arm64.tar.gz.sbom",
+            "/dns53_0.11.0_darwin-x86_64.tar.gz",
+            "/dns53_0.11.0_darwin-x86_64.tar.gz.sbom",
+            "/dns53_0.11.0_i386.deb",
+            "/dns53_0.11.0_linux-386.tar.gz",
+            "/dns53_0.11.0_linux-386.tar.gz.sbom",
+            "/dns53_0.11.0_linux-arm64.tar.gz",
+            "/dns53_0.11.0_linux-arm64.tar.gz.sbom",
+            "/dns53_0.11.0_linux-armv7.tar.gz",
+            "/dns53_0.11.0_linux-armv7.tar.gz.sbom",
+            "/dns53_0.11.0_linux-x86_64.tar.gz",
+            "/dns53_0.11.0_linux-x86_64.tar.gz.sbom",
+            "/dns53_0.11.0_windows-386.zip",
+            "/dns53_0.11.0_windows-386.zip.sbom",
+            "/dns53_0.11.0_windows-arm64.zip",
+            "/dns53_0.11.0_windows-arm64.zip.sbom",
+            "/dns53_0.11.0_windows-armv7.zip",
+            "/dns53_0.11.0_windows-armv7.zip.sbom",
+            "/dns53_0.11.0_windows-x86_64.zip",
+            "/dns53_0.11.0_windows-x86_64.zip.sbom",
+            "/dns53_0.11.0_x86.apk",
+            "/dns53_0.11.0_x86_64.apk",
+        },
+    }));
+    try std.testing.expectEqualStrings("/dotenv-linter-alpine-x86_64.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"dotenv-linter"},
+        .urls = &.{
+            "/dotenv-linter-alpine-aarch64.tar.gz",
+            "/dotenv-linter-alpine-x86_64.tar.gz",
+            "/dotenv-linter-darwin-arm64.tar.gz",
+            "/dotenv-linter-darwin-x86_64.tar.gz",
+            "/dotenv-linter-linux-aarch64.tar.gz",
+            "/dotenv-linter-linux-x86_64.tar.gz",
+            "/dotenv-linter-win-aarch64.zip",
+            "/dotenv-linter-win-x64.zip",
+        },
+    }));
+    try std.testing.expectEqualStrings("/micro-2.0.14-linux64-static.tar.gz", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{"micro"},
+        .urls = &.{
+            "/micro-2.0.14-freebsd32.tar.gz",
+            "/micro-2.0.14-freebsd32.tar.gz.sha",
+            "/micro-2.0.14-freebsd32.tgz",
+            "/micro-2.0.14-freebsd32.tgz.sha",
+            "/micro-2.0.14-freebsd64.tar.gz",
+            "/micro-2.0.14-freebsd64.tar.gz.sha",
+            "/micro-2.0.14-freebsd64.tgz",
+            "/micro-2.0.14-freebsd64.tgz.sha",
+            "/micro-2.0.14-linux-arm.tar.gz",
+            "/micro-2.0.14-linux-arm.tar.gz.sha",
+            "/micro-2.0.14-linux-arm.tgz",
+            "/micro-2.0.14-linux-arm.tgz.sha",
+            "/micro-2.0.14-linux-arm64.tar.gz",
+            "/micro-2.0.14-linux-arm64.tar.gz.sha",
+            "/micro-2.0.14-linux-arm64.tgz",
+            "/micro-2.0.14-linux-arm64.tgz.sha",
+            "/micro-2.0.14-linux32.tar.gz",
+            "/micro-2.0.14-linux32.tar.gz.sha",
+            "/micro-2.0.14-linux32.tgz",
+            "/micro-2.0.14-linux32.tgz.sha",
+            "/micro-2.0.14-linux64-static.tar.gz",
+            "/micro-2.0.14-linux64-static.tar.gz.sha",
+            "/micro-2.0.14-linux64-static.tgz",
+            "/micro-2.0.14-linux64-static.tgz.sha",
+            "/micro-2.0.14-linux64.tar.gz",
+            "/micro-2.0.14-linux64.tar.gz.sha",
+            "/micro-2.0.14-linux64.tgz",
+            "/micro-2.0.14-linux64.tgz.sha",
+            "/micro-2.0.14-macos-arm64.tar.gz",
+            "/micro-2.0.14-macos-arm64.tar.gz.sha",
+            "/micro-2.0.14-macos-arm64.tgz",
+            "/micro-2.0.14-macos-arm64.tgz.sha",
+            "/micro-2.0.14-netbsd32.tar.gz",
+            "/micro-2.0.14-netbsd32.tar.gz.sha",
+            "/micro-2.0.14-netbsd32.tgz",
+            "/micro-2.0.14-netbsd32.tgz.sha",
+            "/micro-2.0.14-netbsd64.tar.gz",
+            "/micro-2.0.14-netbsd64.tar.gz.sha",
+            "/micro-2.0.14-netbsd64.tgz",
+            "/micro-2.0.14-netbsd64.tgz.sha",
+            "/micro-2.0.14-openbsd32.tar.gz",
+            "/micro-2.0.14-openbsd32.tar.gz.sha",
+            "/micro-2.0.14-openbsd32.tgz",
+            "/micro-2.0.14-openbsd32.tgz.sha",
+            "/micro-2.0.14-openbsd64.tar.gz",
+            "/micro-2.0.14-openbsd64.tar.gz.sha",
+            "/micro-2.0.14-openbsd64.tgz",
+            "/micro-2.0.14-openbsd64.tgz.sha",
+            "/micro-2.0.14-osx.tar.gz",
+            "/micro-2.0.14-osx.tar.gz.sha",
+            "/micro-2.0.14-osx.tgz",
+            "/micro-2.0.14-osx.tgz.sha",
+            "/micro-2.0.14-win32.zip",
+            "/micro-2.0.14-win32.zip.sha",
+            "/micro-2.0.14-win64.zip",
+            "/micro-2.0.14-win64.zip.sha",
         },
     }));
 
     try std.testing.expectError(error.DownloadUrlNotFound, findDownloadUrl(.{
         .os = .linux,
         .arch = .x86_64,
-        .extra_strings_to_trim = &.{},
         .urls = &.{},
     }));
 }
