@@ -1,6 +1,8 @@
-A package manager for installing linux programs that are self contained
+A package manager for installing linux programs that are self contained.
 
 ![readme.gif](./readme.gif)
+
+Packages are defined in [`dipm-pkgs`](https://github.com/Hejsil/dipm-pkgs).
 
 # How to install
 
