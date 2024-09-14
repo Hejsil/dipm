@@ -486,21 +486,11 @@ test "dipm install fails-download" {
     );
 }
 
-test "fuzz" {
-    const input = std.testing.fuzzInput(.{ .corpus = &.{
-        "install test-file",
-        "uninstall test-file",
-        "update test-file",
-        "donate test-file",
-        "list",
-        "pkgs",
-        "help",
-    } });
-
+fn fuzz(fuzz_input: []const u8) !void {
     var args = std.ArrayList([]const u8).init(std.testing.allocator);
     defer args.deinit();
 
-    var args_it = try std.process.ArgIteratorGeneral(.{}).init(std.testing.allocator, input);
+    var args_it = try std.process.ArgIteratorGeneral(.{}).init(std.testing.allocator, fuzz_input);
     defer args_it.deinit();
 
     while (args_it.next()) |arg|
@@ -514,6 +504,10 @@ test "fuzz" {
         error.InvalidArgument => {},
         else => try std.testing.expect(false),
     };
+}
+
+test "fuzz" {
+    try std.testing.fuzz(fuzz, .{});
 }
 
 pub fn runMain(options: struct {

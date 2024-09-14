@@ -368,9 +368,8 @@ fn parseAndWrite(allocator: std.mem.Allocator, string: []const u8) ![]u8 {
     }
 }
 
-test "Parser fuzz" {
+fn fuzz(fuzz_input: []const u8) !void {
     const allocator = std.testing.allocator;
-    const fuzz_input = std.testing.fuzzInput(.{});
 
     // This fuzz test ensure that once parsed and written out once, doing so again should yield the same result.
     const stage1 = try parseAndWrite(allocator, fuzz_input);
@@ -387,6 +386,10 @@ test "Parser fuzz" {
         std.testing.expectEqualSlices(u8, stage2, fuzz_input) catch {};
         return err;
     };
+}
+
+test "Parser fuzz" {
+    try std.testing.fuzz(fuzz, .{});
 }
 
 pub const Result = struct {
