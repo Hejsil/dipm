@@ -683,6 +683,8 @@ fn findManPages(options: struct {
     while (try walker.next()) |entry| {
         if (entry.kind != .file)
             continue;
+        if (std.mem.startsWith(u8, entry.basename, "."))
+            continue;
         if (!isManPage(entry.basename))
             continue;
 
@@ -768,16 +770,20 @@ test findManPages {
             .{ .sub_path = "1.gz", .data = "" },
             .{ .sub_path = "text.1", .data = "" },
             .{ .sub_path = "text.1.gz", .data = "" },
+            .{ .sub_path = ".text.1.gz", .data = "" },
             .{ .sub_path = "text.10", .data = "" },
             .{ .sub_path = "text.10.gz", .data = "" },
+            .{ .sub_path = ".text.10.gz", .data = "" },
             .{ .sub_path = "text-0.2.0", .data = "" },
             .{ .sub_path = "subdir/text", .data = "" },
             .{ .sub_path = "subdir/1", .data = "" },
             .{ .sub_path = "subdir/1.gz", .data = "" },
             .{ .sub_path = "subdir/text.1", .data = "" },
             .{ .sub_path = "subdir/text.1.gz", .data = "" },
+            .{ .sub_path = "subdir/.text.1.gz", .data = "" },
             .{ .sub_path = "subdir/text.10", .data = "" },
             .{ .sub_path = "subdir/text.10.gz", .data = "" },
+            .{ .sub_path = "subdir/.text.10.gz", .data = "" },
             .{ .sub_path = "subdir/text-0.2.0", .data = "" },
         },
         .expected = &.{
