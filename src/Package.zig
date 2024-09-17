@@ -826,6 +826,7 @@ fn findDownloadUrl(options: struct {
                 // linked
                 this_score += std.mem.count(u8, basename, "alpine");
                 this_score += std.mem.count(u8, basename, "musl");
+                this_score += std.mem.count(u8, basename, "static");
             },
             else => {},
         }
@@ -1856,6 +1857,22 @@ test findDownloadUrl {
             "/micro-2.0.14-win32.zip.sha",
             "/micro-2.0.14-win64.zip",
             "/micro-2.0.14-win64.zip.sha",
+        },
+    }));
+    try std.testing.expectEqualStrings("/usql_static-0.19.3-linux-amd64.tar.bz2", try findDownloadUrl(.{
+        .os = .linux,
+        .arch = .x86_64,
+        .extra_strings = &.{ "usql", "usql-0.19.3" },
+        .urls = &.{
+            "/usql-0.19.3-darwin-amd64.tar.bz2",
+            "/usql-0.19.3-darwin-arm64.tar.bz2",
+            "/usql-0.19.3-darwin-universal.tar.bz2",
+            "/usql-0.19.3-linux-amd64.tar.bz2",
+            "/usql-0.19.3-linux-arm.tar.bz2",
+            "/usql-0.19.3-linux-arm64.tar.bz2",
+            "/usql-0.19.3-windows-amd64.zip",
+            "/usql_static-0.19.3-linux-amd64.tar.bz2",
+            "/usql_static-0.19.3-linux-arm64.tar.bz2",
         },
     }));
 
