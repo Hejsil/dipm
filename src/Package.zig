@@ -201,37 +201,13 @@ pub fn fromGithub(options: struct {
     );
 
     var latest_release_json = std.ArrayList(u8).init(arena);
-    if (std.mem.startsWith(u8, latest_release_uri, api_uri_prefix)) {
-        // For `api.github.com`, use the `gh` program instead of our own `download` function. No
-        // need to implement authentication in `dipm` itself.
-        // TODO: Fallback to own `download` if `gh` is not installed
-        const endpoint = latest_release_uri[api_uri_prefix.len..];
-        var gh_process = std.process.Child.init(&.{ "gh", "api", endpoint }, arena);
-        gh_process.stdin_behavior = .Ignore;
-        gh_process.stdout_behavior = .Pipe;
-        gh_process.stderr_behavior = .Pipe;
-
-        try gh_process.spawn();
-
-        var stderr = std.ArrayList(u8).init(arena);
-        try gh_process.collectOutput(&latest_release_json, &stderr, std.math.maxInt(usize));
-
-        const term = try gh_process.wait();
-        switch (term) {
-            .Exited => |exitcode| if (exitcode != 0) {
-                return error.LatestReleaseDownloadFailed;
-            },
-            .Signal, .Stopped, .Unknown => return error.LatestReleaseDownloadFailed,
-        }
-    } else {
-        const release_download_result = try download.download(latest_release_json.writer(), .{
-            .client = options.http_client,
-            .uri_str = latest_release_uri,
-            .progress = options.progress,
-        });
-        if (release_download_result.status != .ok)
-            return error.LatestReleaseDownloadFailed;
-    }
+    const release_download_result = try download.download(latest_release_json.writer(), .{
+        .client = options.http_client,
+        .uri_str = latest_release_uri,
+        .progress = options.progress,
+    });
+    if (release_download_result.status != .ok)
+        return error.LatestReleaseDownloadFailed;
 
     const LatestRelease = struct {
         tag_name: []const u8,
