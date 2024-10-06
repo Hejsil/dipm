@@ -706,8 +706,7 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
             .http_client = &http_client,
             .url = url.url,
             .name = url.name,
-            .os = builtin.os.tag,
-            .arch = builtin.target.cpu.arch,
+            .target = .{ .os = builtin.os.tag, .arch = builtin.target.cpu.arch },
         }) catch |err| {
             std.log.err("{s} {s}", .{ @errorName(err), url.url });
             continue;
@@ -774,8 +773,7 @@ fn pkgsMakeCommand(program: *Program) !void {
             .tmp_allocator = program.gpa,
             .http_client = &http_client,
             .url = url,
-            .os = builtin.os.tag,
-            .arch = builtin.target.cpu.arch,
+            .target = .{ .os = builtin.os.tag, .arch = builtin.target.cpu.arch },
         }) catch |err| {
             std.log.err("{s} {s}", .{ @errorName(err), url });
             continue;

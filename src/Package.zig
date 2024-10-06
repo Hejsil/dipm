@@ -72,11 +72,10 @@ pub const Specific = struct {
 pub fn specific(
     package: Package,
     name: []const u8,
-    os: std.Target.Os.Tag,
-    arch: std.Target.Cpu.Arch,
+    target: Target,
 ) ?Specific {
-    const install = switch (os) {
-        .linux => switch (arch) {
+    const install = switch (target.os) {
+        .linux => switch (target.arch) {
             .x86_64 => package.linux_x86_64,
             else => return null,
         },
@@ -137,8 +136,7 @@ pub fn fromUrl(options: struct {
     name: ?[]const u8 = null,
     url: []const u8,
 
-    os: std.Target.Os.Tag,
-    arch: std.Target.Cpu.Arch,
+    target: Target,
 }) !Named {
     const github_url = "https://github.com/";
     if (std.mem.startsWith(u8, options.url, github_url)) {
@@ -155,8 +153,7 @@ pub fn fromUrl(options: struct {
             .name = options.name,
             .user = repo_user,
             .repo = repo_name,
-            .os = options.os,
-            .arch = options.arch,
+            .target = options.target,
         });
     } else {
         return error.InvalidUrl;
@@ -185,8 +182,7 @@ pub fn fromGithub(options: struct {
     /// https://api.github.com/repos/<user>/<repo>/releases/latest
     latest_release_uri: ?[]const u8 = null,
 
-    os: std.Target.Os.Tag,
-    arch: std.Target.Cpu.Arch,
+    target: Target,
 }) !Named {
     const tmp_allocator = options.tmp_allocator orelse options.allocator;
     var arena_state = std.heap.ArenaAllocator.init(tmp_allocator);
@@ -231,8 +227,7 @@ pub fn fromGithub(options: struct {
     errdefer options.allocator.free(version);
 
     const download_url = try findDownloadUrl(.{
-        .os = options.os,
-        .arch = options.arch,
+        .target = options.target,
         .extra_strings = &.{
             name,
 
@@ -289,7 +284,7 @@ pub fn fromGithub(options: struct {
     const binaries = try findStaticallyLinkedBinaries(.{
         .allocator = options.allocator,
         .tmp_allocator = tmp_allocator,
-        .arch = options.arch,
+        .arch = options.target.arch,
         .dir = tmp_dir.dir,
     });
     errdefer {
@@ -395,8 +390,7 @@ fn testFromGithub(options: struct {
     user: []const u8,
     repo: []const u8,
     tag_name: []const u8,
-    os: std.Target.Os.Tag,
-    arch: std.Target.Cpu.Arch,
+    target: Target,
     expect: []const u8,
 }) !void {
     const allocator = std.testing.allocator;
@@ -422,7 +416,7 @@ fn testFromGithub(options: struct {
     const cwd = std.fs.cwd();
     try cwd.writeFile(.{
         .sub_path = static_binary_path,
-        .data = switch (options.arch) {
+        .data = switch (options.target.arch) {
             .x86_64 => &testing_static_x86_64_binary,
             .arm => &testing_static_arm_binary,
             else => unreachable, // Unsupported currently
@@ -463,8 +457,7 @@ fn testFromGithub(options: struct {
         .user = options.user,
         .repo = options.repo,
         .latest_release_uri = latest_release_file_uri,
-        .os = options.os,
-        .arch = options.arch,
+        .target = options.target,
     });
     defer package.deinit(allocator);
 
@@ -486,8 +479,7 @@ test fromGithub {
         .user = "junegunn",
         .repo = "fzf",
         .tag_name = "v0.54.0",
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .expect =
         \\[fzf.info]
         \\version = 0.54.0
@@ -506,8 +498,7 @@ test fromGithub {
         .user = "googlefonts",
         .repo = "fontc",
         .tag_name = "fontc-v0.0.1",
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .expect =
         \\[fontc.info]
         \\version = 0.0.1
@@ -776,8 +767,7 @@ test findManPages {
 }
 
 fn findDownloadUrl(options: struct {
-    os: std.Target.Os.Tag,
-    arch: std.Target.Cpu.Arch,
+    target: Target,
     extra_strings: []const []const u8 = &.{},
     urls: []const []const u8,
 }) ![]const u8 {
@@ -791,10 +781,10 @@ fn findDownloadUrl(options: struct {
         const basename = std.fs.path.basename(url);
         var this_score: usize = 0;
 
-        this_score += std.mem.count(u8, basename, @tagName(options.arch));
-        this_score += std.mem.count(u8, basename, @tagName(options.os));
+        this_score += std.mem.count(u8, basename, @tagName(options.target.arch));
+        this_score += std.mem.count(u8, basename, @tagName(options.target.os));
 
-        switch (options.os) {
+        switch (options.target.os) {
             .linux => {
                 this_score += std.mem.count(u8, basename, "Linux");
 
@@ -807,14 +797,14 @@ fn findDownloadUrl(options: struct {
             else => {},
         }
 
-        switch (options.arch) {
+        switch (options.target.arch) {
             .x86_64 => {
                 this_score += std.mem.count(u8, basename, "64bit");
                 this_score += std.mem.count(u8, basename, "amd64");
                 this_score += std.mem.count(u8, basename, "x64");
                 this_score += std.mem.count(u8, basename, "x86-64");
 
-                switch (options.os) {
+                switch (options.target.os) {
                     .linux => {
                         this_score += std.mem.count(u8, basename, "linux64");
                     },
@@ -868,7 +858,7 @@ fn findDownloadUrl(options: struct {
         // Avoid debug builds of binaries
         this_score -|= std.mem.count(u8, basename, "debug");
 
-        switch (options.os) {
+        switch (options.target.os) {
             .linux => {
                 // Targeting the gnu abi tends to not be statically linked
                 this_score -|= std.mem.count(u8, basename, "gnu");
@@ -893,8 +883,7 @@ fn findDownloadUrl(options: struct {
 
 test findDownloadUrl {
     try std.testing.expectEqualStrings("/fzf-0.54.0-linux_amd64.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"fzf"},
         .urls = &.{
             "/fzf-0.54.0-darwin_amd64.zip",
@@ -918,8 +907,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/fzf-0.54.0-windows_amd64.zip", try findDownloadUrl(.{
-        .os = .windows,
-        .arch = .x86_64,
+        .target = .{ .os = .windows, .arch = .x86_64 },
         .extra_strings = &.{"fzf"},
         .urls = &.{
             "/fzf-0.54.0-darwin_amd64.zip",
@@ -943,8 +931,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/gophish-v0.12.1-linux-64bit.zip", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"gophish"},
         .urls = &.{
             "/gophish-v0.12.1-linux-32bit.zip",
@@ -954,8 +941,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/gophish-v0.12.1-windows-64bit.zip", try findDownloadUrl(.{
-        .os = .windows,
-        .arch = .x86_64,
+        .target = .{ .os = .windows, .arch = .x86_64 },
         .extra_strings = &.{"gophish"},
         .urls = &.{
             "/gophish-v0.12.1-linux-32bit.zip",
@@ -965,8 +951,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/gophish-v0.12.1-linux-32bit.zip", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86,
+        .target = .{ .os = .linux, .arch = .x86 },
         .extra_strings = &.{"gophish"},
         .urls = &.{
             "/gophish-v0.12.1-linux-32bit.zip",
@@ -976,8 +961,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/wasmer-linux-musl-amd64.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"wasmer"},
         .urls = &.{
             "/wasmer-darwin-amd64.tar.gz",
@@ -992,8 +976,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/mise-v2024.7.4-linux-x64-musl.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"mise"},
         .urls = &.{
             "/mise-v2024.7.4-linux-arm64",
@@ -1025,8 +1008,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/shadowsocks-v1.20.3.x86_64-unknown-linux-musl.tar.xz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"shadowsocks"},
         .urls = &.{
             "/shadowsocks-v1.20.3.aarch64-apple-darwin.tar.xz",
@@ -1062,8 +1044,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/sigrs-x86_64-unknown-linux-musl.tar.xz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"sigrs"},
         .urls = &.{
             "/dist-manifest.json",
@@ -1083,8 +1064,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/dockerc_x86-64", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"dockerc"},
         .urls = &.{
             "/dockerc_aarch64",
@@ -1093,8 +1073,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/micro-2.0.14-linux64-static.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"micro"},
         .urls = &.{
             "/micro-2.0.14-linux64-static.tar.gz",
@@ -1102,8 +1081,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/jq-linux64", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"jq"},
         .urls = &.{
             "/jq-1.7.1.tar.gz",
@@ -1137,8 +1115,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/act_Linux_x86_64.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"act"},
         .urls = &.{
             "/act_Darwin_arm64.tar.gz",
@@ -1157,8 +1134,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/age-v1.2.0-linux-amd64.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"age"},
         .urls = &.{
             "/age-v1.2.0-darwin-amd64.tar.gz",
@@ -1178,8 +1154,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/caddy_2.8.4_linux_amd64.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"caddy"},
         .urls = &.{
             "/caddy_2.8.4_buildable-artifact.pem",
@@ -1332,8 +1307,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/glow_2.0.0_Linux_x86_64.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"glow"},
         .urls = &.{
             "/checksums.txt",
@@ -1396,8 +1370,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/iamb-x86_64-unknown-linux-musl.tgz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"iamb"},
         .urls = &.{
             "/iamb-aarch64-apple-darwin.tgz",
@@ -1412,8 +1385,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/linutil", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"linutil"},
         .urls = &.{
             "/linutil",
@@ -1422,8 +1394,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/ownserver_v0.6.0_x86_64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"ownserver"},
         .urls = &.{
             "/ownserver_v0.6.0_x86_64-apple-darwin.zip",
@@ -1437,8 +1408,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/presenterm-0.8.0-x86_64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"presenterm"},
         .urls = &.{
             "/presenterm-0.8.0-aarch64-apple-darwin.tar.gz",
@@ -1468,8 +1438,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/rustic-v0.8.0-x86_64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"rustic"},
         .urls = &.{
             "/rustic-v0.8.0-aarch64-apple-darwin.tar.gz",
@@ -1511,8 +1480,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/watchexec-2.1.2-x86_64-unknown-linux-musl.tar.xz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"watchexec"},
         .urls = &.{
             "/B3SUMS",
@@ -1630,8 +1598,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/tigerbeetle-x86_64-linux.zip", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"tigerbeetle"},
         .urls = &.{
             "/tigerbeetle-aarch64-linux-debug.zip",
@@ -1645,8 +1612,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/tau_1.1.5_linux_amd64.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"tau"},
         .urls = &.{
             "/dream_1.1.5_darwin_amd64.tar.gz",
@@ -1667,8 +1633,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/sccache-dist-v0.8.1-x86_64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"sccache"},
         .urls = &.{
             "/sccache-dist-v0.8.1-x86_64-unknown-linux-musl.tar.gz",
@@ -1692,8 +1657,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{ "sccache", "sccache-v0.8.1" },
         .urls = &.{
             "/sccache-dist-v0.8.1-x86_64-unknown-linux-musl.tar.gz",
@@ -1717,8 +1681,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/dns53_0.11.0_linux-x86_64.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"dns53"},
         .urls = &.{
             "/checksums.txt",
@@ -1759,8 +1722,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/dotenv-linter-alpine-x86_64.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"dotenv-linter"},
         .urls = &.{
             "/dotenv-linter-alpine-aarch64.tar.gz",
@@ -1774,8 +1736,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/micro-2.0.14-linux64-static.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"micro"},
         .urls = &.{
             "/micro-2.0.14-freebsd32.tar.gz",
@@ -1837,8 +1798,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/usql_static-0.19.3-linux-amd64.tar.bz2", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{ "usql", "usql-0.19.3" },
         .urls = &.{
             "/usql-0.19.3-darwin-amd64.tar.bz2",
@@ -1853,8 +1813,7 @@ test findDownloadUrl {
         },
     }));
     try std.testing.expectEqualStrings("/uctags-2024.10.02-linux-x86_64.tar.gz", try findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"uctags"},
         .urls = &.{
             "/uctags-2024.10.02-1-x86_64.pkg.tar.xz",
@@ -1924,8 +1883,7 @@ test findDownloadUrl {
     }));
 
     try std.testing.expectError(error.DownloadUrlNotFound, findDownloadUrl(.{
-        .os = .linux,
-        .arch = .x86_64,
+        .target = .{ .os = .linux, .arch = .x86_64 },
         .urls = &.{},
     }));
 }
@@ -1974,6 +1932,7 @@ test versionFromTag {
 
 test {
     _ = Progress;
+    _ = Target;
 
     _ = download;
     _ = fs;
@@ -1984,6 +1943,7 @@ test {
 const Package = @This();
 
 const Progress = @import("Progress.zig");
+const Target = @import("Target.zig");
 
 const builtin = @import("builtin");
 const download = @import("download.zig");

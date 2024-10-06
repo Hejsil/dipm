@@ -7,8 +7,7 @@ installed_packages: *InstalledPackages,
 diagnostics: *Diagnostics,
 progress: *Progress,
 
-os: std.Target.Os.Tag,
-arch: std.Target.Cpu.Arch,
+target: Target,
 
 prefix_dir: std.fs.Dir,
 bin_dir: std.fs.Dir,
@@ -43,8 +42,7 @@ pub fn init(options: Options) !PackageManager {
         .http_client = options.http_client,
         .diagnostics = options.diagnostics,
         .progress = options.progress,
-        .os = options.os,
-        .arch = options.arch,
+        .target = options.target,
         .prefix_dir = prefix_dir,
         .bin_dir = bin_dir,
         .lib_dir = lib_dir,
@@ -69,8 +67,10 @@ pub const Options = struct {
     /// The prefix path where the package manager will work and install packages
     prefix: []const u8,
 
-    arch: std.Target.Cpu.Arch = builtin.cpu.arch,
-    os: std.Target.Os.Tag = builtin.os.tag,
+    target: Target = .{
+        .arch = builtin.cpu.arch,
+        .os = builtin.os.tag,
+    },
 };
 
 pub fn cleanup(pm: PackageManager) !void {
@@ -160,11 +160,10 @@ fn packagesToInstall(
             continue;
         };
 
-        const specific = package.specific(package_name, pm.os, pm.arch) orelse {
+        const specific = package.specific(package_name, pm.target) orelse {
             try pm.diagnostics.notFoundForTarget(.{
                 .name = package_name,
-                .os = pm.os,
-                .arch = pm.arch,
+                .target = pm.target,
             });
             packages_to_install.swapRemoveAt(i);
             continue;
@@ -550,6 +549,7 @@ test {
     _ = Package;
     _ = Packages;
     _ = Progress;
+    _ = Target;
 
     _ = download;
     _ = ini;
@@ -564,6 +564,7 @@ const InstalledPackages = @import("InstalledPackages.zig");
 const Package = @import("Package.zig");
 const Packages = @import("Packages.zig");
 const Progress = @import("Progress.zig");
+const Target = @import("Target.zig");
 
 const builtin = @import("builtin");
 const download = @import("download.zig");

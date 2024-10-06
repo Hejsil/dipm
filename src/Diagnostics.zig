@@ -176,8 +176,8 @@ pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !v
             esc.reset,
         });
         try writer.print("└── Package not found for {s}_{s}\n", .{
-            @tagName(not_found.os),
-            @tagName(not_found.arch),
+            @tagName(not_found.target.os),
+            @tagName(not_found.target.arch),
         });
     }
     for (diagnostics.warnings.up_to_date.items) |up_to_date| {
@@ -365,8 +365,7 @@ pub fn notFoundForTarget(diagnostics: *Diagnostics, not_found: PackageTarget) !v
     const arena = diagnostics.arena.allocator();
     return diagnostics.warnings.not_found_for_target.append(diagnostics.gpa(), .{
         .name = try arena.dupe(u8, not_found.name),
-        .os = not_found.os,
-        .arch = not_found.arch,
+        .target = not_found.target,
     });
 }
 
@@ -462,8 +461,7 @@ pub const PackageError = struct {
 
 pub const PackageTarget = struct {
     name: []const u8,
-    os: std.Target.Os.Tag,
-    arch: std.Target.Cpu.Arch,
+    target: Target,
 };
 
 pub const HashMismatch = struct {
@@ -489,10 +487,12 @@ pub const DownloadFailedWithStatus = struct {
 
 test {
     _ = Escapes;
+    _ = Target;
 }
 
 const Diagnostics = @This();
 
 const Escapes = @import("Escapes.zig");
+const Target = @import("Target.zig");
 
 const std = @import("std");
