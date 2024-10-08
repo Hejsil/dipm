@@ -223,13 +223,7 @@ pub fn extract(options: ExtractOptions) !void {
             defer out_file.close();
 
             var decomp = std.compress.gzip.decompressor(node_reader);
-            var buf: [std.mem.page_size]u8 = undefined;
-            while (true) {
-                const len = try decomp.reader().read(&buf);
-                if (len == 0)
-                    break;
-                try out_file.writeAll(buf[0..len]);
-            }
+            try io.pipe(decomp.reader(), out_file.writer());
         },
         .tar => {
             try std.tar.pipeToFileSystem(
@@ -309,7 +303,14 @@ pub fn copyTree(from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
     };
 }
 
+test {
+    _ = Progress;
+
+    _ = io;
+}
+
 const Progress = @import("Progress.zig");
 
 const builtin = @import("builtin");
+const io = @import("io.zig");
 const std = @import("std");
