@@ -270,6 +270,21 @@ test "parse" {
     );
 }
 
+fn parseAndWrite(allocator: std.mem.Allocator, string: []const u8) ![]u8 {
+    var out = std.ArrayList(u8).init(allocator);
+    defer out.deinit();
+
+    var packages = try parse(allocator, string);
+    defer packages.deinit();
+
+    try packages.write(out.writer());
+    return out.toOwnedSlice();
+}
+
+test "parse.fuzz" {
+    try std.testing.fuzz(fuzz.fnFromParseAndWrite(parseAndWrite), .{});
+}
+
 pub fn sort(packages: *Packages) void {
     packages.packages.sort(struct {
         keys: []const []const u8,
@@ -540,6 +555,7 @@ test {
     _ = Package;
     _ = Progress;
 
+    _ = fuzz;
     _ = ini;
     _ = paths;
 }
@@ -550,6 +566,7 @@ const Diagnostics = @import("Diagnostics.zig");
 const Package = @import("Package.zig");
 const Progress = @import("Progress.zig");
 
+const fuzz = @import("fuzz.zig");
 const ini = @import("ini.zig");
 const paths = @import("paths.zig");
 const std = @import("std");

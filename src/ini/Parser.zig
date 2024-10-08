@@ -368,28 +368,8 @@ fn parseAndWrite(allocator: std.mem.Allocator, string: []const u8) ![]u8 {
     }
 }
 
-fn fuzz(fuzz_input: []const u8) !void {
-    const allocator = std.testing.allocator;
-
-    // This fuzz test ensure that once parsed and written out once, doing so again should yield the same result.
-    const stage1 = try parseAndWrite(allocator, fuzz_input);
-    defer allocator.free(stage1);
-
-    const stage2 = try parseAndWrite(allocator, stage1);
-    defer allocator.free(stage2);
-
-    // Use both expectEqualStrings and expectEqualSlices so that we get both the string and hex diff
-    std.testing.expectEqualStrings(stage1, stage2) catch {};
-    std.testing.expectEqualSlices(u8, stage1, stage2) catch |err| {
-        // Also use the testing api to print out the fuzz input
-        std.testing.expectEqualStrings(stage2, fuzz_input) catch {};
-        std.testing.expectEqualSlices(u8, stage2, fuzz_input) catch {};
-        return err;
-    };
-}
-
-test "Parser fuzz" {
-    try std.testing.fuzz(fuzz, .{});
+test "fuzz" {
+    try std.testing.fuzz(fuzz.fnFromParseAndWrite(parseAndWrite), .{});
 }
 
 pub const Result = struct {
@@ -604,6 +584,11 @@ test "Result.invalid" {
     );
 }
 
+test {
+    _ = fuzz;
+}
+
 const Parser = @This();
 
+const fuzz = @import("../fuzz.zig");
 const std = @import("std");
