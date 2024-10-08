@@ -144,6 +144,7 @@ pub fn parseInto(packages: *Packages, tmp_allocator: std.mem.Allocator, string: 
         try tmp_buffer.writer().print("{s}.info", .{package_name});
         const info_section = dynamic.sections.get(tmp_buffer.items) orelse return error.NoInfoSectionFound;
         const info_version = info_section.get("version", .{}) orelse return error.NoInfoVersionFound;
+        const info_description = info_section.get("description", .{}) orelse "";
 
         var info_donate = std.ArrayListUnmanaged([]const u8){};
         for (info_section.properties.items) |property| {
@@ -180,6 +181,7 @@ pub fn parseInto(packages: *Packages, tmp_allocator: std.mem.Allocator, string: 
         try packages.packages.putNoClobber(gpa, package_name, .{
             .info = .{
                 .version = try arena.dupe(u8, info_version),
+                .description = try arena.dupe(u8, info_description),
                 .donate = try info_donate.toOwnedSlice(arena),
             },
             .update = .{ .github = try arena.dupe(u8, update_github) },
@@ -234,6 +236,8 @@ test "parse" {
     try expectCanonical(
         \\[test.info]
         \\version = 0.0.0
+        \\description = Test package 1
+        \\donate = donate/link1
         \\
         \\[test.update]
         \\github = test/test
@@ -248,6 +252,9 @@ test "parse" {
         \\
         \\[test2.info]
         \\version = 0.0.0
+        \\description = Test package 2
+        \\donate = donate/link2
+        \\donate = donate/link3
         \\
         \\[test2.update]
         \\github = test2/test2
@@ -458,6 +465,7 @@ test update {
         .package = .{
             .info = .{
                 .version = "0.1.0",
+                .description = "Test package",
                 .donate = &.{ "donate-link", "donate-link" },
             },
             .update = .{ .github = "test/test" },
@@ -476,6 +484,7 @@ test update {
     try expectWrite(&packages,
         \\[test.info]
         \\version = 0.1.0
+        \\description = Test package
         \\donate = donate-link
         \\donate = donate-link
         \\
@@ -511,6 +520,7 @@ test update {
     try expectWrite(&packages,
         \\[test.info]
         \\version = 0.2.0
+        \\description = Test package
         \\donate = donate-link
         \\donate = donate-link
         \\
