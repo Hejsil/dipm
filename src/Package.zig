@@ -15,9 +15,9 @@ const Update = struct {
 const InstallArch = struct {
     url: []const u8,
     hash: []const u8,
-    bin: []const []const u8,
-    lib: []const []const u8,
-    share: []const []const u8,
+    bin: []const []const u8 = &.{},
+    lib: []const []const u8 = &.{},
+    share: []const []const u8 = &.{},
 };
 
 pub const Install = struct {

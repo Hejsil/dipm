@@ -712,7 +712,7 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
             continue;
         };
 
-        try packages.update(package);
+        _ = try packages.update(package);
 
         if (options.commit) {
             packages.sort();
@@ -725,22 +725,26 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
                 package.package.info.version,
             });
 
-            var child = std.process.Child.init(
-                &.{ "git", "commit", "-i", pkgs_ini_base_name, "-m", msg },
-                program.gpa,
-            );
-            child.stdin_behavior = .Ignore;
-            child.stdout_behavior = .Pipe;
-            child.stderr_behavior = .Pipe;
-            child.cwd_dir = pkgs_ini_dir;
-
-            try child.spawn();
-            _ = try child.wait();
+            try gitCommit(program.gpa, pkgs_ini_dir, pkgs_ini_base_name, msg);
         }
     }
 
     packages.sort();
     try packages.writeToFileOverride(pkgs_ini_file);
+}
+
+fn gitCommit(allocator: std.mem.Allocator, dir: std.fs.Dir, file: []const u8, msg: []const u8) !void {
+    var child = std.process.Child.init(
+        &.{ "git", "commit", "-i", file, "-m", msg },
+        allocator,
+    );
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+    child.cwd_dir = dir;
+
+    try child.spawn();
+    _ = try child.wait();
 }
 
 const pkgs_make_usage =

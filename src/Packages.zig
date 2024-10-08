@@ -284,34 +284,28 @@ test sort {
     var packages = Packages.init(std.testing.allocator);
     defer packages.deinit();
 
-    try packages.update(.{
+    try std.testing.expect(try packages.update(.{
         .name = "btest",
         .package = .{
             .info = .{ .version = "0.2.0" },
             .update = .{ .github = "test/test" },
             .linux_x86_64 = .{
-                .bin = &.{},
-                .lib = &.{},
-                .share = &.{},
                 .hash = "test_hash",
                 .url = "test_url",
             },
         },
-    });
-    try packages.update(.{
+    }) == null);
+    try std.testing.expect(try packages.update(.{
         .name = "atest",
         .package = .{
             .info = .{ .version = "0.2.0" },
             .update = .{ .github = "test/test" },
             .linux_x86_64 = .{
-                .bin = &.{},
-                .lib = &.{},
-                .share = &.{},
                 .hash = "test_hash",
                 .url = "test_url",
             },
         },
-    });
+    }) == null);
     try expectWrite(&packages,
         \\[btest.info]
         \\version = 0.2.0
@@ -361,11 +355,12 @@ test sort {
 }
 
 /// Update a package. If it doesn't exist it is added.
-pub fn update(packages: *Packages, package: Package.Named) !void {
+pub fn update(packages: *Packages, package: Package.Named) !?Package {
     const gpa = packages.arena.child_allocator;
     const entry = try packages.packages.getOrPut(gpa, package.name);
     if (entry.found_existing) {
-        entry.value_ptr.*.linux_x86_64.bin = try updateInstall(.{
+        const old_package = entry.value_ptr.*;
+        entry.value_ptr.linux_x86_64.bin = try updateInstall(.{
             .arena = packages.arena.allocator(),
             .tmp_allocator = packages.arena.child_allocator,
             .old_version = entry.value_ptr.*.info.version,
@@ -373,7 +368,7 @@ pub fn update(packages: *Packages, package: Package.Named) !void {
             .new_version = package.package.info.version,
             .new_installs = package.package.linux_x86_64.bin,
         });
-        entry.value_ptr.*.linux_x86_64.lib = try updateInstall(.{
+        entry.value_ptr.linux_x86_64.lib = try updateInstall(.{
             .arena = packages.arena.allocator(),
             .tmp_allocator = packages.arena.child_allocator,
             .old_version = entry.value_ptr.*.info.version,
@@ -381,7 +376,7 @@ pub fn update(packages: *Packages, package: Package.Named) !void {
             .new_version = package.package.info.version,
             .new_installs = package.package.linux_x86_64.lib,
         });
-        entry.value_ptr.*.linux_x86_64.share = try updateInstall(.{
+        entry.value_ptr.linux_x86_64.share = try updateInstall(.{
             .arena = packages.arena.allocator(),
             .tmp_allocator = packages.arena.child_allocator,
             .old_version = entry.value_ptr.*.info.version,
@@ -389,11 +384,14 @@ pub fn update(packages: *Packages, package: Package.Named) !void {
             .new_version = package.package.info.version,
             .new_installs = package.package.linux_x86_64.share,
         });
-        entry.value_ptr.*.info.version = package.package.info.version;
-        entry.value_ptr.*.linux_x86_64.url = package.package.linux_x86_64.url;
-        entry.value_ptr.*.linux_x86_64.hash = package.package.linux_x86_64.hash;
+
+        entry.value_ptr.info.version = package.package.info.version;
+        entry.value_ptr.linux_x86_64.url = package.package.linux_x86_64.url;
+        entry.value_ptr.linux_x86_64.hash = package.package.linux_x86_64.hash;
+        return old_package;
     } else {
         entry.value_ptr.* = package.package;
+        return null;
     }
 }
 
@@ -460,7 +458,7 @@ test update {
 
     try expectWrite(&packages, "");
 
-    try packages.update(.{
+    try std.testing.expect(try packages.update(.{
         .name = "test",
         .package = .{
             .info = .{
@@ -480,7 +478,7 @@ test update {
                 .url = "test_url1",
             },
         },
-    });
+    }) == null);
     try expectWrite(&packages,
         \\[test.info]
         \\version = 0.1.0
@@ -499,7 +497,7 @@ test update {
         \\
     );
 
-    try packages.update(.{
+    try std.testing.expect(try packages.update(.{
         .name = "test",
         .package = .{
             .info = .{ .version = "0.2.0" },
@@ -516,7 +514,7 @@ test update {
                 .url = "test_url2",
             },
         },
-    });
+    }) != null);
     try expectWrite(&packages,
         \\[test.info]
         \\version = 0.2.0
