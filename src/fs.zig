@@ -174,7 +174,7 @@ pub fn extract(options: ExtractOptions) !void {
     const tar_pipe_options = std.tar.PipeOptions{ .exclude_empty_directories = true };
 
     var buffered_reader = std.io.bufferedReader(options.input_file.reader());
-    var node_reader_state = Progress.nodeReader(buffered_reader.reader(), options.node);
+    var node_reader_state = options.node.reader(buffered_reader.reader());
     const node_reader = node_reader_state.reader();
 
     options.node.setMax(@min(std.math.maxInt(u32), try options.input_file.getEndPos()));

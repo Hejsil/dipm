@@ -35,6 +35,58 @@ pub const Node = enum(usize) {
         state.inner.curr = curr;
         state.lock.unlock();
     }
+
+    pub fn writer(node: Node, child_writer: anytype) Writer(@TypeOf(child_writer)) {
+        return .{ .child = child_writer, .node = node };
+    }
+
+    pub fn Writer(comptime Child: type) type {
+        return struct {
+            child: Child,
+            node: Node,
+
+            pub const Error = Child.Error;
+            pub const Writer = std.io.Writer(*Self, Error, write);
+
+            const Self = @This();
+
+            pub fn writer(self: *Self) @This().Writer {
+                return .{ .context = self };
+            }
+
+            pub fn write(self: *Self, bytes: []const u8) Error!usize {
+                const res = try self.child.write(bytes);
+                self.node.advance(@min(res, std.math.maxInt(u32)));
+                return res;
+            }
+        };
+    }
+
+    pub fn reader(node: Node, child_reader: anytype) Reader(@TypeOf(child_reader)) {
+        return .{ .child = child_reader, .node = node };
+    }
+
+    pub fn Reader(comptime Child: type) type {
+        return struct {
+            child: Child,
+            node: Node,
+
+            pub const Error = Child.Error;
+            pub const Reader = std.io.Reader(*Self, Error, read);
+
+            const Self = @This();
+
+            pub fn reader(self: *Self) Self.Reader {
+                return .{ .context = self };
+            }
+
+            pub fn read(self: *Self, buf: []u8) Error!usize {
+                const res = try self.child.read(buf);
+                self.node.advance(@min(res, std.math.maxInt(u32)));
+                return res;
+            }
+        };
+    }
 };
 
 const NodeState = struct {
@@ -243,60 +295,6 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
 
     try writer.writeAll(options.escapes.reset);
     return nodes_printed;
-}
-
-// TODO: Bad name, but what is a better one? :thinking:
-pub fn NodeWriter(comptime Child: type) type {
-    return struct {
-        child: Child,
-        node: Node,
-
-        pub const Error = Child.Error;
-        pub const Writer = std.io.Writer(*Self, Error, write);
-
-        const Self = @This();
-
-        pub fn writer(self: *Self) Writer {
-            return .{ .context = self };
-        }
-
-        pub fn write(self: *Self, bytes: []const u8) Error!usize {
-            const res = try self.child.write(bytes);
-            self.node.advance(@min(res, std.math.maxInt(u32)));
-            return res;
-        }
-    };
-}
-
-pub fn nodeWriter(child: anytype, node: Node) NodeWriter(@TypeOf(child)) {
-    return .{ .child = child, .node = node };
-}
-
-// TODO: Bad name, but what is a better one? :thinking:
-pub fn NodeReader(comptime Child: type) type {
-    return struct {
-        child: Child,
-        node: Node,
-
-        pub const Error = Child.Error;
-        pub const Reader = std.io.Reader(*Self, Error, read);
-
-        const Self = @This();
-
-        pub fn reader(self: *Self) Reader {
-            return .{ .context = self };
-        }
-
-        pub fn read(self: *Self, buf: []u8) Error!usize {
-            const res = try self.child.read(buf);
-            self.node.advance(@min(res, std.math.maxInt(u32)));
-            return res;
-        }
-    };
-}
-
-pub fn nodeReader(child: anytype, node: Node) NodeReader(@TypeOf(child)) {
-    return .{ .child = child, .node = node };
 }
 
 fn expectRender(

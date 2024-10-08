@@ -39,7 +39,7 @@ pub fn download(writer: anytype, options: struct {
         if (request.response.content_length) |length|
             options.progress.setMax(@min(length, std.math.maxInt(u32)));
 
-        var node_writer = Progress.nodeWriter(out, options.progress);
+        var node_writer = options.progress.writer(out);
         try io.pipe(request.reader(), node_writer.writer());
         break :blk request.response.status;
     };
