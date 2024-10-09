@@ -23,7 +23,9 @@ pub fn download(writer: anytype, options: struct {
         try io.pipe(file.reader(), out);
         break :blk .ok;
     } else blk: {
-        const client = options.client orelse return error.NoHttpClientProvided;
+        // No downloading using http from tests
+        std.debug.assert(!builtin.is_test);
+        const client = options.client.?;
 
         var header_buffer: [1024 * 8]u8 = undefined;
         var request = try client.open(.GET, uri, .{
@@ -62,4 +64,5 @@ const Progress = @import("Progress.zig");
 
 const io = @import("io.zig");
 
+const builtin = @import("builtin");
 const std = @import("std");
