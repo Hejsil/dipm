@@ -193,36 +193,13 @@ pub fn fromGithub(options: struct {
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
-    const api_uri_prefix = "https://api.github.com/";
-    const latest_release_uri = options.latest_release_uri orelse try std.fmt.allocPrint(
-        arena,
-        "{s}repos/{s}/{s}/releases/latest",
-        .{ api_uri_prefix, options.user, options.repo },
-    );
-
-    var latest_release_json = std.ArrayList(u8).init(arena);
-    const release_download_result = try download.download(latest_release_json.writer(), .{
-        .client = options.http_client,
-        .uri_str = latest_release_uri,
-        .progress = options.progress,
+    const latest_release = try githubDownloadLatestRelease(.{
+        .arena = arena,
+        .http_client = options.http_client,
+        .user = options.user,
+        .repo = options.repo,
+        .latest_release_uri = options.latest_release_uri,
     });
-    if (release_download_result.status != .ok)
-        return error.LatestReleaseDownloadFailed;
-
-    const LatestRelease = struct {
-        tag_name: []const u8,
-        assets: []const struct {
-            browser_download_url: []const u8,
-        },
-    };
-
-    const latest_release_value = try std.json.parseFromSlice(
-        LatestRelease,
-        arena,
-        latest_release_json.items,
-        .{ .ignore_unknown_fields = true },
-    );
-    const latest_release = latest_release_value.value;
 
     const name = try options.allocator.dupe(u8, options.name orelse options.repo);
     errdefer options.allocator.free(name);
@@ -323,6 +300,47 @@ pub fn fromGithub(options: struct {
             },
         },
     };
+}
+
+const github_api_uri_prefix = "https://api.github.com/";
+
+const GithubLatestRelease = struct {
+    tag_name: []const u8,
+    assets: []const struct {
+        browser_download_url: []const u8,
+    },
+};
+
+fn githubDownloadLatestRelease(options: struct {
+    arena: std.mem.Allocator,
+    http_client: *std.http.Client,
+    progress: Progress.Node = .none,
+    user: []const u8,
+    repo: []const u8,
+    latest_release_uri: ?[]const u8,
+}) !GithubLatestRelease {
+    const latest_release_uri = options.latest_release_uri orelse try std.fmt.allocPrint(
+        options.arena,
+        "{s}repos/{s}/{s}/releases/latest",
+        .{ github_api_uri_prefix, options.user, options.repo },
+    );
+
+    var latest_release_json = std.ArrayList(u8).init(options.arena);
+    const release_download_result = try download.download(latest_release_json.writer(), .{
+        .client = options.http_client,
+        .uri_str = latest_release_uri,
+        .progress = options.progress,
+    });
+    if (release_download_result.status != .ok)
+        return error.LatestReleaseDownloadFailed;
+
+    const latest_release_value = try std.json.parseFromSlice(
+        GithubLatestRelease,
+        options.arena,
+        latest_release_json.items,
+        .{ .ignore_unknown_fields = true },
+    );
+    return latest_release_value.value;
 }
 
 // Small static binary produced with:
