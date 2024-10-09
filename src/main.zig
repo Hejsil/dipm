@@ -560,7 +560,6 @@ fn pkgsUpdateCommand(program: *Program) !void {
     var packages_to_update = std.StringArrayHashMap(void).init(program.arena);
     var options = PackagesAddOptions{
         .commit = false,
-        .commit_prefix = "Update",
         .pkgs_ini_path = "./pkgs.ini",
         .urls = undefined,
     };
@@ -614,7 +613,6 @@ fn pkgsAddCommand(program: *Program) !void {
     var urls = std.ArrayList(UrlAndName).init(program.arena);
     var options = PackagesAddOptions{
         .commit = false,
-        .commit_prefix = "Add",
         .pkgs_ini_path = "./pkgs.ini",
         .urls = undefined,
     };
@@ -637,7 +635,6 @@ fn pkgsAddCommand(program: *Program) !void {
 const PackagesAddOptions = struct {
     pkgs_ini_path: []const u8,
     commit: bool,
-    commit_prefix: []const u8,
     urls: []const UrlAndName,
 };
 
@@ -712,39 +709,22 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
             continue;
         };
 
-        _ = try packages.update(package);
+        const old_package = try packages.update(package);
 
         if (options.commit) {
             packages.sort();
             try packages.writeToFileOverride(pkgs_ini_file);
             try pkgs_ini_file.sync();
 
-            const msg = try std.fmt.allocPrint(program.arena, "{s}: {s} {s}", .{
-                package.name,
-                options.commit_prefix,
-                package.package.info.version,
-            });
-
-            try gitCommit(program.gpa, pkgs_ini_dir, pkgs_ini_base_name, msg);
+            const msg = try git.createCommitMessage(program.arena, package, old_package);
+            try git.commitFile(program.gpa, pkgs_ini_dir, pkgs_ini_base_name, msg);
         }
     }
 
-    packages.sort();
-    try packages.writeToFileOverride(pkgs_ini_file);
-}
-
-fn gitCommit(allocator: std.mem.Allocator, dir: std.fs.Dir, file: []const u8, msg: []const u8) !void {
-    var child = std.process.Child.init(
-        &.{ "git", "commit", "-i", file, "-m", msg },
-        allocator,
-    );
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
-    child.cwd_dir = dir;
-
-    try child.spawn();
-    _ = try child.wait();
+    if (!options.commit) {
+        packages.sort();
+        try packages.writeToFileOverride(pkgs_ini_file);
+    }
 }
 
 const pkgs_make_usage =
@@ -800,6 +780,7 @@ test {
 
     _ = download;
     _ = fs;
+    _ = git;
 
     _ = @import("testing.zig");
 }
@@ -815,4 +796,5 @@ const Progress = @import("Progress.zig");
 const builtin = @import("builtin");
 const download = @import("download.zig");
 const fs = @import("fs.zig");
+const git = @import("git.zig");
 const std = @import("std");
