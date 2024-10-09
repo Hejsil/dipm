@@ -155,14 +155,21 @@ pub fn fromUrl(options: struct {
             .http_client = options.http_client,
             .progress = options.progress,
             .name = options.name,
-            .user = repo_user,
-            .repo = repo_name,
+            .repo = .{
+                .user = repo_user,
+                .name = repo_name,
+            },
             .target = options.target,
         });
     } else {
         return error.InvalidUrl;
     }
 }
+
+pub const GithubRepo = struct {
+    user: []const u8,
+    name: []const u8,
+};
 
 /// Creates a package a Github repository. Will query the github API to figure out the
 /// latest release of the repository and look for suitable download links for that release.
@@ -179,8 +186,7 @@ pub fn fromGithub(options: struct {
 
     /// Name of the package. `null` means it should be inferred
     name: ?[]const u8 = null,
-    user: []const u8,
-    repo: []const u8,
+    repo: GithubRepo,
 
     /// Use this uri to download the latest release json. If `null` then this uri will be used:
     /// https://api.github.com/repos/<user>/<repo>/releases/latest
@@ -196,12 +202,12 @@ pub fn fromGithub(options: struct {
     const latest_release = try githubDownloadLatestRelease(.{
         .arena = arena,
         .http_client = options.http_client,
-        .user = options.user,
-        .repo = options.repo,
+        .user = options.repo.user,
+        .repo = options.repo.name,
         .latest_release_uri = options.latest_release_uri,
     });
 
-    const name = try options.allocator.dupe(u8, options.name orelse options.repo);
+    const name = try options.allocator.dupe(u8, options.name orelse options.repo.name);
     errdefer options.allocator.free(name);
 
     const version = try options.allocator.dupe(u8, versionFromTag(latest_release.tag_name));
@@ -281,8 +287,8 @@ pub fn fromGithub(options: struct {
     errdefer options.allocator.free(download_url_duped);
 
     const github = try std.fmt.allocPrint(options.allocator, "{s}/{s}", .{
-        options.user,
-        options.repo,
+        options.repo.user,
+        options.repo.name,
     });
     errdefer options.allocator.free(github);
 
@@ -409,8 +415,7 @@ const testing_static_arm_binary = [_]u8{
 fn testFromGithub(options: struct {
     /// Name of the package. `null` means it should be inferred
     name: ?[]const u8 = null,
-    user: []const u8,
-    repo: []const u8,
+    repo: GithubRepo,
     tag_name: []const u8,
     target: Target,
     expect: []const u8,
@@ -426,8 +431,8 @@ fn testFromGithub(options: struct {
 
     const tmp_dir_path = try tmp_dir.path(arena);
     const static_binary_name = try std.fmt.allocPrint(arena, "{s}-{s}-{s}", .{
-        options.user,
-        options.repo,
+        options.repo.user,
+        options.repo.name,
         options.tag_name,
     });
     const static_binary_path = try std.fs.path.join(arena, &.{
@@ -476,7 +481,6 @@ fn testFromGithub(options: struct {
         .allocator = allocator,
         .tmp_allocator = allocator,
         .http_client = undefined, // Not used when downloading from file:// uris
-        .user = options.user,
         .repo = options.repo,
         .latest_release_uri = latest_release_file_uri,
         .target = options.target,
@@ -498,8 +502,7 @@ fn testFromGithub(options: struct {
 
 test fromGithub {
     try testFromGithub(.{
-        .user = "junegunn",
-        .repo = "fzf",
+        .repo = .{ .user = "junegunn", .name = "fzf" },
         .tag_name = "v0.54.0",
         .target = .{ .os = .linux, .arch = .x86_64 },
         .expect =
@@ -517,8 +520,7 @@ test fromGithub {
         ,
     });
     try testFromGithub(.{
-        .user = "googlefonts",
-        .repo = "fontc",
+        .repo = .{ .user = "googlefonts", .name = "fontc" },
         .tag_name = "fontc-v0.0.1",
         .target = .{ .os = .linux, .arch = .x86_64 },
         .expect =
