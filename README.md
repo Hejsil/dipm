@@ -40,5 +40,6 @@ tries to be.
 There are package managers that work on multiple distros like [homebrew](https://brew.sh/) or
 [nix](https://nixos.org/). While these are great, they're quite complicated for what I want.
 
-Also, writing a package manager is fun~ 😉
-
+There are also [eget](https://github.com/zyedidia/eget) and [stow](https://github.com/marwanhawari/stew)
+which are much simpler. The only issue I see with these is that they are dependent on Github and
+cannot install binaries from elsewhere.
