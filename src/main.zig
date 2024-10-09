@@ -534,8 +534,6 @@ fn pkgsCommand(program: *Program) !void {
             return program.pkgsUpdateCommand();
         if (program.args.flag(&.{"add"}))
             return program.pkgsAddCommand();
-        if (program.args.flag(&.{"make"}))
-            return program.pkgsMakeCommand();
         if (program.args.flag(&.{ "-h", "--help", "help" }))
             return program.stdout.writeAll(pkgs_usage);
         if (program.args.positional()) |_|
@@ -725,48 +723,6 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
         packages.sort();
         try packages.writeToFileOverride(pkgs_ini_file);
     }
-}
-
-const pkgs_make_usage =
-    \\Usage: dipm pkgs make [options] [url]...
-    \\
-    \\Options:
-    \\  -h, --help          Display this message
-    \\
-;
-
-fn pkgsMakeCommand(program: *Program) !void {
-    var urls = std.StringArrayHashMap(void).init(program.arena);
-
-    while (program.args.next()) {
-        if (program.args.flag(&.{ "-h", "--help" }))
-            return program.stdout.writeAll(pkgs_make_usage);
-        if (program.args.positional()) |url|
-            try urls.put(url, {});
-    }
-
-    var http_client = std.http.Client{ .allocator = program.gpa };
-    defer http_client.deinit();
-
-    var stdout_buffered = std.io.bufferedWriter(program.stdout.writer());
-    const writer = stdout_buffered.writer();
-
-    for (urls.keys()) |url| {
-        const package = Package.fromUrl(.{
-            .allocator = program.arena,
-            .tmp_allocator = program.gpa,
-            .http_client = &http_client,
-            .url = url,
-            .target = .{ .os = builtin.os.tag, .arch = builtin.target.cpu.arch },
-        }) catch |err| {
-            std.log.err("{s} {s}", .{ @errorName(err), url });
-            continue;
-        };
-
-        try package.package.write(package.name, writer);
-    }
-
-    try stdout_buffered.flush();
 }
 
 test {
