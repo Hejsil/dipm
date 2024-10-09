@@ -543,7 +543,7 @@ pub fn setupPrefix(options: struct {
 }) !Prefix {
     const allocator = options.allocator;
 
-    const packages = [_]Package{
+    const packages = [_]TestPackage{
         simple_file,
         simple_tree_tar_xz,
         simple_tree_tar_gz,
@@ -592,20 +592,21 @@ pub fn setupPrefix(options: struct {
 
         if (i != 0) try pkgs_ini_writer.writeAll("\n");
 
-        try pkgs_ini_writer.print("[{s}.info]\n", .{package.name});
-        try pkgs_ini_writer.print("version = {s}\n\n", .{options.version});
-
-        try pkgs_ini_writer.print("[{s}.linux_x86_64]\n", .{package.name});
-
-        for (package.install_bin) |install_bin|
-            try pkgs_ini_writer.print("install_bin = {s}\n", .{install_bin});
-        for (package.install_lib) |install_lib|
-            try pkgs_ini_writer.print("install_lib = {s}\n", .{install_lib});
-        for (package.install_share) |install_share|
-            try pkgs_ini_writer.print("install_share = {s}\n", .{install_share});
-
-        try pkgs_ini_writer.print("url = file://{s}/{s}\n", .{ pkgs_dir_path, package.file.name });
-        try pkgs_ini_writer.print("hash = {s}\n", .{package.file.hash});
+        var url_buf: [std.fs.max_path_bytes]u8 = undefined;
+        try Package.write(.{
+            .info = .{ .version = options.version },
+            .update = .{ .github = "" },
+            .linux_x86_64 = .{
+                .url = try std.fmt.bufPrint(&url_buf, "file://{s}/{s}", .{
+                    pkgs_dir_path,
+                    package.file.name,
+                }),
+                .hash = package.file.hash,
+                .bin = package.install_bin,
+                .lib = package.install_lib,
+                .share = package.install_share,
+            },
+        }, package.name, pkgs_ini_writer);
     }
 
     try buffered_pkg_ini_file.flush();
@@ -662,7 +663,7 @@ pub const Prefix = struct {
     }
 };
 
-pub const Package = struct {
+pub const TestPackage = struct {
     name: []const u8,
     file: File,
     install_bin: []const []const u8 = &.{},
@@ -676,7 +677,7 @@ pub const Package = struct {
     };
 };
 
-pub const simple_file = Package{
+pub const simple_file = TestPackage{
     .name = "test-file",
     .file = .{
         .name = "pkg",
@@ -699,7 +700,7 @@ pub const simple_file = Package{
 //   xxd -p "$FILE" | tr -d '\n' | sed -E 's/([a-z0-9]{2})/0x\1,/g'
 //   sha256sum "$FILE"
 //
-pub const simple_tree_tar_xz = Package{
+pub const simple_tree_tar_xz = TestPackage{
     .name = "test-xz",
     .file = .{
         .name = "pkg.tar.xz",
@@ -732,7 +733,7 @@ pub const simple_tree_tar_xz = Package{
     .install_share = &.{ "test-xz-dir:share/dir", "test-xz:share/dir/file" },
 };
 
-pub const simple_tree_tar_gz = Package{
+pub const simple_tree_tar_gz = TestPackage{
     .name = "test-gz",
     .file = .{
         .name = "pkg.tar.gz",
@@ -763,7 +764,7 @@ pub const simple_tree_tar_gz = Package{
     .install_share = &.{ "test-gz-dir:share/dir", "test-gz:share/dir/file" },
 };
 
-pub const simple_tree_tar_zst = Package{
+pub const simple_tree_tar_zst = TestPackage{
     .name = "test-zst",
     .file = .{
         .name = "pkg.tar.zst",
@@ -793,7 +794,7 @@ pub const simple_tree_tar_zst = Package{
     .install_share = &.{ "test-zst-dir:share/dir", "test-zst:share/dir/file" },
 };
 
-pub const wrong_hash = Package{
+pub const wrong_hash = TestPackage{
     .name = "wrong-hash",
     .file = .{
         .name = "wrong-hash",
@@ -803,7 +804,7 @@ pub const wrong_hash = Package{
     .install_bin = &.{"wrong-hash"},
 };
 
-pub const fails_download = Package{
+pub const fails_download = TestPackage{
     .name = "fails-download",
     .file = .{
         .name = "fails-download",
@@ -814,10 +815,14 @@ pub const fails_download = Package{
 };
 
 test {
+    _ = Package;
+
     _ = fs;
     _ = main;
     _ = paths;
 }
+
+const Package = @import("Package.zig");
 
 const paths = @import("paths.zig");
 const fs = @import("fs.zig");
