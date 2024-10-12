@@ -548,9 +548,10 @@ const pkgs_update_usage =
     \\Usage: dipm pkgs update [options] [url]...
     \\
     \\Options:
-    \\  -f, --pkgs-file     Path to pkgs.ini (default: ./pkgs.ini)
-    \\  -c, --commit        Commit each package updated to pkgs.ini
-    \\  -h, --help          Display this message
+    \\  -f, --pkgs-file           Path to pkgs.ini (default: ./pkgs.ini)
+    \\  -c, --commit              Commit each package updated to pkgs.ini
+    \\  -d, --update-description  Also update the description of the package
+    \\  -h, --help                Display this message
     \\
 ;
 
@@ -558,6 +559,7 @@ fn pkgsUpdateCommand(program: *Program) !void {
     var packages_to_update = std.StringArrayHashMap(void).init(program.arena);
     var options = PackagesAddOptions{
         .commit = false,
+        .update_description = false,
         .pkgs_ini_path = "./pkgs.ini",
         .urls = undefined,
     };
@@ -567,6 +569,8 @@ fn pkgsUpdateCommand(program: *Program) !void {
             options.pkgs_ini_path = file;
         if (program.args.flag(&.{ "-c", "--commit" }))
             options.commit = true;
+        if (program.args.flag(&.{ "-d", "--update-description" }))
+            options.update_description = true;
         if (program.args.flag(&.{ "-h", "--help" }))
             return program.stdout.writeAll(pkgs_update_usage);
         if (program.args.positional()) |url|
@@ -611,6 +615,7 @@ fn pkgsAddCommand(program: *Program) !void {
     var urls = std.ArrayList(UrlAndName).init(program.arena);
     var options = PackagesAddOptions{
         .commit = false,
+        .update_description = true,
         .pkgs_ini_path = "./pkgs.ini",
         .urls = undefined,
     };
@@ -633,6 +638,7 @@ fn pkgsAddCommand(program: *Program) !void {
 const PackagesAddOptions = struct {
     pkgs_ini_path: []const u8,
     commit: bool,
+    update_description: bool,
     urls: []const UrlAndName,
 };
 
@@ -707,7 +713,9 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
             continue;
         };
 
-        const old_package = try packages.update(package);
+        const old_package = try packages.update(package, .{
+            .description = options.update_description,
+        });
 
         if (options.commit) {
             packages.sort();

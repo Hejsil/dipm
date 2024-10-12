@@ -55,6 +55,7 @@ pub fn deinit(package: Package, allocator: std.mem.Allocator) void {
     heap.freeItems(allocator, package.linux_x86_64.share);
 
     allocator.free(package.info.version);
+    allocator.free(package.info.description);
     allocator.free(package.update.github);
     allocator.free(package.linux_x86_64.url);
     allocator.free(package.linux_x86_64.hash);
@@ -188,6 +189,10 @@ pub fn fromGithub(options: struct {
     name: ?[]const u8 = null,
     repo: GithubRepo,
 
+    /// Use this uri to download the repository json. If `null` then this uri will be used:
+    /// https://api.github.com/repos/<user>/<repo>
+    repository_uri: ?[]const u8 = null,
+
     /// Use this uri to download the latest release json. If `null` then this uri will be used:
     /// https://api.github.com/repos/<user>/<repo>/releases/latest
     latest_release_uri: ?[]const u8 = null,
@@ -199,11 +204,17 @@ pub fn fromGithub(options: struct {
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
+    const repository = try githubDownloadRepository(.{
+        .arena = arena,
+        .http_client = options.http_client,
+        .repo = options.repo,
+        .repository_uri = options.repository_uri,
+    });
+
     const latest_release = try githubDownloadLatestRelease(.{
         .arena = arena,
         .http_client = options.http_client,
-        .user = options.repo.user,
-        .repo = options.repo.name,
+        .repo = options.repo,
         .latest_release_uri = options.latest_release_uri,
     });
 
@@ -212,6 +223,9 @@ pub fn fromGithub(options: struct {
 
     const version = try options.allocator.dupe(u8, versionFromTag(latest_release.tag_name));
     errdefer options.allocator.free(version);
+
+    const description = try options.allocator.dupe(u8, repository.description);
+    errdefer options.allocator.free(description);
 
     const download_url = try findDownloadUrl(.{
         .target = options.target,
@@ -295,7 +309,10 @@ pub fn fromGithub(options: struct {
     return .{
         .name = name,
         .package = .{
-            .info = .{ .version = version },
+            .info = .{
+                .version = version,
+                .description = description,
+            },
             .update = .{ .github = github },
             .linux_x86_64 = .{
                 .bin = binaries,
@@ -321,14 +338,13 @@ fn githubDownloadLatestRelease(options: struct {
     arena: std.mem.Allocator,
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
-    user: []const u8,
-    repo: []const u8,
+    repo: GithubRepo,
     latest_release_uri: ?[]const u8,
 }) !GithubLatestRelease {
     const latest_release_uri = options.latest_release_uri orelse try std.fmt.allocPrint(
         options.arena,
         "{s}repos/{s}/{s}/releases/latest",
-        .{ github_api_uri_prefix, options.user, options.repo },
+        .{ github_api_uri_prefix, options.repo.user, options.repo.name },
     );
 
     var latest_release_json = std.ArrayList(u8).init(options.arena);
@@ -344,6 +360,41 @@ fn githubDownloadLatestRelease(options: struct {
         GithubLatestRelease,
         options.arena,
         latest_release_json.items,
+        .{ .ignore_unknown_fields = true },
+    );
+    return latest_release_value.value;
+}
+
+const GithubRepository = struct {
+    description: []const u8,
+};
+
+fn githubDownloadRepository(options: struct {
+    arena: std.mem.Allocator,
+    http_client: *std.http.Client,
+    progress: Progress.Node = .none,
+    repo: GithubRepo,
+    repository_uri: ?[]const u8,
+}) !GithubRepository {
+    const repository_uri = options.repository_uri orelse try std.fmt.allocPrint(
+        options.arena,
+        "{s}repos/{s}/{s}",
+        .{ github_api_uri_prefix, options.repo.user, options.repo.name },
+    );
+
+    var repository_json = std.ArrayList(u8).init(options.arena);
+    const repository_result = try download.download(repository_json.writer(), .{
+        .client = options.http_client,
+        .uri_str = repository_uri,
+        .progress = options.progress,
+    });
+    if (repository_result.status != .ok)
+        return error.LatestReleaseDownloadFailed;
+
+    const latest_release_value = try std.json.parseFromSlice(
+        GithubRepository,
+        options.arena,
+        repository_json.items,
         .{ .ignore_unknown_fields = true },
     );
     return latest_release_value.value;
@@ -415,6 +466,7 @@ const testing_static_arm_binary = [_]u8{
 fn testFromGithub(options: struct {
     /// Name of the package. `null` means it should be inferred
     name: ?[]const u8 = null,
+    description: []const u8,
     repo: GithubRepo,
     tag_name: []const u8,
     target: Target,
@@ -472,16 +524,28 @@ fn testFromGithub(options: struct {
         , .{ options.tag_name, static_binary_uri }),
     });
 
-    const latest_release_file_uri = try std.fmt.allocPrint(
-        arena,
-        "file://{s}",
-        .{latest_release_file_path},
-    );
+    const repository_file_path = try std.fs.path.join(arena, &.{
+        tmp_dir_path,
+        "repository.json",
+    });
+    try cwd.writeFile(.{
+        .sub_path = repository_file_path,
+        .data = try std.fmt.allocPrint(arena,
+            \\{{
+            \\  "description": "{s}"
+            \\}}
+            \\
+        , .{options.description}),
+    });
+
+    const latest_release_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{latest_release_file_path});
+    const repository_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{repository_file_path});
     const package = try fromGithub(.{
         .allocator = allocator,
         .tmp_allocator = allocator,
         .http_client = undefined, // Not used when downloading from file:// uris
         .repo = options.repo,
+        .repository_uri = repository_file_uri,
         .latest_release_uri = latest_release_file_uri,
         .target = options.target,
     });
@@ -502,12 +566,14 @@ fn testFromGithub(options: struct {
 
 test fromGithub {
     try testFromGithub(.{
+        .description = ":cherry_blossom: A command-line fuzzy finder",
         .repo = .{ .user = "junegunn", .name = "fzf" },
         .tag_name = "v0.54.0",
         .target = .{ .os = .linux, .arch = .x86_64 },
         .expect =
         \\[fzf.info]
         \\version = 0.54.0
+        \\description = :cherry_blossom: A command-line fuzzy finder
         \\
         \\[fzf.update]
         \\github = junegunn/fzf
@@ -520,12 +586,14 @@ test fromGithub {
         ,
     });
     try testFromGithub(.{
+        .description = "Where in we pursue oxidizing (context: https://github.com/googlefonts/oxidize) fontmake.",
         .repo = .{ .user = "googlefonts", .name = "fontc" },
         .tag_name = "fontc-v0.0.1",
         .target = .{ .os = .linux, .arch = .x86_64 },
         .expect =
         \\[fontc.info]
         \\version = 0.0.1
+        \\description = Where in we pursue oxidizing (context: https://github.com/googlefonts/oxidize) fontmake.
         \\
         \\[fontc.update]
         \\github = googlefonts/fontc

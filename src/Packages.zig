@@ -309,7 +309,7 @@ test sort {
                 .url = "test_url",
             },
         },
-    }) == null);
+    }, .{}) == null);
     try std.testing.expect(try packages.update(.{
         .name = "atest",
         .package = .{
@@ -320,7 +320,7 @@ test sort {
                 .url = "test_url",
             },
         },
-    }) == null);
+    }, .{}) == null);
     try expectWrite(&packages,
         \\[btest.info]
         \\version = 0.2.0
@@ -369,8 +369,12 @@ test sort {
     );
 }
 
+pub const UpdateOptions = struct {
+    description: bool = false,
+};
+
 /// Update a package. If it doesn't exist it is added.
-pub fn update(packages: *Packages, package: Package.Named) !?Package {
+pub fn update(packages: *Packages, package: Package.Named, options: UpdateOptions) !?Package {
     const gpa = packages.arena.child_allocator;
     const entry = try packages.packages.getOrPut(gpa, package.name);
     if (entry.found_existing) {
@@ -403,6 +407,10 @@ pub fn update(packages: *Packages, package: Package.Named) !?Package {
         entry.value_ptr.info.version = package.package.info.version;
         entry.value_ptr.linux_x86_64.url = package.package.linux_x86_64.url;
         entry.value_ptr.linux_x86_64.hash = package.package.linux_x86_64.hash;
+
+        if (options.description)
+            entry.value_ptr.info.description = package.package.info.description;
+
         return old_package;
     } else {
         entry.value_ptr.* = package.package;
@@ -432,7 +440,7 @@ fn updateInstall(options: struct {
         for (options.old_installs) |old_install_str| {
             const old_install = Package.Install.fromString(old_install_str);
             if (std.mem.eql(u8, old_install.to, new_install.to)) {
-                // Old and new installs the same file. This happends when the path changes, but
+                // Old and new installs the same file. This happens when the path changes, but
                 // the file name stays the same:
                 //   test-0.1.0/test, test-0.2.0/test -> test-0.2.0/test
                 res.appendAssumeCapacity(new_install_str);
@@ -493,7 +501,7 @@ test update {
                 .url = "test_url1",
             },
         },
-    }) == null);
+    }, .{}) == null);
     try expectWrite(&packages,
         \\[test.info]
         \\version = 0.1.0
@@ -512,7 +520,7 @@ test update {
         \\
     );
 
-    try std.testing.expect(try packages.update(.{
+    const new_version = Package.Named{
         .name = "test",
         .package = .{
             .info = .{ .version = "0.2.0" },
@@ -529,11 +537,33 @@ test update {
                 .url = "test_url2",
             },
         },
-    }) != null);
+    };
+    try std.testing.expect(try packages.update(new_version, .{}) != null);
     try expectWrite(&packages,
         \\[test.info]
         \\version = 0.2.0
         \\description = Test package
+        \\donate = donate-link
+        \\donate = donate-link
+        \\
+        \\[test.update]
+        \\github = test/test
+        \\
+        \\[test.linux_x86_64]
+        \\install_bin = test-0.2.0/test
+        \\install_bin = test2:test-0.2.0
+        \\install_bin = test3
+        \\url = test_url2
+        \\hash = test_hash2
+        \\
+    );
+
+    try std.testing.expect(try packages.update(new_version, .{
+        .description = true,
+    }) != null);
+    try expectWrite(&packages,
+        \\[test.info]
+        \\version = 0.2.0
         \\donate = donate-link
         \\donate = donate-link
         \\

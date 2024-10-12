@@ -14,8 +14,8 @@ pub fn commitFile(allocator: std.mem.Allocator, dir: std.fs.Dir, file: []const u
 
 /// Create a commit message based on what `Package.update` did. Depending on what changed between
 /// the old and new package, the commit message will differ.
-pub fn createCommitMessage(allocator: std.mem.Allocator, package: Package.Named, m_old_pacakge: ?Package) ![]u8 {
-    const old_package = m_old_pacakge orelse {
+pub fn createCommitMessage(allocator: std.mem.Allocator, package: Package.Named, m_old_package: ?Package) ![]u8 {
+    const old_package = m_old_package orelse {
         return std.fmt.allocPrint(allocator, "{s}: Add {s}", .{
             package.name,
             package.package.info.version,
@@ -31,13 +31,15 @@ pub fn createCommitMessage(allocator: std.mem.Allocator, package: Package.Named,
         return std.fmt.allocPrint(allocator, "{s}: Update hash", .{package.name});
     if (!std.mem.eql(u8, package.package.linux_x86_64.url, old_package.linux_x86_64.url))
         return std.fmt.allocPrint(allocator, "{s}: Update url", .{package.name});
+    if (!std.mem.eql(u8, package.package.info.description, old_package.info.description))
+        return std.fmt.allocPrint(allocator, "{s}: Update description", .{package.name});
 
     // TODO: Better message
     return std.fmt.allocPrint(allocator, "{s}: Update something", .{package.name});
 }
 
-fn expectCreateCommitMessage(expected: []const u8, package: Package.Named, m_old_pacakge: ?Package) !void {
-    const actual = try createCommitMessage(std.testing.allocator, package, m_old_pacakge);
+fn expectCreateCommitMessage(expected: []const u8, package: Package.Named, m_old_package: ?Package) !void {
+    const actual = try createCommitMessage(std.testing.allocator, package, m_old_package);
     defer std.testing.allocator.free(actual);
 
     try std.testing.expectEqualStrings(expected, actual);
@@ -49,7 +51,10 @@ test createCommitMessage {
         .{
             .name = "dipm",
             .package = .{
-                .info = .{ .version = "0.1.0" },
+                .info = .{
+                    .version = "0.1.0",
+                    .description = "Description 1",
+                },
                 .update = .{ .github = "" },
                 .linux_x86_64 = .{
                     .url = "a",
@@ -64,7 +69,10 @@ test createCommitMessage {
         .{
             .name = "dipm",
             .package = .{
-                .info = .{ .version = "0.1.0" },
+                .info = .{
+                    .version = "0.1.0",
+                    .description = "Description 1",
+                },
                 .update = .{ .github = "" },
                 .linux_x86_64 = .{
                     .url = "a",
@@ -73,7 +81,10 @@ test createCommitMessage {
             },
         },
         .{
-            .info = .{ .version = "0.2.0" },
+            .info = .{
+                .version = "0.2.0",
+                .description = "Description 2",
+            },
             .update = .{ .github = "" },
             .linux_x86_64 = .{
                 .url = "b",
@@ -86,7 +97,10 @@ test createCommitMessage {
         .{
             .name = "dipm",
             .package = .{
-                .info = .{ .version = "0.1.0" },
+                .info = .{
+                    .version = "0.1.0",
+                    .description = "Description 1",
+                },
                 .update = .{ .github = "" },
                 .linux_x86_64 = .{
                     .url = "a",
@@ -95,7 +109,10 @@ test createCommitMessage {
             },
         },
         .{
-            .info = .{ .version = "0.1.0" },
+            .info = .{
+                .version = "0.1.0",
+                .description = "Description 2",
+            },
             .update = .{ .github = "" },
             .linux_x86_64 = .{
                 .url = "b",
@@ -108,7 +125,10 @@ test createCommitMessage {
         .{
             .name = "dipm",
             .package = .{
-                .info = .{ .version = "0.1.0" },
+                .info = .{
+                    .version = "0.1.0",
+                    .description = "Description 1",
+                },
                 .update = .{ .github = "" },
                 .linux_x86_64 = .{
                     .url = "a",
@@ -117,10 +137,41 @@ test createCommitMessage {
             },
         },
         .{
-            .info = .{ .version = "0.1.0" },
+            .info = .{
+                .version = "0.1.0",
+                .description = "Description 2",
+            },
             .update = .{ .github = "" },
             .linux_x86_64 = .{
                 .url = "b",
+                .hash = "a",
+            },
+        },
+    );
+    try expectCreateCommitMessage(
+        "dipm: Update description",
+        .{
+            .name = "dipm",
+            .package = .{
+                .info = .{
+                    .version = "0.1.0",
+                    .description = "Description 1",
+                },
+                .update = .{ .github = "" },
+                .linux_x86_64 = .{
+                    .url = "a",
+                    .hash = "a",
+                },
+            },
+        },
+        .{
+            .info = .{
+                .version = "0.1.0",
+                .description = "Description 2",
+            },
+            .update = .{ .github = "" },
+            .linux_x86_64 = .{
+                .url = "a",
                 .hash = "a",
             },
         },
