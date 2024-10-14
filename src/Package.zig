@@ -224,7 +224,8 @@ pub fn fromGithub(options: struct {
     const version = try options.allocator.dupe(u8, versionFromTag(latest_release.tag_name));
     errdefer options.allocator.free(version);
 
-    const description = try options.allocator.dupe(u8, repository.description);
+    const trimmed_description = std.mem.trim(u8, repository.description, " ");
+    const description = try options.allocator.dupe(u8, trimmed_description);
     errdefer options.allocator.free(description);
 
     const download_url = try findDownloadUrl(.{
@@ -566,7 +567,7 @@ fn testFromGithub(options: struct {
 
 test fromGithub {
     try testFromGithub(.{
-        .description = ":cherry_blossom: A command-line fuzzy finder",
+        .description = " :cherry_blossom: A command-line fuzzy finder ",
         .repo = .{ .user = "junegunn", .name = "fzf" },
         .tag_name = "v0.54.0",
         .target = .{ .os = .linux, .arch = .x86_64 },
