@@ -68,7 +68,7 @@ pub fn download(options: DownloadOptions) !Packages {
         if (result.status != .ok)
             return error.DownloadGotNoneOkStatusCode; // TODO: Diagnostics
 
-        try pkgs_file.setEndPos(try pkgs_file.getEndPos());
+        try pkgs_file.setEndPos(try pkgs_file.getPos());
         try pkgs_file.seekTo(0);
     }
 
