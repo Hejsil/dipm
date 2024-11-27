@@ -1984,8 +1984,12 @@ test findDownloadUrl {
 fn versionFromTag(tag: []const u8) []const u8 {
     var state: enum {
         start,
-        sep,
+
+        first_number,
+        first_sep,
+
         number,
+        sep,
     } = .start;
 
     for (0..tag.len) |i_forward| {
@@ -1993,23 +1997,32 @@ fn versionFromTag(tag: []const u8) []const u8 {
         const c = tag[i_backward];
         switch (state) {
             .start => switch (c) {
-                '0'...'9' => state = .number,
+                '0'...'9' => state = .first_number,
                 else => return tag,
             },
-            .sep => switch (c) {
+            .first_number => switch (c) {
+                '0'...'9' => {},
+                '.', '_' => state = .first_sep,
+                else => return tag,
+            },
+            .first_sep => switch (c) {
                 '0'...'9' => state = .number,
-                else => return tag[i_backward + 2 ..],
+                else => return tag,
             },
             .number => switch (c) {
                 '0'...'9' => {},
                 '.', '_' => state = .sep,
                 else => return tag[i_backward + 1 ..],
             },
+            .sep => switch (c) {
+                '0'...'9' => state = .number,
+                else => return tag[i_backward + 2 ..],
+            },
         }
     }
 
     switch (state) {
-        .start, .number => return tag,
+        .start, .first_number, .first_sep, .number => return tag,
         .sep => return tag[1..],
     }
 }
@@ -2021,6 +2034,10 @@ test versionFromTag {
     try std.testing.expectEqualStrings("2024_01_01", versionFromTag("_2024_01_01"));
     try std.testing.expectEqualStrings("2024_01_01", versionFromTag(".2024_01_01"));
     try std.testing.expectEqualStrings("test", versionFromTag("test"));
+    try std.testing.expectEqualStrings("v0.13.0-alpha.11", versionFromTag("v0.13.0-alpha.11"));
+    try std.testing.expectEqualStrings("v1", versionFromTag("v1"));
+    try std.testing.expectEqualStrings("v1.", versionFromTag("v1."));
+    try std.testing.expectEqualStrings("1.1", versionFromTag("v1.1"));
 }
 
 test {
