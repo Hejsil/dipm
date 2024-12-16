@@ -1,6 +1,6 @@
-pub fn freeItems(allocator: std.mem.Allocator, slice: anytype) void {
+pub fn freeItems(gpa: std.mem.Allocator, slice: anytype) void {
     for (slice) |item|
-        allocator.free(item);
+        gpa.free(item);
 }
 
 test {}

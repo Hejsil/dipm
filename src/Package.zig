@@ -43,25 +43,25 @@ pub const Named = struct {
     name: []const u8,
     package: Package,
 
-    pub fn deinit(package: Named, allocator: std.mem.Allocator) void {
-        allocator.free(package.name);
-        package.package.deinit(allocator);
+    pub fn deinit(package: Named, gpa: std.mem.Allocator) void {
+        gpa.free(package.name);
+        package.package.deinit(gpa);
     }
 };
 
-pub fn deinit(package: Package, allocator: std.mem.Allocator) void {
-    heap.freeItems(allocator, package.linux_x86_64.bin);
-    heap.freeItems(allocator, package.linux_x86_64.lib);
-    heap.freeItems(allocator, package.linux_x86_64.share);
+pub fn deinit(package: Package, gpa: std.mem.Allocator) void {
+    heap.freeItems(gpa, package.linux_x86_64.bin);
+    heap.freeItems(gpa, package.linux_x86_64.lib);
+    heap.freeItems(gpa, package.linux_x86_64.share);
 
-    allocator.free(package.info.version);
-    allocator.free(package.info.description);
-    allocator.free(package.update.github);
-    allocator.free(package.linux_x86_64.url);
-    allocator.free(package.linux_x86_64.hash);
-    allocator.free(package.linux_x86_64.bin);
-    allocator.free(package.linux_x86_64.lib);
-    allocator.free(package.linux_x86_64.share);
+    gpa.free(package.info.version);
+    gpa.free(package.info.description);
+    gpa.free(package.update.github);
+    gpa.free(package.linux_x86_64.url);
+    gpa.free(package.linux_x86_64.hash);
+    gpa.free(package.linux_x86_64.bin);
+    gpa.free(package.linux_x86_64.lib);
+    gpa.free(package.linux_x86_64.share);
 }
 
 pub const Specific = struct {
@@ -128,11 +128,11 @@ pub fn write(package: Package, name: []const u8, writer: anytype) !void {
 /// * fromGithub
 pub fn fromUrl(options: struct {
     /// Allocator used for the result
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
 
     /// Allocator used for internal allocations. None of the allocations made with this
     /// allocator will be returned.
-    tmp_allocator: ?std.mem.Allocator = null,
+    tmp_gpa: ?std.mem.Allocator = null,
 
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
@@ -151,8 +151,8 @@ pub fn fromUrl(options: struct {
         const repo_user = repo_split.first();
         const repo_name = repo_split.next() orelse "";
         return fromGithub(.{
-            .allocator = options.allocator,
-            .tmp_allocator = options.tmp_allocator,
+            .gpa = options.gpa,
+            .tmp_gpa = options.tmp_gpa,
             .http_client = options.http_client,
             .progress = options.progress,
             .name = options.name,
@@ -176,11 +176,11 @@ pub const GithubRepo = struct {
 /// latest release of the repository and look for suitable download links for that release.
 pub fn fromGithub(options: struct {
     /// Allocator used for the result
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
 
     /// Allocator used for internal allocations. None of the allocations made with this
     /// allocator will be returned.
-    tmp_allocator: ?std.mem.Allocator = null,
+    tmp_gpa: ?std.mem.Allocator = null,
 
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
@@ -199,8 +199,8 @@ pub fn fromGithub(options: struct {
 
     target: Target,
 }) !Named {
-    const tmp_allocator = options.tmp_allocator orelse options.allocator;
-    var arena_state = std.heap.ArenaAllocator.init(tmp_allocator);
+    const tmp_gpa = options.tmp_gpa orelse options.gpa;
+    var arena_state = std.heap.ArenaAllocator.init(tmp_gpa);
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
@@ -218,15 +218,15 @@ pub fn fromGithub(options: struct {
         .latest_release_uri = options.latest_release_uri,
     });
 
-    const name = try options.allocator.dupe(u8, options.name orelse options.repo.name);
-    errdefer options.allocator.free(name);
+    const name = try options.gpa.dupe(u8, options.name orelse options.repo.name);
+    errdefer options.gpa.free(name);
 
-    const version = try options.allocator.dupe(u8, versionFromTag(latest_release.tag_name));
-    errdefer options.allocator.free(version);
+    const version = try options.gpa.dupe(u8, versionFromTag(latest_release.tag_name));
+    errdefer options.gpa.free(version);
 
     const trimmed_description = std.mem.trim(u8, repository.description, " ");
-    const description = try options.allocator.dupe(u8, trimmed_description);
-    errdefer options.allocator.free(description);
+    const description = try options.gpa.dupe(u8, trimmed_description);
+    errdefer options.gpa.free(description);
 
     const download_url = try findDownloadUrl(.{
         .target = options.target,
@@ -267,45 +267,45 @@ pub fn fromGithub(options: struct {
 
     try downloaded_file.seekTo(0);
     try fs.extract(.{
-        .allocator = arena,
+        .gpa = arena,
         .input_name = downloaded_path,
         .input_file = downloaded_file,
         .output_dir = tmp_dir.dir,
     });
 
     const man_pages = try findManPages(.{
-        .allocator = options.allocator,
-        .tmp_allocator = tmp_allocator,
+        .gpa = options.gpa,
+        .tmp_gpa = tmp_gpa,
         .dir = tmp_dir.dir,
     });
     errdefer {
-        heap.freeItems(options.allocator, man_pages);
-        options.allocator.free(man_pages);
+        heap.freeItems(options.gpa, man_pages);
+        options.gpa.free(man_pages);
     }
 
     const binaries = try findStaticallyLinkedBinaries(.{
-        .allocator = options.allocator,
-        .tmp_allocator = tmp_allocator,
+        .gpa = options.gpa,
+        .tmp_gpa = tmp_gpa,
         .arch = options.target.arch,
         .dir = tmp_dir.dir,
     });
     errdefer {
-        heap.freeItems(options.allocator, binaries);
-        options.allocator.free(binaries);
+        heap.freeItems(options.gpa, binaries);
+        options.gpa.free(binaries);
     }
 
     const hash = std.fmt.bytesToHex(package_download_result.hash, .lower);
-    const hash_duped = try options.allocator.dupe(u8, &hash);
-    errdefer options.allocator.free(hash_duped);
+    const hash_duped = try options.gpa.dupe(u8, &hash);
+    errdefer options.gpa.free(hash_duped);
 
-    const download_url_duped = try options.allocator.dupe(u8, download_url);
-    errdefer options.allocator.free(download_url_duped);
+    const download_url_duped = try options.gpa.dupe(u8, download_url);
+    errdefer options.gpa.free(download_url_duped);
 
-    const github = try std.fmt.allocPrint(options.allocator, "{s}/{s}", .{
+    const github = try std.fmt.allocPrint(options.gpa, "{s}/{s}", .{
         options.repo.user,
         options.repo.name,
     });
-    errdefer options.allocator.free(github);
+    errdefer options.gpa.free(github);
 
     return .{
         .name = name,
@@ -542,8 +542,8 @@ fn testFromGithub(options: struct {
     const latest_release_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{latest_release_file_path});
     const repository_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{repository_file_path});
     const package = try fromGithub(.{
-        .allocator = allocator,
-        .tmp_allocator = allocator,
+        .gpa = allocator,
+        .tmp_gpa = allocator,
         .http_client = undefined, // Not used when downloading from file:// uris
         .repo = options.repo,
         .repository_uri = repository_file_uri,
@@ -609,12 +609,12 @@ test fromGithub {
 }
 
 fn findStaticallyLinkedBinaries(options: struct {
-    allocator: std.mem.Allocator,
-    tmp_allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
+    tmp_gpa: std.mem.Allocator,
     arch: std.Target.Cpu.Arch,
     dir: std.fs.Dir,
 }) ![]const []const u8 {
-    var arena_state = std.heap.ArenaAllocator.init(options.tmp_allocator);
+    var arena_state = std.heap.ArenaAllocator.init(options.tmp_gpa);
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
@@ -644,17 +644,17 @@ fn findStaticallyLinkedBinaries(options: struct {
     if (static_files_result.stdout.len < 1)
         return error.NoStaticallyLinkedFiles;
 
-    var bins_list = std.ArrayList([]const u8).init(options.allocator);
+    var bins_list = std.ArrayList([]const u8).init(options.gpa);
     defer {
         for (bins_list.items) |item|
-            options.allocator.free(item);
+            options.gpa.free(item);
         bins_list.deinit();
     }
 
     var static_files_lines = std.mem.tokenizeScalar(u8, static_files_result.stdout, '\n');
     while (static_files_lines.next()) |static_bin| {
-        const bin = try options.allocator.dupe(u8, static_bin);
-        errdefer options.allocator.free(bin);
+        const bin = try options.gpa.dupe(u8, static_bin);
+        errdefer options.gpa.free(bin);
 
         try bins_list.append(bin);
     }
@@ -677,8 +677,8 @@ fn testFindStaticallyLinkedBinaries(options: struct {
 
     const allocator = std.testing.allocator;
     const result = try findStaticallyLinkedBinaries(.{
-        .allocator = allocator,
-        .tmp_allocator = allocator,
+        .gpa = allocator,
+        .tmp_gpa = allocator,
         .arch = options.arch,
         .dir = tmp_dir.dir,
     });
@@ -727,16 +727,16 @@ test findStaticallyLinkedBinaries {
 }
 
 fn findManPages(options: struct {
-    allocator: std.mem.Allocator,
-    tmp_allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
+    tmp_gpa: std.mem.Allocator,
     dir: std.fs.Dir,
 }) ![][]const u8 {
-    var walker = try options.dir.walk(options.tmp_allocator);
+    var walker = try options.dir.walk(options.tmp_gpa);
     defer walker.deinit();
 
-    var result = std.ArrayList([]const u8).init(options.allocator);
+    var result = std.ArrayList([]const u8).init(options.gpa);
     defer {
-        heap.freeItems(options.allocator, result.items);
+        heap.freeItems(options.gpa, result.items);
         result.deinit();
     }
 
@@ -748,8 +748,8 @@ fn findManPages(options: struct {
         if (!isManPage(entry.basename))
             continue;
 
-        const duped = try options.allocator.dupe(u8, entry.path);
-        errdefer options.allocator.free(duped);
+        const duped = try options.gpa.dupe(u8, entry.path);
+        errdefer options.gpa.free(duped);
 
         try result.append(duped);
     }
@@ -807,8 +807,8 @@ fn testfindManPages(options: struct {
 
     const allocator = std.testing.allocator;
     const result = try findManPages(.{
-        .allocator = allocator,
-        .tmp_allocator = allocator,
+        .gpa = allocator,
+        .tmp_gpa = allocator,
         .dir = tmp_dir.dir,
     });
     defer {

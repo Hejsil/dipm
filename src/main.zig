@@ -6,7 +6,7 @@ pub fn main() !u8 {
     const args = std.process.argsAlloc(gpa) catch @panic("OOM");
     defer std.process.argsFree(gpa, args);
 
-    mainFull(.{ .allocator = gpa, .args = args[1..] }) catch |err| switch (err) {
+    mainFull(.{ .gpa = gpa, .args = args[1..] }) catch |err| switch (err) {
         DiagnosticsError.DiagnosticFailure => return 1,
         else => |e| {
             if (builtin.mode == .Debug)
@@ -25,7 +25,7 @@ pub const DiagnosticsError = error{
 };
 
 pub const MainOptions = struct {
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     args: []const []const u8,
 
     forced_prefix: ?[]const u8 = null,
@@ -35,23 +35,23 @@ pub const MainOptions = struct {
 };
 
 pub fn mainFull(options: MainOptions) !void {
-    var arena_state = std.heap.ArenaAllocator.init(options.allocator);
+    var arena_state = std.heap.ArenaAllocator.init(options.gpa);
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
     const home_path = std.process.getEnvVarOwned(arena, "HOME") catch "/";
     const local_home_path = try std.fs.path.join(arena, &.{ home_path, ".local" });
 
-    var diag = Diagnostics.init(options.allocator);
+    var diag = Diagnostics.init(options.gpa);
     defer diag.deinit();
 
     var progress = try Progress.init(.{
-        .allocator = arena,
+        .gpa = arena,
         .maximum_node_name_len = 15,
     });
 
     var program = Program{
-        .gpa = options.allocator,
+        .gpa = options.gpa,
         .arena = arena,
         .progress = &progress,
         .diagnostics = &diag,
@@ -205,13 +205,13 @@ fn donateCommand(program: *Program) !void {
     defer http_client.deinit();
 
     var installed_packages = try InstalledPackages.open(.{
-        .allocator = program.gpa,
+        .gpa = program.gpa,
         .prefix = program.prefix(),
     });
     defer installed_packages.deinit();
 
     var packages = try Packages.download(.{
-        .allocator = program.gpa,
+        .gpa = program.gpa,
         .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -264,13 +264,13 @@ fn installCommand(program: *Program) !void {
     defer http_client.deinit();
 
     var installed_packages = try InstalledPackages.open(.{
-        .allocator = program.gpa,
+        .gpa = program.gpa,
         .prefix = program.prefix(),
     });
     defer installed_packages.deinit();
 
     var packages = try Packages.download(.{
-        .allocator = program.gpa,
+        .gpa = program.gpa,
         .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -281,7 +281,7 @@ fn installCommand(program: *Program) !void {
     defer packages.deinit();
 
     var pm = try PackageManager.init(.{
-        .allocator = program.gpa,
+        .gpa = program.gpa,
         .http_client = &http_client,
         .packages = &packages,
         .installed_packages = &installed_packages,
@@ -315,7 +315,7 @@ fn uninstallCommand(program: *Program) !void {
     }
 
     var installed_packages = try InstalledPackages.open(.{
-        .allocator = program.gpa,
+        .gpa = program.gpa,
         .prefix = program.prefix(),
     });
     defer installed_packages.deinit();
@@ -325,7 +325,7 @@ fn uninstallCommand(program: *Program) !void {
     defer packages.deinit();
 
     var pm = try PackageManager.init(.{
-        .allocator = program.gpa,
+        .gpa = program.gpa,
         .packages = &packages,
         .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
@@ -367,13 +367,13 @@ fn updateCommand(program: *Program) !void {
     defer http_client.deinit();
 
     var installed_packages = try InstalledPackages.open(.{
-        .allocator = program.gpa,
+        .gpa = program.gpa,
         .prefix = program.prefix(),
     });
     defer installed_packages.deinit();
 
     var packages = try Packages.download(.{
-        .allocator = program.gpa,
+        .gpa = program.gpa,
         .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -384,7 +384,7 @@ fn updateCommand(program: *Program) !void {
     defer packages.deinit();
 
     var pm = try PackageManager.init(.{
-        .allocator = program.gpa,
+        .gpa = program.gpa,
         .http_client = &http_client,
         .packages = &packages,
         .installed_packages = &installed_packages,
@@ -450,7 +450,7 @@ fn listInstalledCommand(program: *Program) !void {
     }
 
     var installed_packages = try InstalledPackages.open(.{
-        .allocator = program.gpa,
+        .gpa = program.gpa,
         .prefix = program.prefix(),
     });
     defer installed_packages.deinit();
@@ -490,7 +490,7 @@ fn listAllCommand(program: *Program) !void {
     defer http_client.deinit();
 
     var pkgs = try Packages.download(.{
-        .allocator = program.gpa,
+        .gpa = program.gpa,
         .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
@@ -702,8 +702,8 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
         defer program.progress.end(progress);
 
         const package = Package.fromUrl(.{
-            .allocator = packages.arena.allocator(),
-            .tmp_allocator = program.gpa,
+            .gpa = packages.arena.allocator(),
+            .tmp_gpa = program.gpa,
             .http_client = &http_client,
             .url = url.url,
             .name = url.name,

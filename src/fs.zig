@@ -13,8 +13,8 @@ pub const ZigCacheTmpDir = struct {
         parent_dir.deleteTree(&dir.dir_name) catch {};
     }
 
-    pub fn path(dir: ZigCacheTmpDir, allocator: std.mem.Allocator) ![]u8 {
-        return std.fs.path.join(allocator, &.{
+    pub fn path(dir: ZigCacheTmpDir, gpa: std.mem.Allocator) ![]u8 {
+        return std.fs.path.join(gpa, &.{
             dir.zig_cache_path,
             dir.tmp_subdir_name,
             &dir.dir_name,
@@ -42,11 +42,11 @@ pub fn zigCacheTmpDir(open_dir_options: std.fs.Dir.OpenOptions) !ZigCacheTmpDir 
     };
 }
 
-pub fn zigCacheTmpDirPath(allocator: std.mem.Allocator) ![]const u8 {
+pub fn zigCacheTmpDirPath(gpa: std.mem.Allocator) ![]const u8 {
     var tmp_dir = try zigCacheTmpDir(.{});
     defer tmp_dir.dir.close();
 
-    return tmp_dir.path(allocator);
+    return tmp_dir.path(gpa);
 }
 
 var zig_cache_path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -159,7 +159,7 @@ pub const FileType = enum {
 };
 
 pub const ExtractOptions = struct {
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
 
     input_name: []const u8,
     input_file: std.fs.File,
@@ -170,7 +170,6 @@ pub const ExtractOptions = struct {
 };
 
 pub fn extract(options: ExtractOptions) !void {
-    const allocator = options.allocator;
     const tar_pipe_options = std.tar.PipeOptions{ .exclude_empty_directories = true };
 
     var buffered_reader = std.io.bufferedReader(options.input_file.reader());
@@ -189,7 +188,7 @@ pub fn extract(options: ExtractOptions) !void {
 
             var child = std.process.Child.init(
                 &.{ "tar", "-xvf", options.input_name, "-C", out_path },
-                allocator,
+                options.gpa,
             );
             child.stdin_behavior = .Ignore;
             child.stdout_behavior = .Pipe;
@@ -211,7 +210,7 @@ pub fn extract(options: ExtractOptions) !void {
             try std.tar.pipeToFileSystem(options.output_dir, decomp.reader(), tar_pipe_options);
         },
         .tar_xz => {
-            var decomp = try std.compress.xz.decompress(allocator, node_reader);
+            var decomp = try std.compress.xz.decompress(options.gpa, node_reader);
             defer decomp.deinit();
             try std.tar.pipeToFileSystem(options.output_dir, decomp.reader(), tar_pipe_options);
         },

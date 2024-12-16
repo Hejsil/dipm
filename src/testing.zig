@@ -511,7 +511,7 @@ test "fuzz" {
 }
 
 pub fn runMain(options: struct {
-    allocator: std.mem.Allocator = std.testing.allocator,
+    gpa: std.mem.Allocator = std.testing.allocator,
     args: []const []const u8,
     prefix: Prefix,
 }) !void {
@@ -525,7 +525,7 @@ pub fn runMain(options: struct {
     defer stderr.close();
 
     try main.mainFull(.{
-        .allocator = options.allocator,
+        .gpa = options.gpa,
         .args = options.args,
         .stdout = stdout,
         .stderr = stderr,
@@ -535,14 +535,12 @@ pub fn runMain(options: struct {
 }
 
 pub fn setupPrefix(options: struct {
-    allocator: std.mem.Allocator = std.testing.allocator,
+    gpa: std.mem.Allocator = std.testing.allocator,
     version: []const u8,
 
     /// If null, a random prefix will be generated
     prefix: ?[]const u8 = null,
 }) !Prefix {
-    const allocator = options.allocator;
-
     const packages = [_]TestPackage{
         simple_file,
         simple_tree_tar_xz,
@@ -553,24 +551,24 @@ pub fn setupPrefix(options: struct {
     };
 
     const prefix_path = if (options.prefix) |prefix|
-        try allocator.dupe(u8, prefix)
+        try options.gpa.dupe(u8, prefix)
     else
-        try fs.zigCacheTmpDirPath(allocator);
-    errdefer allocator.free(prefix_path);
+        try fs.zigCacheTmpDirPath(options.gpa);
+    errdefer options.gpa.free(prefix_path);
 
     const cwd = std.fs.cwd();
     var prefix_dir = try cwd.makeOpenPath(prefix_path, .{});
     errdefer prefix_dir.close();
 
-    const pkgs_ini_path = try std.fs.path.join(allocator, &.{
+    const pkgs_ini_path = try std.fs.path.join(options.gpa, &.{
         prefix_path,
         paths.own_data_subpath,
         paths.pkgs_file_name,
     });
-    defer allocator.free(pkgs_ini_path);
+    defer options.gpa.free(pkgs_ini_path);
 
-    const pkgs_dir_path = try std.fs.path.join(allocator, &.{ prefix_path, "pkgs" });
-    defer allocator.free(pkgs_dir_path);
+    const pkgs_dir_path = try std.fs.path.join(options.gpa, &.{ prefix_path, "pkgs" });
+    defer options.gpa.free(pkgs_dir_path);
 
     var pkgs_dir = try cwd.makeOpenPath(pkgs_dir_path, .{});
     defer pkgs_dir.close();
@@ -611,11 +609,11 @@ pub fn setupPrefix(options: struct {
 
     try buffered_pkg_ini_file.flush();
 
-    const pkgs_uri = try std.fmt.allocPrint(allocator, "file://{s}", .{pkgs_ini_path});
-    errdefer allocator.free(pkgs_uri);
+    const pkgs_uri = try std.fmt.allocPrint(options.gpa, "file://{s}", .{pkgs_ini_path});
+    errdefer options.gpa.free(pkgs_uri);
 
     return .{
-        .allocator = allocator,
+        .gpa = options.gpa,
         .pkgs_uri = pkgs_uri,
         .prefix = prefix_path,
         .prefix_dir = prefix_dir,
@@ -623,7 +621,7 @@ pub fn setupPrefix(options: struct {
 }
 
 pub const Prefix = struct {
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     pkgs_uri: []const u8,
     prefix: []const u8,
     prefix_dir: std.fs.Dir,
@@ -631,8 +629,8 @@ pub const Prefix = struct {
     pub fn deinit(prefix: *Prefix) void {
         prefix.prefix_dir.close();
         std.fs.cwd().deleteTree(prefix.prefix) catch {};
-        prefix.allocator.free(prefix.pkgs_uri);
-        prefix.allocator.free(prefix.prefix);
+        prefix.gpa.free(prefix.pkgs_uri);
+        prefix.gpa.free(prefix.prefix);
     }
 
     pub fn expectNoFile(prefix: Prefix, file: []const u8) !void {

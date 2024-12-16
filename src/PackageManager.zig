@@ -17,7 +17,7 @@ share_dir: std.fs.Dir,
 own_tmp_dir: std.fs.Dir,
 
 pub fn init(options: Options) !PackageManager {
-    const allocator = options.allocator;
+    const allocator = options.gpa;
 
     const cwd = std.fs.cwd();
     var prefix_dir = try cwd.makeOpenPath(options.prefix, .{});
@@ -54,7 +54,7 @@ pub fn init(options: Options) !PackageManager {
 }
 
 pub const Options = struct {
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     http_client: ?*std.http.Client = null,
     packages: *const Packages,
     installed_packages: *InstalledPackages,
@@ -106,7 +106,7 @@ pub fn installMany(pm: *PackageManager, package_names: []const []const u8) !void
     }
 
     var downloads = try DownloadAndExtractJobs.init(.{
-        .allocator = pm.gpa,
+        .gpa = pm.gpa,
         .dir = pm.own_tmp_dir,
         .packages = packages_to_install.values(),
     });
@@ -242,7 +242,7 @@ fn downloadAndExtractPackage(
 
     try downloaded_file.seekTo(0);
     try fs.extract(.{
-        .allocator = pm.gpa,
+        .gpa = pm.gpa,
         .node = extract_progress,
         .input_name = downloaded_path,
         .input_file = downloaded_file,
@@ -440,7 +440,7 @@ fn updatePackages(pm: *PackageManager, package_names: []const []const u8, option
     }
 
     var downloads = try DownloadAndExtractJobs.init(.{
-        .allocator = pm.gpa,
+        .gpa = pm.gpa,
         .dir = pm.own_tmp_dir,
         .packages = packages_to_install.values(),
     });
@@ -487,12 +487,12 @@ const DownloadAndExtractJobs = struct {
     jobs: std.ArrayList(DownloadAndExtractJob),
 
     fn init(options: struct {
-        allocator: std.mem.Allocator,
+        gpa: std.mem.Allocator,
         dir: std.fs.Dir,
         packages: []const Package.Specific,
     }) !DownloadAndExtractJobs {
         var res = DownloadAndExtractJobs{
-            .jobs = std.ArrayList(DownloadAndExtractJob).init(options.allocator),
+            .jobs = std.ArrayList(DownloadAndExtractJob).init(options.gpa),
         };
         errdefer res.deinit();
 

@@ -6,9 +6,9 @@ pub fn deinit(dynamic: Dynamic) void {
     dynamic.arena.deinit();
 }
 
-pub fn parse(allocator: std.mem.Allocator, string: []const u8, opt: ParseOptions) !Dynamic {
+pub fn parse(gpa: std.mem.Allocator, string: []const u8, opt: ParseOptions) !Dynamic {
     var res = Dynamic{
-        .arena = std.heap.ArenaAllocator.init(allocator),
+        .arena = std.heap.ArenaAllocator.init(gpa),
         .root = .{ .properties = .{} },
         .sections = .{},
     };
@@ -86,11 +86,11 @@ pub const ParseOptions = struct {
     allocate: Allocate = Allocate.all,
 };
 
-fn parseAndWrite(allocator: std.mem.Allocator, string: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(allocator);
+fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
+    var out = std.ArrayList(u8).init(gpa);
     defer out.deinit();
 
-    var dynamic = try parse(allocator, string, .{ .allocate = Allocate.none });
+    var dynamic = try parse(gpa, string, .{ .allocate = Allocate.none });
     defer dynamic.deinit();
 
     try dynamic.write(out.writer());

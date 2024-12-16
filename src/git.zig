@@ -1,7 +1,7 @@
-pub fn commitFile(allocator: std.mem.Allocator, dir: std.fs.Dir, file: []const u8, msg: []const u8) !void {
+pub fn commitFile(gpa: std.mem.Allocator, dir: std.fs.Dir, file: []const u8, msg: []const u8) !void {
     var child = std.process.Child.init(
         &.{ "git", "commit", "-i", file, "-m", msg },
-        allocator,
+        gpa,
     );
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Pipe;
@@ -14,28 +14,28 @@ pub fn commitFile(allocator: std.mem.Allocator, dir: std.fs.Dir, file: []const u
 
 /// Create a commit message based on what `Package.update` did. Depending on what changed between
 /// the old and new package, the commit message will differ.
-pub fn createCommitMessage(allocator: std.mem.Allocator, package: Package.Named, m_old_package: ?Package) ![]u8 {
+pub fn createCommitMessage(gpa: std.mem.Allocator, package: Package.Named, m_old_package: ?Package) ![]u8 {
     const old_package = m_old_package orelse {
-        return std.fmt.allocPrint(allocator, "{s}: Add {s}", .{
+        return std.fmt.allocPrint(gpa, "{s}: Add {s}", .{
             package.name,
             package.package.info.version,
         });
     };
     if (!std.mem.eql(u8, package.package.info.version, old_package.info.version)) {
-        return std.fmt.allocPrint(allocator, "{s}: Update {s}", .{
+        return std.fmt.allocPrint(gpa, "{s}: Update {s}", .{
             package.name,
             package.package.info.version,
         });
     }
     if (!std.mem.eql(u8, package.package.linux_x86_64.hash, old_package.linux_x86_64.hash))
-        return std.fmt.allocPrint(allocator, "{s}: Update hash", .{package.name});
+        return std.fmt.allocPrint(gpa, "{s}: Update hash", .{package.name});
     if (!std.mem.eql(u8, package.package.linux_x86_64.url, old_package.linux_x86_64.url))
-        return std.fmt.allocPrint(allocator, "{s}: Update url", .{package.name});
+        return std.fmt.allocPrint(gpa, "{s}: Update url", .{package.name});
     if (!std.mem.eql(u8, package.package.info.description, old_package.info.description))
-        return std.fmt.allocPrint(allocator, "{s}: Update description", .{package.name});
+        return std.fmt.allocPrint(gpa, "{s}: Update description", .{package.name});
 
     // TODO: Better message
-    return std.fmt.allocPrint(allocator, "{s}: Update something", .{package.name});
+    return std.fmt.allocPrint(gpa, "{s}: Update something", .{package.name});
 }
 
 fn expectCreateCommitMessage(expected: []const u8, package: Package.Named, m_old_package: ?Package) !void {

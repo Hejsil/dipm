@@ -4,8 +4,8 @@ packages: std.StringArrayHashMapUnmanaged(InstalledPackage),
 file: ?std.fs.File,
 
 pub fn open(options: struct {
-    allocator: std.mem.Allocator,
-    tmp_allocator: ?std.mem.Allocator = null,
+    gpa: std.mem.Allocator,
+    tmp_gpa: ?std.mem.Allocator = null,
     prefix: []const u8,
 }) !InstalledPackages {
     const cwd = std.fs.cwd();
@@ -19,8 +19,8 @@ pub fn open(options: struct {
     errdefer file.close();
 
     return parseFromFile(.{
-        .allocator = options.allocator,
-        .tmp_allocator = options.tmp_allocator,
+        .gpa = options.gpa,
+        .tmp_gpa = options.tmp_gpa,
         .file = file,
     });
 }
@@ -34,17 +34,17 @@ pub fn deinit(packages: *InstalledPackages) void {
 }
 
 pub fn parseFromFile(options: struct {
-    allocator: std.mem.Allocator,
-    tmp_allocator: ?std.mem.Allocator = null,
+    gpa: std.mem.Allocator,
+    tmp_gpa: ?std.mem.Allocator = null,
     file: std.fs.File,
 }) !InstalledPackages {
-    const tmp_allocator = options.tmp_allocator orelse options.allocator;
-    const data_str = try options.file.readToEndAlloc(tmp_allocator, std.math.maxInt(usize));
-    defer tmp_allocator.free(data_str);
+    const tmp_gpa = options.tmp_gpa orelse options.gpa;
+    const data_str = try options.file.readToEndAlloc(tmp_gpa, std.math.maxInt(usize));
+    defer tmp_gpa.free(data_str);
 
     var res = try parse(.{
-        .allocator = options.allocator,
-        .tmp_allocator = options.tmp_allocator,
+        .gpa = options.gpa,
+        .tmp_gpa = options.tmp_gpa,
         .string = data_str,
     });
     errdefer res.deinit();
@@ -54,21 +54,20 @@ pub fn parseFromFile(options: struct {
 }
 
 pub fn parse(options: struct {
-    allocator: std.mem.Allocator,
-    tmp_allocator: ?std.mem.Allocator = null,
+    gpa: std.mem.Allocator,
+    tmp_gpa: ?std.mem.Allocator = null,
     string: []const u8,
 }) !InstalledPackages {
     // TODO: This is quite an inefficient implementation. It first parsers a dynamic ini and then
     //       extracts the fields. Instead, the parsing needs to be done manually, or a ini parser
     //       that can parse into T is needed.
-
-    const tmp_allocator = options.tmp_allocator orelse options.allocator;
-    const dynamic = try ini.Dynamic.parse(tmp_allocator, options.string, .{
+    const tmp_gpa = options.tmp_gpa orelse options.gpa;
+    const dynamic = try ini.Dynamic.parse(tmp_gpa, options.string, .{
         .allocate = ini.Dynamic.Allocate.none,
     });
     defer dynamic.deinit();
 
-    var arena_state = std.heap.ArenaAllocator.init(options.allocator);
+    var arena_state = std.heap.ArenaAllocator.init(options.gpa);
     errdefer arena_state.deinit();
     const arena = arena_state.allocator();
 
@@ -123,8 +122,8 @@ pub fn writeTo(packages: InstalledPackages, writer: anytype) !void {
 
 fn expectCanonical(string: []const u8) !void {
     var packages = try parse(.{
-        .allocator = std.testing.allocator,
-        .tmp_allocator = std.testing.allocator,
+        .gpa = std.testing.allocator,
+        .tmp_gpa = std.testing.allocator,
         .string = string,
     });
     defer packages.deinit();

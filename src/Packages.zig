@@ -1,15 +1,15 @@
 arena: std.heap.ArenaAllocator,
 packages: std.StringArrayHashMapUnmanaged(Package),
 
-pub fn init(allocator: std.mem.Allocator) Packages {
+pub fn init(gpa: std.mem.Allocator) Packages {
     return .{
-        .arena = std.heap.ArenaAllocator.init(allocator),
+        .arena = std.heap.ArenaAllocator.init(gpa),
         .packages = .{},
     };
 }
 
 const DownloadOptions = struct {
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
 
     http_client: *std.http.Client,
 
@@ -35,7 +35,7 @@ const DownloadOptions = struct {
 };
 
 pub fn download(options: DownloadOptions) !Packages {
-    var packages = Packages.init(options.allocator);
+    var packages = Packages.init(options.gpa);
     errdefer packages.deinit();
 
     const cwd = std.fs.cwd();
@@ -72,10 +72,10 @@ pub fn download(options: DownloadOptions) !Packages {
         try pkgs_file.seekTo(0);
     }
 
-    const string = try pkgs_file.readToEndAlloc(options.allocator, std.math.maxInt(usize));
-    defer options.allocator.free(string);
+    const string = try pkgs_file.readToEndAlloc(options.gpa, std.math.maxInt(usize));
+    defer options.gpa.free(string);
 
-    try packages.parseInto(options.allocator, string);
+    try packages.parseInto(options.gpa, string);
     return packages;
 }
 
@@ -86,32 +86,32 @@ pub fn deinit(packages: *Packages) void {
 }
 
 pub fn parseFromPath(
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     dir: std.fs.Dir,
     sub_path: []const u8,
 ) !Packages {
     const file = try dir.openFile(sub_path, .{});
     defer file.close();
 
-    return parseFile(allocator, file);
+    return parseFile(gpa, file);
 }
 
-pub fn parseFile(allocator: std.mem.Allocator, file: std.fs.File) !Packages {
-    const string = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-    defer allocator.free(string);
+pub fn parseFile(gpa: std.mem.Allocator, file: std.fs.File) !Packages {
+    const string = try file.readToEndAlloc(gpa, std.math.maxInt(usize));
+    defer gpa.free(string);
 
-    return parse(allocator, string);
+    return parse(gpa, string);
 }
 
-pub fn parse(allocator: std.mem.Allocator, string: []const u8) !Packages {
-    var res = Packages.init(allocator);
+pub fn parse(gpa: std.mem.Allocator, string: []const u8) !Packages {
+    var res = Packages.init(gpa);
     errdefer res.deinit();
 
-    try res.parseInto(allocator, string);
+    try res.parseInto(gpa, string);
     return res;
 }
 
-pub fn parseInto(packages: *Packages, tmp_allocator: std.mem.Allocator, string: []const u8) !void {
+pub fn parseInto(packages: *Packages, tmp_gpa: std.mem.Allocator, string: []const u8) !void {
     const gpa = packages.arena.child_allocator;
     const arena = packages.arena.allocator();
 
@@ -119,22 +119,22 @@ pub fn parseInto(packages: *Packages, tmp_allocator: std.mem.Allocator, string: 
     //       extracts the fields. Instead, the parsing needs to be done manually, or a ini parser
     //       that can parse into T is needed.
 
-    const dynamic = try ini.Dynamic.parse(tmp_allocator, string, .{
+    const dynamic = try ini.Dynamic.parse(tmp_gpa, string, .{
         .allocate = ini.Dynamic.Allocate.none,
     });
     defer dynamic.deinit();
 
     var package_names = std.StringArrayHashMapUnmanaged(void){};
-    defer package_names.deinit(tmp_allocator);
+    defer package_names.deinit(tmp_gpa);
 
-    try package_names.ensureTotalCapacity(tmp_allocator, dynamic.sections.count());
+    try package_names.ensureTotalCapacity(tmp_gpa, dynamic.sections.count());
     for (dynamic.sections.keys()) |section_name| {
         var name_split = std.mem.splitScalar(u8, section_name, '.');
         const package_name = name_split.first();
         package_names.putAssumeCapacity(package_name, {});
     }
 
-    var tmp_buffer = std.ArrayList(u8).init(tmp_allocator);
+    var tmp_buffer = std.ArrayList(u8).init(tmp_gpa);
     defer tmp_buffer.deinit();
 
     for (package_names.keys()) |package_name_ref| {
@@ -270,11 +270,11 @@ test "parse" {
     );
 }
 
-fn parseAndWrite(allocator: std.mem.Allocator, string: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(allocator);
+fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
+    var out = std.ArrayList(u8).init(gpa);
     defer out.deinit();
 
-    var packages = try parse(allocator, string);
+    var packages = try parse(gpa, string);
     defer packages.deinit();
 
     try packages.write(out.writer());
@@ -381,7 +381,7 @@ pub fn update(packages: *Packages, package: Package.Named, options: UpdateOption
         const old_package = entry.value_ptr.*;
         entry.value_ptr.linux_x86_64.bin = try updateInstall(.{
             .arena = packages.arena.allocator(),
-            .tmp_allocator = packages.arena.child_allocator,
+            .tmp_gpa = packages.arena.child_allocator,
             .old_version = entry.value_ptr.*.info.version,
             .old_installs = entry.value_ptr.*.linux_x86_64.bin,
             .new_version = package.package.info.version,
@@ -389,7 +389,7 @@ pub fn update(packages: *Packages, package: Package.Named, options: UpdateOption
         });
         entry.value_ptr.linux_x86_64.lib = try updateInstall(.{
             .arena = packages.arena.allocator(),
-            .tmp_allocator = packages.arena.child_allocator,
+            .tmp_gpa = packages.arena.child_allocator,
             .old_version = entry.value_ptr.*.info.version,
             .old_installs = entry.value_ptr.*.linux_x86_64.lib,
             .new_version = package.package.info.version,
@@ -397,7 +397,7 @@ pub fn update(packages: *Packages, package: Package.Named, options: UpdateOption
         });
         entry.value_ptr.linux_x86_64.share = try updateInstall(.{
             .arena = packages.arena.allocator(),
-            .tmp_allocator = packages.arena.child_allocator,
+            .tmp_gpa = packages.arena.child_allocator,
             .old_version = entry.value_ptr.*.info.version,
             .old_installs = entry.value_ptr.*.linux_x86_64.share,
             .new_version = package.package.info.version,
@@ -420,14 +420,14 @@ pub fn update(packages: *Packages, package: Package.Named, options: UpdateOption
 
 fn updateInstall(options: struct {
     arena: std.mem.Allocator,
-    tmp_allocator: std.mem.Allocator,
+    tmp_gpa: std.mem.Allocator,
 
     old_version: []const u8,
     old_installs: []const []const u8,
     new_version: []const u8,
     new_installs: []const []const u8,
 }) ![]const []const u8 {
-    var tmp_arena_state = std.heap.ArenaAllocator.init(options.tmp_allocator);
+    var tmp_arena_state = std.heap.ArenaAllocator.init(options.tmp_gpa);
     const tmp_arena = tmp_arena_state.allocator();
     defer tmp_arena_state.deinit();
 

@@ -354,9 +354,9 @@ test "Parser tokens" {
     );
 }
 
-fn parseAndWrite(allocator: std.mem.Allocator, string: []const u8) ![]u8 {
+fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
     var parser = Parser.init(string);
-    var out = std.ArrayList(u8).init(allocator);
+    var out = std.ArrayList(u8).init(gpa);
     defer out.deinit();
 
     while (true) {
