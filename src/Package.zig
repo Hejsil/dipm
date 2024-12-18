@@ -50,12 +50,14 @@ pub const Named = struct {
 };
 
 pub fn deinit(package: Package, gpa: std.mem.Allocator) void {
+    heap.freeItems(gpa, package.info.donate);
     heap.freeItems(gpa, package.linux_x86_64.bin);
     heap.freeItems(gpa, package.linux_x86_64.lib);
     heap.freeItems(gpa, package.linux_x86_64.share);
 
     gpa.free(package.info.version);
     gpa.free(package.info.description);
+    gpa.free(package.info.donate);
     gpa.free(package.update.github);
     gpa.free(package.linux_x86_64.url);
     gpa.free(package.linux_x86_64.hash);
@@ -197,6 +199,10 @@ pub fn fromGithub(options: struct {
     /// https://api.github.com/repos/<user>/<repo>/releases/latest
     latest_release_uri: ?[]const u8 = null,
 
+    /// Use this uri to download the FUNDING.yml. If `null` then this uri will be used:
+    /// https://raw.githubusercontent.com/<user>/<repo>/refs/tags/<tag>/.github/FUNDING.yml
+    funding_uri: ?[]const u8 = null,
+
     target: Target,
 }) !Named {
     const tmp_gpa = options.tmp_gpa orelse options.gpa;
@@ -210,13 +216,22 @@ pub fn fromGithub(options: struct {
         .repo = options.repo,
         .repository_uri = options.repository_uri,
     });
-
     const latest_release = try githubDownloadLatestRelease(.{
         .arena = arena,
         .http_client = options.http_client,
         .repo = options.repo,
         .latest_release_uri = options.latest_release_uri,
     });
+    const donate = try githubDownloadSponsorUrls(.{
+        .gpa = options.gpa,
+        .arena = arena,
+        .http_client = options.http_client,
+        .repo = options.repo,
+        .ref = latest_release.tag_name,
+        .funding_uri = options.funding_uri,
+    });
+    errdefer options.gpa.free(donate);
+    errdefer heap.freeItems(options.gpa, donate);
 
     const name = try options.gpa.dupe(u8, options.name orelse options.repo.name);
     errdefer options.gpa.free(name);
@@ -278,10 +293,8 @@ pub fn fromGithub(options: struct {
         .tmp_gpa = tmp_gpa,
         .dir = tmp_dir.dir,
     });
-    errdefer {
-        heap.freeItems(options.gpa, man_pages);
-        options.gpa.free(man_pages);
-    }
+    errdefer options.gpa.free(man_pages);
+    errdefer heap.freeItems(options.gpa, man_pages);
 
     const binaries = try findStaticallyLinkedBinaries(.{
         .gpa = options.gpa,
@@ -289,10 +302,8 @@ pub fn fromGithub(options: struct {
         .arch = options.target.arch,
         .dir = tmp_dir.dir,
     });
-    errdefer {
-        heap.freeItems(options.gpa, binaries);
-        options.gpa.free(binaries);
-    }
+    errdefer options.gpa.free(binaries);
+    errdefer heap.freeItems(options.gpa, binaries);
 
     const hash = std.fmt.bytesToHex(package_download_result.hash, .lower);
     const hash_duped = try options.gpa.dupe(u8, &hash);
@@ -313,6 +324,7 @@ pub fn fromGithub(options: struct {
             .info = .{
                 .version = version,
                 .description = description,
+                .donate = donate,
             },
             .update = .{ .github = github },
             .linux_x86_64 = .{
@@ -327,6 +339,7 @@ pub fn fromGithub(options: struct {
 }
 
 const github_api_uri_prefix = "https://api.github.com/";
+const github_funding_uri_prefix = "https://raw.githubusercontent.com/";
 
 const GithubLatestRelease = struct {
     tag_name: []const u8,
@@ -399,6 +412,223 @@ fn githubDownloadRepository(options: struct {
         .{ .ignore_unknown_fields = true },
     );
     return latest_release_value.value;
+}
+
+fn githubDownloadSponsorUrls(options: struct {
+    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    http_client: *std.http.Client,
+    progress: Progress.Node = .none,
+    repo: GithubRepo,
+    ref: []const u8,
+    funding_uri: ?[]const u8,
+}) ![]const []const u8 {
+    const funding_uri = options.funding_uri orelse try std.fmt.allocPrint(
+        options.arena,
+        "{s}{s}/{s}/refs/tags/{s}/.github/FUNDING.yml",
+        .{ github_funding_uri_prefix, options.repo.user, options.repo.name, options.ref },
+    );
+
+    var funding_yml = std.ArrayList(u8).init(options.arena);
+    const repository_result = try download.download(funding_yml.writer(), .{
+        .client = options.http_client,
+        .uri_str = funding_uri,
+        .progress = options.progress,
+    });
+    if (repository_result.status != .ok)
+        return &.{};
+
+    return fundingYmlToUrls(options.gpa, funding_yml.items);
+}
+
+// Very scuffed but working parser for FUNDING.yml. Didn't really wonna write something proper or
+// pull in a yaml dependency.
+fn fundingYmlToUrls(gpa: std.mem.Allocator, string: []const u8) ![]const []const u8 {
+    var urls = std.ArrayList([]const u8).init(gpa);
+    errdefer urls.deinit();
+    errdefer heap.freeItems(gpa, urls.items);
+
+    const whitespace = "\t\n ";
+    const H = struct {
+        fn ws(str: []const u8) []const u8 {
+            var trimmed = str;
+            while (true) {
+                trimmed = std.mem.trimLeft(u8, trimmed, whitespace);
+                if (trimmed.len == 0 or trimmed[0] != '#')
+                    return trimmed;
+
+                const end = std.mem.indexOfScalar(u8, trimmed, '\n') orelse trimmed.len;
+                trimmed = trimmed[end..];
+            }
+        }
+    };
+
+    const prefixes = std.StaticStringMap([]const u8).initComptime(.{
+        .{ "buy_me_a_coffee", "https://buymeacoffee.com/" },
+        .{ "github", "https://github.com/sponsors/" },
+        .{ "ko_fi", "https://ko-fi.com/" },
+        .{ "patreon", "https://www.patreon.com/" },
+    });
+
+    var str = H.ws(string);
+    while (str.len != 0) {
+        const colon = std.mem.indexOfScalar(u8, str, ':') orelse return error.InvalidFundingYml;
+        const key = std.mem.trimRight(u8, str[0..colon], whitespace);
+        const prefix = prefixes.get(key) orelse "";
+
+        str = H.ws(str[colon + 1 ..]);
+        if (str.len == 0)
+            break;
+
+        switch (str[0]) {
+            '#' => {
+                const nl = std.mem.indexOfScalar(u8, str, '\n') orelse break;
+                str = str[nl + 1 ..];
+            },
+            '-' => while (true) {
+                str = H.ws(str[1..]);
+                const end = std.mem.indexOfScalar(u8, str, '\n') orelse str.len;
+                const value_str = std.mem.trimRight(u8, str[0..end], whitespace);
+                const value = std.mem.trim(u8, value_str, "\"");
+
+                try urls.ensureUnusedCapacity(1);
+                urls.appendAssumeCapacity(try std.fmt.allocPrint(gpa, "{s}{s}", .{ prefix, value }));
+
+                str = H.ws(str[end..]);
+                if (str.len == 0 or str[0] != '-')
+                    break;
+            },
+            '[' => while (true) {
+                str = H.ws(str[1..]);
+
+                const end = std.mem.indexOfAny(u8, str, ",]") orelse return error.InvalidFundingYml;
+                const value_str = std.mem.trimRight(u8, str[0..end], whitespace);
+                const value = std.mem.trim(u8, value_str, "\"");
+
+                try urls.ensureUnusedCapacity(1);
+                urls.appendAssumeCapacity(try std.fmt.allocPrint(gpa, "{s}{s}", .{ prefix, value }));
+
+                const end_char = str[end];
+                str = str[end..];
+                if (end_char == ']') {
+                    str = str[1..];
+                    break;
+                }
+            },
+            else => {
+                const end = std.mem.indexOfScalar(u8, str, '\n') orelse str.len;
+                const value_str = std.mem.trimRight(u8, str[0..end], whitespace);
+                const value = std.mem.trim(u8, value_str, "\"");
+
+                try urls.ensureUnusedCapacity(1);
+                urls.appendAssumeCapacity(try std.fmt.allocPrint(gpa, "{s}{s}", .{ prefix, value }));
+                str = str[end..];
+            },
+        }
+
+        str = H.ws(str);
+    }
+
+    return urls.toOwnedSlice();
+}
+
+fn expectFundingUrls(funding_yml: []const u8, expected: []const []const u8) !void {
+    const actual = try fundingYmlToUrls(std.testing.allocator, funding_yml);
+    defer std.testing.allocator.free(actual);
+    defer heap.freeItems(std.testing.allocator, actual);
+
+    const len = @min(expected.len, actual.len);
+    for (expected[0..len], actual[0..len]) |e, a|
+        try std.testing.expectEqualStrings(e, a);
+    for (expected[len..]) |e|
+        try std.testing.expectEqualStrings("-- Missing string --", e);
+    for (actual[len..]) |a|
+        try std.testing.expectEqualStrings("-- Extra string --", a);
+    try std.testing.expectEqual(expected.len, actual.len);
+}
+
+test fundingYmlToUrls {
+    try expectFundingUrls(
+        \\github: test1
+    ,
+        &.{
+            "https://github.com/sponsors/test1",
+        },
+    );
+    try expectFundingUrls(
+        \\github: test1
+        \\github: test2
+    ,
+        &.{
+            "https://github.com/sponsors/test1",
+            "https://github.com/sponsors/test2",
+        },
+    );
+    try expectFundingUrls(
+        \\github: [test1]
+    ,
+        &.{
+            "https://github.com/sponsors/test1",
+        },
+    );
+    try expectFundingUrls(
+        \\github: [test1]
+        \\github: [test2]
+    ,
+        &.{
+            "https://github.com/sponsors/test1",
+            "https://github.com/sponsors/test2",
+        },
+    );
+    try expectFundingUrls(
+        \\github: [test1, test2, test3]
+    ,
+        &.{
+            "https://github.com/sponsors/test1",
+            "https://github.com/sponsors/test2",
+            "https://github.com/sponsors/test3",
+        },
+    );
+    try expectFundingUrls(
+        \\custom: ["url"]
+    ,
+        &.{
+            "url",
+        },
+    );
+    try expectFundingUrls(
+        \\custom: # comment
+    ,
+        &.{},
+    );
+    try expectFundingUrls(
+        \\patreon: [test]
+        \\buy_me_a_coffee: [test]
+        \\ko_fi: [test]
+    ,
+        &.{
+            "https://www.patreon.com/test",
+            "https://buymeacoffee.com/test",
+            "https://ko-fi.com/test",
+        },
+    );
+    try expectFundingUrls(
+        \\# Funding links
+        \\github:
+        \\  - timvisee
+        \\custom:
+        \\  - "https://timvisee.com/donate"
+        \\patreon: timvisee
+        \\ko_fi: timvisee
+        \\
+    ,
+        &.{
+            "https://github.com/sponsors/timvisee",
+            "https://timvisee.com/donate",
+            "https://www.patreon.com/timvisee",
+            "https://ko-fi.com/timvisee",
+        },
+    );
 }
 
 // Small static binary produced with:
@@ -525,6 +755,19 @@ fn testFromGithub(options: struct {
         , .{ options.tag_name, static_binary_uri }),
     });
 
+    const funding_file_path = try std.fs.path.join(arena, &.{
+        tmp_dir_path,
+        "FUNDING.yml",
+    });
+    try cwd.writeFile(.{
+        .sub_path = funding_file_path,
+        .data = try std.fmt.allocPrint(arena,
+            \\github: {s}
+            \\ko_fi: {s}
+            \\
+        , .{ options.repo.user, options.repo.user }),
+    });
+
     const repository_file_path = try std.fs.path.join(arena, &.{
         tmp_dir_path,
         "repository.json",
@@ -541,6 +784,7 @@ fn testFromGithub(options: struct {
 
     const latest_release_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{latest_release_file_path});
     const repository_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{repository_file_path});
+    const funding_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{funding_file_path});
     const package = try fromGithub(.{
         .gpa = allocator,
         .tmp_gpa = allocator,
@@ -548,6 +792,7 @@ fn testFromGithub(options: struct {
         .repo = options.repo,
         .repository_uri = repository_file_uri,
         .latest_release_uri = latest_release_file_uri,
+        .funding_uri = funding_file_uri,
         .target = options.target,
     });
     defer package.deinit(allocator);
@@ -575,6 +820,8 @@ test fromGithub {
         \\[fzf.info]
         \\version = 0.54.0
         \\description = :cherry_blossom: A command-line fuzzy finder
+        \\donate = https://github.com/sponsors/junegunn
+        \\donate = https://ko-fi.com/junegunn
         \\
         \\[fzf.update]
         \\github = junegunn/fzf
@@ -595,6 +842,8 @@ test fromGithub {
         \\[fontc.info]
         \\version = 0.0.1
         \\description = Where in we pursue oxidizing (context: https://github.com/googlefonts/oxidize) fontmake.
+        \\donate = https://github.com/sponsors/googlefonts
+        \\donate = https://ko-fi.com/googlefonts
         \\
         \\[fontc.update]
         \\github = googlefonts/fontc

@@ -33,6 +33,12 @@ pub fn createCommitMessage(gpa: std.mem.Allocator, package: Package.Named, m_old
         return std.fmt.allocPrint(gpa, "{s}: Update url", .{package.name});
     if (!std.mem.eql(u8, package.package.info.description, old_package.info.description))
         return std.fmt.allocPrint(gpa, "{s}: Update description", .{package.name});
+    if (package.package.info.donate.len != old_package.info.donate.len)
+        return std.fmt.allocPrint(gpa, "{s}: Update donations", .{package.name});
+    for (package.package.info.donate, old_package.info.donate) |new, old| {
+        if (!std.mem.eql(u8, new, old))
+            return std.fmt.allocPrint(gpa, "{s}: Update donations", .{package.name});
+    }
 
     // TODO: Better message
     return std.fmt.allocPrint(gpa, "{s}: Update something", .{package.name});
@@ -168,6 +174,66 @@ test createCommitMessage {
             .info = .{
                 .version = "0.1.0",
                 .description = "Description 2",
+            },
+            .update = .{ .github = "" },
+            .linux_x86_64 = .{
+                .url = "a",
+                .hash = "a",
+            },
+        },
+    );
+    try expectCreateCommitMessage(
+        "dipm: Update donations",
+        .{
+            .name = "dipm",
+            .package = .{
+                .info = .{
+                    .version = "0.1.0",
+                    .description = "Description 1",
+                    .donate = &.{},
+                },
+                .update = .{ .github = "" },
+                .linux_x86_64 = .{
+                    .url = "a",
+                    .hash = "a",
+                },
+            },
+        },
+        .{
+            .info = .{
+                .version = "0.1.0",
+                .description = "Description 1",
+                .donate = &.{"a"},
+            },
+            .update = .{ .github = "" },
+            .linux_x86_64 = .{
+                .url = "a",
+                .hash = "a",
+            },
+        },
+    );
+    try expectCreateCommitMessage(
+        "dipm: Update donations",
+        .{
+            .name = "dipm",
+            .package = .{
+                .info = .{
+                    .version = "0.1.0",
+                    .description = "Description 1",
+                    .donate = &.{"a"},
+                },
+                .update = .{ .github = "" },
+                .linux_x86_64 = .{
+                    .url = "a",
+                    .hash = "a",
+                },
+            },
+        },
+        .{
+            .info = .{
+                .version = "0.1.0",
+                .description = "Description 1",
+                .donate = &.{"b"},
             },
             .update = .{ .github = "" },
             .linux_x86_64 = .{

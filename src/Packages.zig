@@ -405,6 +405,7 @@ pub fn update(packages: *Packages, package: Package.Named, options: UpdateOption
         });
 
         entry.value_ptr.info.version = package.package.info.version;
+        entry.value_ptr.info.donate = package.package.info.donate;
         entry.value_ptr.linux_x86_64.url = package.package.linux_x86_64.url;
         entry.value_ptr.linux_x86_64.hash = package.package.linux_x86_64.hash;
 
@@ -543,8 +544,6 @@ test update {
         \\[test.info]
         \\version = 0.2.0
         \\description = Test package
-        \\donate = donate-link
-        \\donate = donate-link
         \\
         \\[test.update]
         \\github = test/test
@@ -564,8 +563,6 @@ test update {
     try expectWrite(&packages,
         \\[test.info]
         \\version = 0.2.0
-        \\donate = donate-link
-        \\donate = donate-link
         \\
         \\[test.update]
         \\github = test/test
