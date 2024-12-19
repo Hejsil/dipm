@@ -600,9 +600,9 @@ pub fn setupPrefix(options: struct {
                     package.file.name,
                 }),
                 .hash = package.file.hash,
-                .bin = package.install_bin,
-                .lib = package.install_lib,
-                .share = package.install_share,
+                .install_bin = package.install_bin,
+                .install_lib = package.install_lib,
+                .install_share = package.install_share,
             },
         }, package.name, pkgs_ini_writer);
     }

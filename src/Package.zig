@@ -1,23 +1,23 @@
-info: Info,
-update: Update,
-linux_x86_64: InstallArch,
+info: Info = .{},
+update: Update = .{},
+linux_x86_64: Arch = .{},
 
-const Info = struct {
-    version: []const u8,
+pub const Info = struct {
+    version: []const u8 = "",
     description: []const u8 = "",
     donate: []const []const u8 = &.{},
 };
 
-const Update = struct {
-    github: []const u8,
+pub const Update = struct {
+    github: []const u8 = "",
 };
 
-const InstallArch = struct {
-    url: []const u8,
-    hash: []const u8,
-    bin: []const []const u8 = &.{},
-    lib: []const []const u8 = &.{},
-    share: []const []const u8 = &.{},
+pub const Arch = struct {
+    url: []const u8 = "",
+    hash: []const u8 = "",
+    install_bin: []const []const u8 = &.{},
+    install_lib: []const []const u8 = &.{},
+    install_share: []const []const u8 = &.{},
 };
 
 pub const Install = struct {
@@ -48,7 +48,7 @@ pub const Specific = struct {
     name: []const u8,
     info: Info,
     update: Update,
-    install: InstallArch,
+    install: Arch,
 };
 
 pub fn specific(
@@ -92,11 +92,11 @@ pub fn write(package: Package, name: []const u8, writer: anytype) !void {
     }
 
     try writer.print("[{s}.linux_x86_64]\n", .{name});
-    for (package.linux_x86_64.bin) |install|
+    for (package.linux_x86_64.install_bin) |install|
         try writer.print("install_bin = {s}\n", .{install});
-    for (package.linux_x86_64.lib) |install|
+    for (package.linux_x86_64.install_lib) |install|
         try writer.print("install_lib = {s}\n", .{install});
-    for (package.linux_x86_64.share) |install|
+    for (package.linux_x86_64.install_share) |install|
         try writer.print("install_share = {s}\n", .{install});
 
     try writer.print("url = {s}\n", .{package.linux_x86_64.url});
@@ -289,11 +289,11 @@ pub fn fromGithub(options: struct {
             },
             .update = .{ .github = github },
             .linux_x86_64 = .{
-                .bin = binaries,
-                .lib = &.{},
-                .share = man_pages,
                 .url = try options.arena.dupe(u8, download_url),
                 .hash = try options.arena.dupe(u8, &hash),
+                .install_bin = binaries,
+                .install_lib = &.{},
+                .install_share = man_pages,
             },
         },
     };

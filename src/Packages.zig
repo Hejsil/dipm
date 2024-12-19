@@ -8,6 +8,12 @@ pub fn init(gpa: std.mem.Allocator) Packages {
     };
 }
 
+pub fn deinit(packages: *Packages) void {
+    packages.packages.deinit(packages.arena.child_allocator);
+    packages.arena.deinit();
+    packages.* = undefined;
+}
+
 const DownloadOptions = struct {
     gpa: std.mem.Allocator,
 
@@ -75,14 +81,8 @@ pub fn download(options: DownloadOptions) !Packages {
     const string = try pkgs_file.readToEndAlloc(options.gpa, std.math.maxInt(usize));
     defer options.gpa.free(string);
 
-    try packages.parseInto(options.gpa, string);
+    try packages.parseInto(string);
     return packages;
-}
-
-pub fn deinit(packages: *Packages) void {
-    packages.packages.deinit(packages.arena.child_allocator);
-    packages.arena.deinit();
-    packages.* = undefined;
 }
 
 pub fn parseFromPath(
@@ -107,93 +107,97 @@ pub fn parse(gpa: std.mem.Allocator, string: []const u8) !Packages {
     var res = Packages.init(gpa);
     errdefer res.deinit();
 
-    try res.parseInto(gpa, string);
+    try res.parseInto(string);
     return res;
 }
 
-pub fn parseInto(packages: *Packages, tmp_gpa: std.mem.Allocator, string: []const u8) !void {
+pub fn parseInto(packages: *Packages, string: []const u8) !void {
     const gpa = packages.arena.child_allocator;
     const arena = packages.arena.allocator();
 
-    // TODO: This is quite an inefficient implementation. It first parsers a dynamic ini and then
-    //       extracts the fields. Instead, the parsing needs to be done manually, or a ini parser
-    //       that can parse into T is needed.
+    var parser = ini.Parser.init(string);
+    var parsed = parser.next();
 
-    const dynamic = try ini.Dynamic.parse(tmp_gpa, string, .{
-        .allocate = ini.Dynamic.Allocate.none,
-    });
-    defer dynamic.deinit();
+    // Skip to the first section. If we hit a root level property it is an error.
+    while (true) : (parsed = parser.next()) switch (parsed.kind) {
+        .end => return,
+        .comment => {},
+        .section => break,
+        .property, .invalid => return error.InvalidPackagesIni,
+    };
 
-    var package_names = std.StringArrayHashMapUnmanaged(void){};
-    defer package_names.deinit(tmp_gpa);
+    const PackageField = std.meta.FieldEnum(Package);
+    const InfoField = std.meta.FieldEnum(Package.Info);
+    const UpdateField = std.meta.FieldEnum(Package.Update);
+    const ArchField = std.meta.FieldEnum(Package.Arch);
 
-    try package_names.ensureTotalCapacity(tmp_gpa, dynamic.sections.count());
-    for (dynamic.sections.keys()) |section_name| {
-        var name_split = std.mem.splitScalar(u8, section_name, '.');
-        const package_name = name_split.first();
-        package_names.putAssumeCapacity(package_name, {});
-    }
+    // Keep lists for all fields that can have multiple entries. When switching to parsing a new
+    // package, put all the lists into the package and then switch.
+    var donate = std.ArrayList([]const u8).init(arena);
+    var install_bin = std.ArrayList([]const u8).init(arena);
+    var install_lib = std.ArrayList([]const u8).init(arena);
+    var install_share = std.ArrayList([]const u8).init(arena);
 
-    var tmp_buffer = std.ArrayList(u8).init(tmp_gpa);
-    defer tmp_buffer.deinit();
+    // The first `parsed` will be a `section`, so `package` will be initialized in the first
+    // iteration of this loop.
+    var tmp_package: Package = .{};
+    var package: *Package = &tmp_package;
+    var package_field: PackageField = undefined;
+    while (true) : (parsed = parser.next()) switch (parsed.kind) {
+        .comment => {},
+        .invalid => return error.InvalidPackagesIni,
+        .section => {
+            package.info.donate = try donate.toOwnedSlice();
+            package.linux_x86_64.install_bin = try install_bin.toOwnedSlice();
+            package.linux_x86_64.install_lib = try install_lib.toOwnedSlice();
+            package.linux_x86_64.install_share = try install_share.toOwnedSlice();
 
-    for (package_names.keys()) |package_name_ref| {
-        const package_name = try arena.dupe(u8, package_name_ref);
+            const section = parsed.section(string).?;
+            var it = std.mem.splitScalar(u8, section.name, '.');
+            const package_name_str = it.first();
+            const package_field_str = it.rest();
 
-        tmp_buffer.shrinkRetainingCapacity(0);
-        try tmp_buffer.writer().print("{s}.info", .{package_name});
-        const info_section = dynamic.sections.get(tmp_buffer.items) orelse return error.NoInfoSectionFound;
-        const info_version = info_section.get("version", .{}) orelse return error.NoInfoVersionFound;
-        const info_description = info_section.get("description", .{}) orelse "";
+            const entry = try packages.packages.getOrPutValue(gpa, package_name_str, .{});
+            if (!entry.found_existing)
+                entry.key_ptr.* = try arena.dupe(u8, package_name_str);
 
-        var info_donate = std.ArrayListUnmanaged([]const u8){};
-        for (info_section.properties.items) |property| {
-            if (std.mem.eql(u8, property.name, "donate"))
-                try info_donate.append(arena, try arena.dupe(u8, property.value));
-        }
+            package = entry.value_ptr;
+            package_field = try stringToEnum(PackageField, package_field_str);
 
-        tmp_buffer.shrinkRetainingCapacity(0);
-        try tmp_buffer.writer().print("{s}.update", .{package_name});
-        const update_github = blk: {
-            const update_section = dynamic.sections.get(tmp_buffer.items) orelse break :blk "";
-            break :blk update_section.get("github", .{}) orelse "";
-        };
-
-        tmp_buffer.shrinkRetainingCapacity(0);
-        try tmp_buffer.writer().print("{s}.linux_x86_64", .{package_name});
-        const linux_x86_64_section = dynamic.sections.get(tmp_buffer.items) orelse return error.NoLinuxAmd64SectionFound;
-        const linux_x86_64_url = linux_x86_64_section.get("url", .{}) orelse return error.NoLinuxAmd64UrlFound;
-        const linux_x86_64_hash = linux_x86_64_section.get("hash", .{}) orelse return error.NoLinuxAmd64HashFound;
-
-        var linux_x86_64_install_bin = std.ArrayListUnmanaged([]const u8){};
-        var linux_x86_64_install_lib = std.ArrayListUnmanaged([]const u8){};
-        var linux_x86_64_install_share = std.ArrayListUnmanaged([]const u8){};
-
-        for (linux_x86_64_section.properties.items) |property| {
-            if (std.mem.eql(u8, property.name, "install_bin"))
-                try linux_x86_64_install_bin.append(arena, try arena.dupe(u8, property.value));
-            if (std.mem.eql(u8, property.name, "install_lib"))
-                try linux_x86_64_install_lib.append(arena, try arena.dupe(u8, property.value));
-            if (std.mem.eql(u8, property.name, "install_share"))
-                try linux_x86_64_install_share.append(arena, try arena.dupe(u8, property.value));
-        }
-
-        try packages.packages.putNoClobber(gpa, package_name, .{
-            .info = .{
-                .version = try arena.dupe(u8, info_version),
-                .description = try arena.dupe(u8, info_description),
-                .donate = try info_donate.toOwnedSlice(arena),
+            try donate.appendSlice(package.info.donate);
+            try install_bin.appendSlice(package.linux_x86_64.install_bin);
+            try install_lib.appendSlice(package.linux_x86_64.install_lib);
+            try install_share.appendSlice(package.linux_x86_64.install_share);
+        },
+        .property => switch (package_field) {
+            .info => switch (try stringToEnum(InfoField, parsed.property(string).?.name)) {
+                .version => package.info.version = try arena.dupe(u8, parsed.property(string).?.value),
+                .description => package.info.description = try arena.dupe(u8, parsed.property(string).?.value),
+                .donate => try donate.append(try arena.dupe(u8, parsed.property(string).?.value)),
             },
-            .update = .{ .github = try arena.dupe(u8, update_github) },
-            .linux_x86_64 = .{
-                .url = try arena.dupe(u8, linux_x86_64_url),
-                .hash = try arena.dupe(u8, linux_x86_64_hash),
-                .bin = try linux_x86_64_install_bin.toOwnedSlice(arena),
-                .lib = try linux_x86_64_install_lib.toOwnedSlice(arena),
-                .share = try linux_x86_64_install_share.toOwnedSlice(arena),
+            .update => switch (try stringToEnum(UpdateField, parsed.property(string).?.name)) {
+                .github => package.update.github = try arena.dupe(u8, parsed.property(string).?.value),
             },
-        });
-    }
+            .linux_x86_64 => switch (try stringToEnum(ArchField, parsed.property(string).?.name)) {
+                .url => package.linux_x86_64.url = try arena.dupe(u8, parsed.property(string).?.value),
+                .hash => package.linux_x86_64.hash = try arena.dupe(u8, parsed.property(string).?.value),
+                .install_bin => try install_bin.append(try arena.dupe(u8, parsed.property(string).?.value)),
+                .install_lib => try install_lib.append(try arena.dupe(u8, parsed.property(string).?.value)),
+                .install_share => try install_share.append(try arena.dupe(u8, parsed.property(string).?.value)),
+            },
+        },
+        .end => {
+            package.info.donate = try donate.toOwnedSlice();
+            package.linux_x86_64.install_bin = try install_bin.toOwnedSlice();
+            package.linux_x86_64.install_lib = try install_lib.toOwnedSlice();
+            package.linux_x86_64.install_share = try install_share.toOwnedSlice();
+            return;
+        },
+    };
+}
+
+fn stringToEnum(comptime T: type, str: []const u8) !T {
+    return std.meta.stringToEnum(T, str) orelse error.InvalidPackagesIni;
 }
 
 pub fn writeToFileOverride(packages: Packages, file: std.fs.File) !void {
@@ -379,29 +383,29 @@ pub fn update(packages: *Packages, package: Package.Named, options: UpdateOption
     const entry = try packages.packages.getOrPut(gpa, package.name);
     if (entry.found_existing) {
         const old_package = entry.value_ptr.*;
-        entry.value_ptr.linux_x86_64.bin = try updateInstall(.{
+        entry.value_ptr.linux_x86_64.install_bin = try updateInstall(.{
             .arena = packages.arena.allocator(),
             .tmp_gpa = packages.arena.child_allocator,
             .old_version = entry.value_ptr.*.info.version,
-            .old_installs = entry.value_ptr.*.linux_x86_64.bin,
+            .old_installs = entry.value_ptr.*.linux_x86_64.install_bin,
             .new_version = package.package.info.version,
-            .new_installs = package.package.linux_x86_64.bin,
+            .new_installs = package.package.linux_x86_64.install_bin,
         });
-        entry.value_ptr.linux_x86_64.lib = try updateInstall(.{
+        entry.value_ptr.linux_x86_64.install_lib = try updateInstall(.{
             .arena = packages.arena.allocator(),
             .tmp_gpa = packages.arena.child_allocator,
             .old_version = entry.value_ptr.*.info.version,
-            .old_installs = entry.value_ptr.*.linux_x86_64.lib,
+            .old_installs = entry.value_ptr.*.linux_x86_64.install_lib,
             .new_version = package.package.info.version,
-            .new_installs = package.package.linux_x86_64.lib,
+            .new_installs = package.package.linux_x86_64.install_lib,
         });
-        entry.value_ptr.linux_x86_64.share = try updateInstall(.{
+        entry.value_ptr.linux_x86_64.install_share = try updateInstall(.{
             .arena = packages.arena.allocator(),
             .tmp_gpa = packages.arena.child_allocator,
             .old_version = entry.value_ptr.*.info.version,
-            .old_installs = entry.value_ptr.*.linux_x86_64.share,
+            .old_installs = entry.value_ptr.*.linux_x86_64.install_share,
             .new_version = package.package.info.version,
-            .new_installs = package.package.linux_x86_64.share,
+            .new_installs = package.package.linux_x86_64.install_share,
         });
 
         entry.value_ptr.info.version = package.package.info.version;
@@ -492,14 +496,14 @@ test update {
             },
             .update = .{ .github = "test/test" },
             .linux_x86_64 = .{
-                .bin = &.{
+                .hash = "test_hash1",
+                .url = "test_url1",
+                .install_bin = &.{
                     "test-0.1.0/test",
                     "test2:test-0.1.0",
                 },
-                .lib = &.{},
-                .share = &.{},
-                .hash = "test_hash1",
-                .url = "test_url1",
+                .install_lib = &.{},
+                .install_share = &.{},
             },
         },
     }, .{}) == null);
@@ -527,15 +531,15 @@ test update {
             .info = .{ .version = "0.2.0" },
             .update = .{ .github = "test/test" },
             .linux_x86_64 = .{
-                .bin = &.{
+                .hash = "test_hash2",
+                .url = "test_url2",
+                .install_bin = &.{
                     "test-0.2.0/test",
                     "test-0.2.0",
                     "test3",
                 },
-                .lib = &.{},
-                .share = &.{},
-                .hash = "test_hash2",
-                .url = "test_url2",
+                .install_lib = &.{},
+                .install_share = &.{},
             },
         },
     };

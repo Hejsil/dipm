@@ -29,6 +29,7 @@ pub fn deinit(packages: *InstalledPackages) void {
     if (packages.file) |f|
         f.close();
 
+    packages.packages.deinit(packages.arena.child_allocator);
     packages.arena.deinit();
     packages.* = undefined;
 }
@@ -42,61 +43,79 @@ pub fn parseFromFile(options: struct {
     const data_str = try options.file.readToEndAlloc(tmp_gpa, std.math.maxInt(usize));
     defer tmp_gpa.free(data_str);
 
-    var res = try parse(.{
-        .gpa = options.gpa,
-        .tmp_gpa = options.tmp_gpa,
-        .string = data_str,
-    });
+    var res = try parse(options.gpa, data_str);
     errdefer res.deinit();
 
     res.file = options.file;
     return res;
 }
 
-pub fn parse(options: struct {
-    gpa: std.mem.Allocator,
-    tmp_gpa: ?std.mem.Allocator = null,
-    string: []const u8,
-}) !InstalledPackages {
-    // TODO: This is quite an inefficient implementation. It first parsers a dynamic ini and then
-    //       extracts the fields. Instead, the parsing needs to be done manually, or a ini parser
-    //       that can parse into T is needed.
-    const tmp_gpa = options.tmp_gpa orelse options.gpa;
-    const dynamic = try ini.Dynamic.parse(tmp_gpa, options.string, .{
-        .allocate = ini.Dynamic.Allocate.none,
-    });
-    defer dynamic.deinit();
-
-    var arena_state = std.heap.ArenaAllocator.init(options.gpa);
+pub fn parse(gpa: std.mem.Allocator, string: []const u8) !InstalledPackages {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
     errdefer arena_state.deinit();
     const arena = arena_state.allocator();
 
     var packages = std.StringArrayHashMapUnmanaged(InstalledPackage){};
-    for (dynamic.sections.keys(), dynamic.sections.values()) |package_name, package_section| {
-        const version = package_section.get("version", .{}) orelse return error.NoVersionFound;
+    errdefer packages.deinit(gpa);
 
-        var locations = std.ArrayListUnmanaged([]const u8){};
-        for (package_section.properties.items) |property| {
-            if (std.mem.eql(u8, property.name, "location"))
-                try locations.append(arena, try arena.dupe(u8, property.value));
-        }
+    var parser = ini.Parser.init(string);
+    var parsed = parser.next();
 
-        const entry = try packages.getOrPut(arena, package_name);
-        if (entry.found_existing)
-            return error.DuplicatePackage;
+    // Skip to the first section. If we hit a root level property it is an error.
+    while (true) : (parsed = parser.next()) switch (parsed.kind) {
+        .comment => {},
+        .section => break,
+        .property, .invalid => return error.InvalidPackagesIni,
+        .end => return .{
+            .arena = arena_state,
+            .packages = packages,
+            .file = null,
+        },
+    };
 
-        entry.key_ptr.* = try arena.dupe(u8, package_name);
-        entry.value_ptr.* = .{
-            .version = try arena.dupe(u8, version),
-            .locations = try locations.toOwnedSlice(arena),
-        };
-    }
+    const PackageField = std.meta.FieldEnum(InstalledPackage);
+
+    // Keep lists for all fields that can have multiple entries. When switching to parsing a new
+    // package, put all the lists into the package and then switch.
+    var location = std.ArrayList([]const u8).init(arena);
+
+    // The first `parsed` will be a `section`, so `package` will be initialized in the first
+    // iteration of this loop.
+    var tmp_package: InstalledPackage = .{};
+    var package: *InstalledPackage = &tmp_package;
+    while (true) : (parsed = parser.next()) switch (parsed.kind) {
+        .comment => {},
+        .invalid => return error.InvalidPackagesIni,
+        .section => {
+            package.location = try location.toOwnedSlice();
+
+            const section = parsed.section(string).?;
+            const entry = try packages.getOrPutValue(gpa, section.name, .{});
+            if (!entry.found_existing)
+                entry.key_ptr.* = try arena.dupe(u8, section.name);
+
+            package = entry.value_ptr;
+            try location.appendSlice(package.location);
+        },
+        .property => switch (try stringToEnum(PackageField, parsed.property(string).?.name)) {
+            .version => package.version = try arena.dupe(u8, parsed.property(string).?.value),
+            .location => try location.append(try arena.dupe(u8, parsed.property(string).?.value)),
+        },
+        .end => {
+            package.location = try location.toOwnedSlice();
+            break;
+        },
+    };
 
     return .{
         .arena = arena_state,
         .packages = packages,
         .file = null,
     };
+}
+
+fn stringToEnum(comptime T: type, str: []const u8) !T {
+    return std.meta.stringToEnum(T, str) orelse error.InvalidPackagesIni;
 }
 
 pub fn flush(packages: InstalledPackages) !void {
@@ -121,11 +140,7 @@ pub fn writeTo(packages: InstalledPackages, writer: anytype) !void {
 }
 
 fn expectCanonical(string: []const u8) !void {
-    var packages = try parse(.{
-        .gpa = std.testing.allocator,
-        .tmp_gpa = std.testing.allocator,
-        .string = string,
-    });
+    var packages = try parse(std.testing.allocator, string);
     defer packages.deinit();
 
     var rendered = std.ArrayList(u8).init(std.testing.allocator);

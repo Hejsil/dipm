@@ -255,40 +255,41 @@ fn installExtractedPackage(
     from_dir: std.fs.Dir,
     package: Package.Specific,
 ) !void {
-    const installed_arena = pm.installed_packages.arena.allocator();
-    var locations = std.ArrayList([]const u8).init(installed_arena);
+    const gpa = pm.installed_packages.arena.child_allocator;
+    const arena = pm.installed_packages.arena.allocator();
+    var locations = std.ArrayList([]const u8).init(arena);
     defer locations.deinit();
 
-    for (package.install.bin) |install_field| {
+    for (package.install.install_bin) |install_field| {
         const the_install = Package.Install.fromString(install_field);
         try installBin(the_install, from_dir, pm.bin_dir);
-        try locations.append(try std.fs.path.join(installed_arena, &.{
+        try locations.append(try std.fs.path.join(arena, &.{
             paths.bin_subpath,
             the_install.to,
         }));
     }
-    for (package.install.lib) |install_field| {
+    for (package.install.install_lib) |install_field| {
         const the_install = Package.Install.fromString(install_field);
         try installGeneric(the_install, from_dir, pm.lib_dir);
-        try locations.append(try std.fs.path.join(installed_arena, &.{
+        try locations.append(try std.fs.path.join(arena, &.{
             paths.lib_subpath,
             the_install.to,
         }));
     }
-    for (package.install.share) |install_field| {
+    for (package.install.install_share) |install_field| {
         const the_install = Package.Install.fromString(install_field);
         try installGeneric(the_install, from_dir, pm.share_dir);
-        try locations.append(try std.fs.path.join(installed_arena, &.{
+        try locations.append(try std.fs.path.join(arena, &.{
             paths.share_subpath,
             the_install.to,
         }));
     }
 
     // Caller ensures that package is not installed
-    const installed_key = try installed_arena.dupe(u8, package.name);
-    try pm.installed_packages.packages.putNoClobber(installed_arena, installed_key, .{
-        .version = try installed_arena.dupe(u8, package.info.version),
-        .locations = try locations.toOwnedSlice(),
+    const installed_key = try arena.dupe(u8, package.name);
+    try pm.installed_packages.packages.putNoClobber(gpa, installed_key, .{
+        .version = try arena.dupe(u8, package.info.version),
+        .location = try locations.toOwnedSlice(),
     });
 }
 
@@ -370,7 +371,7 @@ fn packagesToUninstall(
 
         packages_to_uninstall.putAssumeCapacity(package_name, .{
             .version = package.version,
-            .locations = package.locations,
+            .location = package.location,
         });
     }
 
@@ -382,7 +383,7 @@ fn uninstallOneUnchecked(
     package_name: []const u8,
     package: InstalledPackage,
 ) !void {
-    for (package.locations) |location|
+    for (package.location) |location|
         try pm.prefix_dir.deleteTree(location);
 
     _ = pm.installed_packages.packages.orderedRemove(package_name);
