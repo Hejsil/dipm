@@ -407,17 +407,47 @@ fn githubDownloadSponsorUrls(options: struct {
 fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []const u8 {
     var urls = std.ArrayList([]const u8).init(arena);
 
-    const whitespace = "\t\n ";
-    const H = struct {
-        fn ws(str: []const u8) []const u8 {
-            var trimmed = str;
-            while (true) {
-                trimmed = std.mem.trimLeft(u8, trimmed, whitespace);
-                if (trimmed.len == 0 or trimmed[0] != '#')
-                    return trimmed;
+    const Tokenizer = struct {
+        str: []const u8,
 
-                const end = std.mem.indexOfScalar(u8, trimmed, '\n') orelse trimmed.len;
-                trimmed = trimmed[end..];
+        pub fn next(tok: *@This()) []const u8 {
+            tok.str = std.mem.trimLeft(u8, tok.str, "\t ");
+            if (tok.str.len == 0)
+                return tok.str;
+
+            switch (tok.str[0]) {
+                '#' => {
+                    const end = std.mem.indexOfScalar(u8, tok.str, '\n') orelse {
+                        tok.str = tok.str[tok.str.len..];
+                        return tok.str;
+                    };
+
+                    const res = tok.str[end .. end + 1];
+                    tok.str = tok.str[end + 1 ..];
+                    return res;
+                },
+                ',', ':', '\n', '-', '[', ']' => {
+                    const res = tok.str[0..1];
+                    tok.str = tok.str[1..];
+                    return res;
+                },
+                '"' => {
+                    const end = std.mem.indexOfScalarPos(u8, tok.str, 1, '"') orelse {
+                        const res = tok.str[1..];
+                        tok.str = tok.str[tok.str.len..];
+                        return res;
+                    };
+
+                    const res = tok.str[1..end];
+                    tok.str = tok.str[end + 1 ..];
+                    return res;
+                },
+                else => {
+                    const end = std.mem.indexOfAny(u8, tok.str, ",:-[]#\t\n ") orelse tok.str.len;
+                    const res = tok.str[0..end];
+                    tok.str = tok.str[end..];
+                    return res;
+                },
             }
         }
     };
@@ -429,60 +459,64 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
         .{ "patreon", "https://www.patreon.com/" },
     });
 
-    var str = H.ws(string);
-    while (str.len != 0) {
-        const colon = std.mem.indexOfScalar(u8, str, ':') orelse return error.InvalidFundingYml;
-        const key = std.mem.trimRight(u8, str[0..colon], whitespace);
-        const prefix = prefixes.get(key) orelse "";
-
-        str = H.ws(str[colon + 1 ..]);
-        if (str.len == 0)
-            break;
-
-        switch (str[0]) {
-            '#' => {
-                const nl = std.mem.indexOfScalar(u8, str, '\n') orelse break;
-                str = str[nl + 1 ..];
-            },
-            '-' => while (true) {
-                str = H.ws(str[1..]);
-                const end = std.mem.indexOfScalar(u8, str, '\n') orelse str.len;
-                const value_str = std.mem.trimRight(u8, str[0..end], whitespace);
-                const value = std.mem.trim(u8, value_str, "\"");
-
-                try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
-
-                str = H.ws(str[end..]);
-                if (str.len == 0 or str[0] != '-')
-                    break;
-            },
-            '[' => while (true) {
-                str = H.ws(str[1..]);
-
-                const end = std.mem.indexOfAny(u8, str, ",]") orelse return error.InvalidFundingYml;
-                const value_str = std.mem.trimRight(u8, str[0..end], whitespace);
-                const value = std.mem.trim(u8, value_str, "\"");
-
-                try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
-
-                const end_char = str[end];
-                str = str[end..];
-                if (end_char == ']') {
-                    str = str[1..];
-                    break;
-                }
-            },
-            else => {
-                const end = std.mem.indexOfScalar(u8, str, '\n') orelse str.len;
-                const value_str = std.mem.trimRight(u8, str[0..end], whitespace);
-                const value = std.mem.trim(u8, value_str, "\"");
-
-                try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
-                str = str[end..];
-            },
+    var tok = Tokenizer{ .str = string };
+    var curr = tok.next();
+    while (curr.len != 0) {
+        if (curr[0] == '\n') {
+            curr = tok.next();
+            continue;
         }
 
-        str = H.ws(str);
+        const key = curr;
+        const prefix = prefixes.get(key) orelse "";
+
+        curr = tok.next();
+        if (curr.len == 0)
+            break;
+        if (curr[0] != ':')
+            return error.InvalidFundingYml;
+
+        curr = tok.next();
+        if (curr.len == 0)
+            break;
+
+        switch (curr[0]) {
+            '\n' => while (true) {
+                curr = tok.next();
+                if (curr.len == 0)
+                    break;
+                if (curr[0] == '\n')
+                    continue;
+                if (curr[0] != '-')
+                    break;
+
+                curr = tok.next();
+                if (curr.len == 0)
+                    break;
+
+                const value = curr;
+                try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
+            },
+            '[' => while (true) {
+                curr = tok.next();
+                if (curr.len == 0)
+                    break;
+                if (curr[0] == '\n' or curr[0] == ',')
+                    continue;
+                if (curr[0] == ']') {
+                    curr = tok.next();
+                    break;
+                }
+
+                const value = curr;
+                try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
+            },
+            else => {
+                const value = curr;
+                try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
+                curr = tok.next();
+            },
+        }
     }
 
     return urls.toOwnedSlice();
@@ -567,18 +601,49 @@ test fundingYmlToUrls {
     try expectFundingUrls(
         \\# Funding links
         \\github:
-        \\  - timvisee
+        \\  - test
         \\custom:
-        \\  - "https://timvisee.com/donate"
-        \\patreon: timvisee
-        \\ko_fi: timvisee
+        \\  - "https://test.com/donate"
+        \\patreon: test
+        \\ko_fi: test
         \\
     ,
         &.{
-            "https://github.com/sponsors/timvisee",
-            "https://timvisee.com/donate",
-            "https://www.patreon.com/timvisee",
-            "https://ko-fi.com/timvisee",
+            "https://github.com/sponsors/test",
+            "https://test.com/donate",
+            "https://www.patreon.com/test",
+            "https://ko-fi.com/test",
+        },
+    );
+    try expectFundingUrls(
+        \\# These are supported funding model platforms
+        \\
+        \\github: test # Replace with up to 4 GitHub Sponsors-enabled usernames e.g., [user1, user2]
+        \\patreon: # Replace with a single Patreon username
+        \\open_collective: # Replace with a single Open Collective username
+        \\ko_fi: test # Replace with a single Ko-fi username
+        \\tidelift: # Replace with a single Tidelift platform-name/package-name e.g., npm/babel
+        \\community_bridge: # Replace with a single Community Bridge project-name e.g., cloud-foundry
+        \\liberapay: # Replace with a single Liberapay username
+        \\issuehunt: # Replace with a single IssueHunt username
+        \\otechie: # Replace with a single Otechie username
+        \\lfx_crowdfunding: # Replace with a single LFX Crowdfunding project-name e.g., cloud-foundry
+        \\custom: # Replace with up to 4 custom sponsorship URLs e.g., ['link1', 'link2']
+        \\
+    ,
+        &.{
+            "https://github.com/sponsors/test",
+            "https://ko-fi.com/test",
+        },
+    );
+    try expectFundingUrls(
+        \\github: test
+        \\custom: paypal.me/test
+        \\
+    ,
+        &.{
+            "https://github.com/sponsors/test",
+            "paypal.me/test",
         },
     );
 }
