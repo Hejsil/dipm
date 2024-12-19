@@ -702,7 +702,7 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
         defer program.progress.end(progress);
 
         const package = Package.fromUrl(.{
-            .gpa = packages.arena.allocator(),
+            .arena = packages.arena.allocator(),
             .tmp_gpa = program.gpa,
             .http_client = &http_client,
             .url = url.url,

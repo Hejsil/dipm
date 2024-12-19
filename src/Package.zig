@@ -42,29 +42,7 @@ pub const Install = struct {
 pub const Named = struct {
     name: []const u8,
     package: Package,
-
-    pub fn deinit(package: Named, gpa: std.mem.Allocator) void {
-        gpa.free(package.name);
-        package.package.deinit(gpa);
-    }
 };
-
-pub fn deinit(package: Package, gpa: std.mem.Allocator) void {
-    heap.freeItems(gpa, package.info.donate);
-    heap.freeItems(gpa, package.linux_x86_64.bin);
-    heap.freeItems(gpa, package.linux_x86_64.lib);
-    heap.freeItems(gpa, package.linux_x86_64.share);
-
-    gpa.free(package.info.version);
-    gpa.free(package.info.description);
-    gpa.free(package.info.donate);
-    gpa.free(package.update.github);
-    gpa.free(package.linux_x86_64.url);
-    gpa.free(package.linux_x86_64.hash);
-    gpa.free(package.linux_x86_64.bin);
-    gpa.free(package.linux_x86_64.lib);
-    gpa.free(package.linux_x86_64.share);
-}
 
 pub const Specific = struct {
     name: []const u8,
@@ -130,7 +108,7 @@ pub fn write(package: Package, name: []const u8, writer: anytype) !void {
 /// * fromGithub
 pub fn fromUrl(options: struct {
     /// Allocator used for the result
-    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
 
     /// Allocator used for internal allocations. None of the allocations made with this
     /// allocator will be returned.
@@ -153,7 +131,7 @@ pub fn fromUrl(options: struct {
         const repo_user = repo_split.first();
         const repo_name = repo_split.next() orelse "";
         return fromGithub(.{
-            .gpa = options.gpa,
+            .arena = options.arena,
             .tmp_gpa = options.tmp_gpa,
             .http_client = options.http_client,
             .progress = options.progress,
@@ -178,7 +156,7 @@ pub const GithubRepo = struct {
 /// latest release of the repository and look for suitable download links for that release.
 pub fn fromGithub(options: struct {
     /// Allocator used for the result
-    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
 
     /// Allocator used for internal allocations. None of the allocations made with this
     /// allocator will be returned.
@@ -205,43 +183,38 @@ pub fn fromGithub(options: struct {
 
     target: Target,
 }) !Named {
-    const tmp_gpa = options.tmp_gpa orelse options.gpa;
-    var arena_state = std.heap.ArenaAllocator.init(tmp_gpa);
-    const arena = arena_state.allocator();
-    defer arena_state.deinit();
+    const tmp_gpa = options.tmp_gpa orelse options.arena;
+    var tmp_arena_state = std.heap.ArenaAllocator.init(tmp_gpa);
+    const tmp_arena = tmp_arena_state.allocator();
+    defer tmp_arena_state.deinit();
 
     const repository = try githubDownloadRepository(.{
-        .arena = arena,
+        .arena = tmp_arena,
         .http_client = options.http_client,
         .repo = options.repo,
         .repository_uri = options.repository_uri,
     });
     const latest_release = try githubDownloadLatestRelease(.{
-        .arena = arena,
+        .arena = tmp_arena,
         .http_client = options.http_client,
         .repo = options.repo,
         .latest_release_uri = options.latest_release_uri,
     });
     const donate = try githubDownloadSponsorUrls(.{
-        .gpa = options.gpa,
-        .arena = arena,
+        .arena = options.arena,
+        .tmp_arena = tmp_arena,
         .http_client = options.http_client,
         .repo = options.repo,
         .ref = latest_release.tag_name,
         .funding_uri = options.funding_uri,
     });
-    errdefer options.gpa.free(donate);
-    errdefer heap.freeItems(options.gpa, donate);
-
-    const name = try options.gpa.dupe(u8, options.name orelse options.repo.name);
-    errdefer options.gpa.free(name);
-
-    const version = try options.gpa.dupe(u8, versionFromTag(latest_release.tag_name));
-    errdefer options.gpa.free(version);
+    errdefer options.arena.free(donate);
+    errdefer heap.freeItems(options.arena, donate);
 
     const trimmed_description = std.mem.trim(u8, repository.description, " ");
-    const description = try options.gpa.dupe(u8, trimmed_description);
-    errdefer options.gpa.free(description);
+    const description = try options.arena.dupe(u8, trimmed_description);
+    const name = try options.arena.dupe(u8, options.name orelse options.repo.name);
+    const version = try options.arena.dupe(u8, versionFromTag(latest_release.tag_name));
 
     const download_url = try findDownloadUrl(.{
         .target = options.target,
@@ -249,10 +222,10 @@ pub fn fromGithub(options: struct {
             name,
 
             // Pick `sccache-v0.8.1` over `sccache-dist-v0.8.1`
-            try std.fmt.allocPrint(arena, "{s}-{s}", .{ name, version }),
-            try std.fmt.allocPrint(arena, "{s}_{s}", .{ name, version }),
-            try std.fmt.allocPrint(arena, "{s}-{s}", .{ name, latest_release.tag_name }),
-            try std.fmt.allocPrint(arena, "{s}_{s}", .{ name, latest_release.tag_name }),
+            try std.fmt.allocPrint(tmp_arena, "{s}-{s}", .{ name, version }),
+            try std.fmt.allocPrint(tmp_arena, "{s}_{s}", .{ name, version }),
+            try std.fmt.allocPrint(tmp_arena, "{s}-{s}", .{ name, latest_release.tag_name }),
+            try std.fmt.allocPrint(tmp_arena, "{s}_{s}", .{ name, latest_release.tag_name }),
         },
         // This is only save because `assets` only have the field `browser_download_url`
         .urls = @ptrCast(latest_release.assets),
@@ -282,42 +255,30 @@ pub fn fromGithub(options: struct {
 
     try downloaded_file.seekTo(0);
     try fs.extract(.{
-        .gpa = arena,
+        .gpa = tmp_arena,
         .input_name = downloaded_path,
         .input_file = downloaded_file,
         .output_dir = tmp_dir.dir,
     });
 
     const man_pages = try findManPages(.{
-        .gpa = options.gpa,
-        .tmp_gpa = tmp_gpa,
+        .arena = options.arena,
+        .tmp_arena = tmp_arena,
         .dir = tmp_dir.dir,
     });
-    errdefer options.gpa.free(man_pages);
-    errdefer heap.freeItems(options.gpa, man_pages);
 
     const binaries = try findStaticallyLinkedBinaries(.{
-        .gpa = options.gpa,
-        .tmp_gpa = tmp_gpa,
+        .arena = options.arena,
+        .tmp_arena = tmp_arena,
         .arch = options.target.arch,
         .dir = tmp_dir.dir,
     });
-    errdefer options.gpa.free(binaries);
-    errdefer heap.freeItems(options.gpa, binaries);
 
     const hash = std.fmt.bytesToHex(package_download_result.hash, .lower);
-    const hash_duped = try options.gpa.dupe(u8, &hash);
-    errdefer options.gpa.free(hash_duped);
-
-    const download_url_duped = try options.gpa.dupe(u8, download_url);
-    errdefer options.gpa.free(download_url_duped);
-
-    const github = try std.fmt.allocPrint(options.gpa, "{s}/{s}", .{
+    const github = try std.fmt.allocPrint(options.arena, "{s}/{s}", .{
         options.repo.user,
         options.repo.name,
     });
-    errdefer options.gpa.free(github);
-
     return .{
         .name = name,
         .package = .{
@@ -331,8 +292,8 @@ pub fn fromGithub(options: struct {
                 .bin = binaries,
                 .lib = &.{},
                 .share = man_pages,
-                .url = download_url_duped,
-                .hash = hash_duped,
+                .url = try options.arena.dupe(u8, download_url),
+                .hash = try options.arena.dupe(u8, &hash),
             },
         },
     };
@@ -415,8 +376,8 @@ fn githubDownloadRepository(options: struct {
 }
 
 fn githubDownloadSponsorUrls(options: struct {
-    gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
+    tmp_arena: std.mem.Allocator,
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
     repo: GithubRepo,
@@ -424,12 +385,12 @@ fn githubDownloadSponsorUrls(options: struct {
     funding_uri: ?[]const u8,
 }) ![]const []const u8 {
     const funding_uri = options.funding_uri orelse try std.fmt.allocPrint(
-        options.arena,
+        options.tmp_arena,
         "{s}{s}/{s}/refs/tags/{s}/.github/FUNDING.yml",
         .{ github_funding_uri_prefix, options.repo.user, options.repo.name, options.ref },
     );
 
-    var funding_yml = std.ArrayList(u8).init(options.arena);
+    var funding_yml = std.ArrayList(u8).init(options.tmp_arena);
     const repository_result = try download.download(funding_yml.writer(), .{
         .client = options.http_client,
         .uri_str = funding_uri,
@@ -438,15 +399,13 @@ fn githubDownloadSponsorUrls(options: struct {
     if (repository_result.status != .ok)
         return &.{};
 
-    return fundingYmlToUrls(options.gpa, funding_yml.items);
+    return fundingYmlToUrls(options.arena, funding_yml.items);
 }
 
 // Very scuffed but working parser for FUNDING.yml. Didn't really wonna write something proper or
 // pull in a yaml dependency.
-fn fundingYmlToUrls(gpa: std.mem.Allocator, string: []const u8) ![]const []const u8 {
-    var urls = std.ArrayList([]const u8).init(gpa);
-    errdefer urls.deinit();
-    errdefer heap.freeItems(gpa, urls.items);
+fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []const u8 {
+    var urls = std.ArrayList([]const u8).init(arena);
 
     const whitespace = "\t\n ";
     const H = struct {
@@ -491,8 +450,7 @@ fn fundingYmlToUrls(gpa: std.mem.Allocator, string: []const u8) ![]const []const
                 const value_str = std.mem.trimRight(u8, str[0..end], whitespace);
                 const value = std.mem.trim(u8, value_str, "\"");
 
-                try urls.ensureUnusedCapacity(1);
-                urls.appendAssumeCapacity(try std.fmt.allocPrint(gpa, "{s}{s}", .{ prefix, value }));
+                try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
 
                 str = H.ws(str[end..]);
                 if (str.len == 0 or str[0] != '-')
@@ -505,8 +463,7 @@ fn fundingYmlToUrls(gpa: std.mem.Allocator, string: []const u8) ![]const []const
                 const value_str = std.mem.trimRight(u8, str[0..end], whitespace);
                 const value = std.mem.trim(u8, value_str, "\"");
 
-                try urls.ensureUnusedCapacity(1);
-                urls.appendAssumeCapacity(try std.fmt.allocPrint(gpa, "{s}{s}", .{ prefix, value }));
+                try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
 
                 const end_char = str[end];
                 str = str[end..];
@@ -520,8 +477,7 @@ fn fundingYmlToUrls(gpa: std.mem.Allocator, string: []const u8) ![]const []const
                 const value_str = std.mem.trimRight(u8, str[0..end], whitespace);
                 const value = std.mem.trim(u8, value_str, "\"");
 
-                try urls.ensureUnusedCapacity(1);
-                urls.appendAssumeCapacity(try std.fmt.allocPrint(gpa, "{s}{s}", .{ prefix, value }));
+                try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
                 str = str[end..];
             },
         }
@@ -533,17 +489,13 @@ fn fundingYmlToUrls(gpa: std.mem.Allocator, string: []const u8) ![]const []const
 }
 
 fn expectFundingUrls(funding_yml: []const u8, expected: []const []const u8) !void {
-    const actual = try fundingYmlToUrls(std.testing.allocator, funding_yml);
-    defer std.testing.allocator.free(actual);
-    defer heap.freeItems(std.testing.allocator, actual);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
 
+    const actual = try fundingYmlToUrls(arena.allocator(), funding_yml);
     const len = @min(expected.len, actual.len);
     for (expected[0..len], actual[0..len]) |e, a|
         try std.testing.expectEqualStrings(e, a);
-    for (expected[len..]) |e|
-        try std.testing.expectEqualStrings("-- Missing string --", e);
-    for (actual[len..]) |a|
-        try std.testing.expectEqualStrings("-- Extra string --", a);
     try std.testing.expectEqual(expected.len, actual.len);
 }
 
@@ -703,9 +655,7 @@ fn testFromGithub(options: struct {
     target: Target,
     expect: []const u8,
 }) !void {
-    const allocator = std.testing.allocator;
-
-    var arena_state = std.heap.ArenaAllocator.init(allocator);
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
@@ -786,8 +736,8 @@ fn testFromGithub(options: struct {
     const repository_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{repository_file_path});
     const funding_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{funding_file_path});
     const package = try fromGithub(.{
-        .gpa = allocator,
-        .tmp_gpa = allocator,
+        .arena = arena,
+        .tmp_gpa = std.testing.allocator,
         .http_client = undefined, // Not used when downloading from file:// uris
         .repo = options.repo,
         .repository_uri = repository_file_uri,
@@ -795,7 +745,6 @@ fn testFromGithub(options: struct {
         .funding_uri = funding_file_uri,
         .target = options.target,
     });
-    defer package.deinit(allocator);
 
     const expected = try std.mem.replaceOwned(
         u8,
@@ -858,22 +807,18 @@ test fromGithub {
 }
 
 fn findStaticallyLinkedBinaries(options: struct {
-    gpa: std.mem.Allocator,
-    tmp_gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    tmp_arena: std.mem.Allocator,
     arch: std.Target.Cpu.Arch,
     dir: std.fs.Dir,
 }) ![]const []const u8 {
-    var arena_state = std.heap.ArenaAllocator.init(options.tmp_gpa);
-    const arena = arena_state.allocator();
-    defer arena_state.deinit();
-
     const arch_str = switch (options.arch) {
         .x86_64 => "x86-64",
         .arm => "ARM",
         else => unreachable, // Unsupported
     };
     const shell_script = try std.fmt.allocPrint(
-        arena,
+        options.tmp_arena,
         \\find -type f -exec file '{{}}' '+' |
         \\    grep -E '{s}.*(statically linked|static-pie linked)' |
         \\    cut -d: -f1 |
@@ -885,7 +830,7 @@ fn findStaticallyLinkedBinaries(options: struct {
     );
 
     const static_files_result = try std.process.Child.run(.{
-        .allocator = arena,
+        .allocator = options.tmp_arena,
         .argv = &.{ "sh", "-c", shell_script },
         .cwd_dir = options.dir,
     });
@@ -893,20 +838,10 @@ fn findStaticallyLinkedBinaries(options: struct {
     if (static_files_result.stdout.len < 1)
         return error.NoStaticallyLinkedFiles;
 
-    var bins_list = std.ArrayList([]const u8).init(options.gpa);
-    defer {
-        for (bins_list.items) |item|
-            options.gpa.free(item);
-        bins_list.deinit();
-    }
-
+    var bins_list = std.ArrayList([]const u8).init(options.arena);
     var static_files_lines = std.mem.tokenizeScalar(u8, static_files_result.stdout, '\n');
-    while (static_files_lines.next()) |static_bin| {
-        const bin = try options.gpa.dupe(u8, static_bin);
-        errdefer options.gpa.free(bin);
-
-        try bins_list.append(bin);
-    }
+    while (static_files_lines.next()) |static_bin|
+        try bins_list.append(try options.arena.dupe(u8, static_bin));
 
     return bins_list.toOwnedSlice();
 }
@@ -916,6 +851,9 @@ fn testFindStaticallyLinkedBinaries(options: struct {
     files: []const std.fs.Dir.WriteFileOptions,
     expected: []const []const u8,
 }) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
     var tmp_dir = try fs.zigCacheTmpDir(.{});
     defer tmp_dir.deleteAndClose();
 
@@ -924,17 +862,12 @@ fn testFindStaticallyLinkedBinaries(options: struct {
         try tmp_dir.dir.writeFile(file_options);
     }
 
-    const allocator = std.testing.allocator;
     const result = try findStaticallyLinkedBinaries(.{
-        .gpa = allocator,
-        .tmp_gpa = allocator,
+        .arena = arena.allocator(),
+        .tmp_arena = arena.allocator(),
         .arch = options.arch,
         .dir = tmp_dir.dir,
     });
-    defer {
-        heap.freeItems(allocator, result);
-        allocator.free(result);
-    }
 
     const len = @min(options.expected.len, result.len);
     for (options.expected[0..len], result[0..len]) |expected, actual|
@@ -976,19 +909,12 @@ test findStaticallyLinkedBinaries {
 }
 
 fn findManPages(options: struct {
-    gpa: std.mem.Allocator,
-    tmp_gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    tmp_arena: std.mem.Allocator,
     dir: std.fs.Dir,
 }) ![][]const u8 {
-    var walker = try options.dir.walk(options.tmp_gpa);
-    defer walker.deinit();
-
-    var result = std.ArrayList([]const u8).init(options.gpa);
-    defer {
-        heap.freeItems(options.gpa, result.items);
-        result.deinit();
-    }
-
+    var walker = try options.dir.walk(options.tmp_arena);
+    var result = std.ArrayList([]const u8).init(options.arena);
     while (try walker.next()) |entry| {
         if (entry.kind != .file)
             continue;
@@ -997,10 +923,7 @@ fn findManPages(options: struct {
         if (!isManPage(entry.basename))
             continue;
 
-        const duped = try options.gpa.dupe(u8, entry.path);
-        errdefer options.gpa.free(duped);
-
-        try result.append(duped);
+        try result.append(try options.arena.dupe(u8, entry.path));
     }
 
     std.mem.sort([]const u8, result.items, {}, mem.sortLessThan(u8));
@@ -1046,6 +969,9 @@ fn testfindManPages(options: struct {
     files: []const std.fs.Dir.WriteFileOptions,
     expected: []const []const u8,
 }) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
     var tmp_dir = try fs.zigCacheTmpDir(.{ .iterate = true });
     defer tmp_dir.deleteAndClose();
 
@@ -1054,16 +980,11 @@ fn testfindManPages(options: struct {
         try tmp_dir.dir.writeFile(file_options);
     }
 
-    const allocator = std.testing.allocator;
     const result = try findManPages(.{
-        .gpa = allocator,
-        .tmp_gpa = allocator,
+        .arena = arena.allocator(),
+        .tmp_arena = arena.allocator(),
         .dir = tmp_dir.dir,
     });
-    defer {
-        heap.freeItems(allocator, result);
-        allocator.free(result);
-    }
 
     const len = @min(options.expected.len, result.len);
     for (options.expected[0..len], result[0..len]) |expected, actual|
