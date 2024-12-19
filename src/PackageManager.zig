@@ -260,29 +260,33 @@ fn installExtractedPackage(
     var locations = std.ArrayList([]const u8).init(arena);
     defer locations.deinit();
 
+    try locations.ensureUnusedCapacity(package.install.install_bin.len +
+        package.install.install_lib.len +
+        package.install.install_share.len);
+
+    // Try to not leave files around if installation fails
+    errdefer {
+        for (locations.items) |location|
+            pm.prefix_dir.deleteTree(location) catch {};
+    }
+
     for (package.install.install_bin) |install_field| {
         const the_install = Package.Install.fromString(install_field);
+        const path = try std.fs.path.join(arena, &.{ paths.bin_subpath, the_install.to });
         try installBin(the_install, from_dir, pm.bin_dir);
-        try locations.append(try std.fs.path.join(arena, &.{
-            paths.bin_subpath,
-            the_install.to,
-        }));
+        locations.appendAssumeCapacity(path);
     }
     for (package.install.install_lib) |install_field| {
         const the_install = Package.Install.fromString(install_field);
+        const path = try std.fs.path.join(arena, &.{ paths.lib_subpath, the_install.to });
         try installGeneric(the_install, from_dir, pm.lib_dir);
-        try locations.append(try std.fs.path.join(arena, &.{
-            paths.lib_subpath,
-            the_install.to,
-        }));
+        locations.appendAssumeCapacity(path);
     }
     for (package.install.install_share) |install_field| {
         const the_install = Package.Install.fromString(install_field);
+        const path = try std.fs.path.join(arena, &.{ paths.share_subpath, the_install.to });
         try installGeneric(the_install, from_dir, pm.share_dir);
-        try locations.append(try std.fs.path.join(arena, &.{
-            paths.share_subpath,
-            the_install.to,
-        }));
+        locations.appendAssumeCapacity(path);
     }
 
     // Caller ensures that package is not installed
