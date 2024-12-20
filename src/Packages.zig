@@ -169,22 +169,26 @@ pub fn parseInto(packages: *Packages, string: []const u8) !void {
             try install_lib.appendSlice(package.linux_x86_64.install_lib);
             try install_share.appendSlice(package.linux_x86_64.install_share);
         },
-        .property => switch (package_field) {
-            .info => switch (try stringToEnum(InfoField, parsed.property(string).?.name)) {
-                .version => package.info.version = try arena.dupe(u8, parsed.property(string).?.value),
-                .description => package.info.description = try arena.dupe(u8, parsed.property(string).?.value),
-                .donate => try donate.append(try arena.dupe(u8, parsed.property(string).?.value)),
-            },
-            .update => switch (try stringToEnum(UpdateField, parsed.property(string).?.name)) {
-                .github => package.update.github = try arena.dupe(u8, parsed.property(string).?.value),
-            },
-            .linux_x86_64 => switch (try stringToEnum(ArchField, parsed.property(string).?.name)) {
-                .url => package.linux_x86_64.url = try arena.dupe(u8, parsed.property(string).?.value),
-                .hash => package.linux_x86_64.hash = try arena.dupe(u8, parsed.property(string).?.value),
-                .install_bin => try install_bin.append(try arena.dupe(u8, parsed.property(string).?.value)),
-                .install_lib => try install_lib.append(try arena.dupe(u8, parsed.property(string).?.value)),
-                .install_share => try install_share.append(try arena.dupe(u8, parsed.property(string).?.value)),
-            },
+        .property => {
+            const prop = parsed.property(string).?;
+            const value = try arena.dupe(u8, prop.value);
+            switch (package_field) {
+                .info => switch (try stringToEnum(InfoField, prop.name)) {
+                    .version => package.info.version = value,
+                    .description => package.info.description = value,
+                    .donate => try donate.append(value),
+                },
+                .update => switch (try stringToEnum(UpdateField, prop.name)) {
+                    .github => package.update.github = value,
+                },
+                .linux_x86_64 => switch (try stringToEnum(ArchField, prop.name)) {
+                    .url => package.linux_x86_64.url = value,
+                    .hash => package.linux_x86_64.hash = value,
+                    .install_bin => try install_bin.append(value),
+                    .install_lib => try install_lib.append(value),
+                    .install_share => try install_share.append(value),
+                },
+            }
         },
         .end => {
             package.info.donate = try donate.toOwnedSlice();

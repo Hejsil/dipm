@@ -51,12 +51,20 @@ pub fn parseFromFile(options: struct {
 }
 
 pub fn parse(gpa: std.mem.Allocator, string: []const u8) !InstalledPackages {
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
-    errdefer arena_state.deinit();
-    const arena = arena_state.allocator();
+    var packages = InstalledPackages{
+        .arena = std.heap.ArenaAllocator.init(gpa),
+        .packages = std.StringArrayHashMapUnmanaged(InstalledPackage){},
+        .file = null,
+    };
+    errdefer packages.deinit();
 
-    var packages = std.StringArrayHashMapUnmanaged(InstalledPackage){};
-    errdefer packages.deinit(gpa);
+    try packages.parseInto(string);
+    return packages;
+}
+
+pub fn parseInto(packages: *InstalledPackages, string: []const u8) !void {
+    const gpa = packages.arena.child_allocator;
+    const arena = packages.arena.allocator();
 
     var parser = ini.Parser.init(string);
     var parsed = parser.next();
@@ -66,11 +74,7 @@ pub fn parse(gpa: std.mem.Allocator, string: []const u8) !InstalledPackages {
         .comment => {},
         .section => break,
         .property, .invalid => return error.InvalidPackagesIni,
-        .end => return .{
-            .arena = arena_state,
-            .packages = packages,
-            .file = null,
-        },
+        .end => return,
     };
 
     const PackageField = std.meta.FieldEnum(InstalledPackage);
@@ -90,27 +94,25 @@ pub fn parse(gpa: std.mem.Allocator, string: []const u8) !InstalledPackages {
             package.location = try location.toOwnedSlice();
 
             const section = parsed.section(string).?;
-            const entry = try packages.getOrPutValue(gpa, section.name, .{});
+            const entry = try packages.packages.getOrPutValue(gpa, section.name, .{});
             if (!entry.found_existing)
                 entry.key_ptr.* = try arena.dupe(u8, section.name);
 
             package = entry.value_ptr;
             try location.appendSlice(package.location);
         },
-        .property => switch (try stringToEnum(PackageField, parsed.property(string).?.name)) {
-            .version => package.version = try arena.dupe(u8, parsed.property(string).?.value),
-            .location => try location.append(try arena.dupe(u8, parsed.property(string).?.value)),
+        .property => {
+            const prop = parsed.property(string).?;
+            const value = try arena.dupe(u8, prop.value);
+            switch (try stringToEnum(PackageField, prop.name)) {
+                .version => package.version = value,
+                .location => try location.append(value),
+            }
         },
         .end => {
             package.location = try location.toOwnedSlice();
-            break;
+            return;
         },
-    };
-
-    return .{
-        .arena = arena_state,
-        .packages = packages,
-        .file = null,
     };
 }
 
