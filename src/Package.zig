@@ -431,8 +431,8 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
                     tok.str = tok.str[1..];
                     return res;
                 },
-                '"' => {
-                    const end = std.mem.indexOfScalarPos(u8, tok.str, 1, '"') orelse {
+                '"', '\'' => {
+                    const end = std.mem.indexOfScalarPos(u8, tok.str, 1, tok.str[0]) orelse {
                         const res = tok.str[1..];
                         tok.str = tok.str[tok.str.len..];
                         return res;
@@ -607,12 +607,14 @@ test fundingYmlToUrls {
         \\  - test
         \\custom:
         \\  - "https://test.com/donate"
+        \\  - 'https://test.com/donate'
         \\patreon: test
         \\ko_fi: test
         \\
     ,
         &.{
             "https://github.com/sponsors/test",
+            "https://test.com/donate",
             "https://test.com/donate",
             "https://www.patreon.com/test",
             "https://ko-fi.com/test",
