@@ -456,6 +456,7 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
         .{ "buy_me_a_coffee", "https://buymeacoffee.com/" },
         .{ "github", "https://github.com/sponsors/" },
         .{ "ko_fi", "https://ko-fi.com/" },
+        .{ "liberapay", "https://liberapay.com/" },
         .{ "patreon", "https://www.patreon.com/" },
     });
 
@@ -591,11 +592,13 @@ test fundingYmlToUrls {
         \\patreon: [test]
         \\buy_me_a_coffee: [test]
         \\ko_fi: [test]
+        \\liberapay: [test]
     ,
         &.{
             "https://www.patreon.com/test",
             "https://buymeacoffee.com/test",
             "https://ko-fi.com/test",
+            "https://liberapay.com/test",
         },
     );
     try expectFundingUrls(
