@@ -450,6 +450,25 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
                 },
             }
         }
+
+        pub fn nextValue(tok: *@This()) []const u8 {
+            tok.str = std.mem.trimLeft(u8, tok.str, "\t ");
+            if (tok.str.len == 0)
+                return tok.str;
+
+            if (tok.str[0] == '"' or tok.str[0] == '\'') {
+                const term = tok.str[0];
+                const end = std.mem.indexOfScalarPos(u8, tok.str, 1, term) orelse tok.str.len;
+                const value = tok.str[1..end];
+                tok.str = tok.str[end + 1 ..];
+                return value;
+            }
+
+            const end = std.mem.indexOfAny(u8, tok.str, "],#\n") orelse tok.str.len;
+            const value = tok.str[0..end];
+            tok.str = tok.str[end..];
+            return std.mem.trim(u8, value, "\t \"'");
+        }
     };
 
     const prefixes = std.StaticStringMap([]const u8).initComptime(.{
@@ -458,6 +477,7 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
         .{ "ko_fi", "https://ko-fi.com/" },
         .{ "liberapay", "https://liberapay.com/" },
         .{ "patreon", "https://www.patreon.com/" },
+        .{ "open_collective", "https://opencollective.com/" },
     });
 
     var tok = Tokenizer{ .str = string };
@@ -477,6 +497,7 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
         if (curr[0] != ':')
             return error.InvalidFundingYml;
 
+        var reset = tok;
         curr = tok.next();
         if (curr.len == 0)
             break;
@@ -491,14 +512,11 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
                 if (curr[0] != '-')
                     break;
 
-                curr = tok.next();
-                if (curr.len == 0)
-                    break;
-
-                const value = curr;
+                const value = tok.nextValue();
                 try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
             },
             '[' => while (true) {
+                reset = tok;
                 curr = tok.next();
                 if (curr.len == 0)
                     break;
@@ -509,11 +527,13 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
                     break;
                 }
 
-                const value = curr;
+                tok = reset;
+                const value = tok.nextValue();
                 try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
             },
             else => {
-                const value = curr;
+                tok = reset;
+                const value = tok.nextValue();
                 try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
                 curr = tok.next();
             },
@@ -593,12 +613,14 @@ test fundingYmlToUrls {
         \\buy_me_a_coffee: [test]
         \\ko_fi: [test]
         \\liberapay: [test]
+        \\open_collective: [test]
     ,
         &.{
             "https://www.patreon.com/test",
             "https://buymeacoffee.com/test",
             "https://ko-fi.com/test",
             "https://liberapay.com/test",
+            "https://opencollective.com/test",
         },
     );
     try expectFundingUrls(
@@ -649,6 +671,50 @@ test fundingYmlToUrls {
         &.{
             "https://github.com/sponsors/test",
             "paypal.me/test",
+        },
+    );
+    try expectFundingUrls(
+        \\custom: https://paypal.me/test
+    ,
+        &.{
+            "https://paypal.me/test",
+        },
+    );
+    try expectFundingUrls(
+        \\custom:
+        \\  - https://paypal.me/test
+    ,
+        &.{
+            "https://paypal.me/test",
+        },
+    );
+    try expectFundingUrls(
+        \\custom: "https://github.com/test#support"
+    ,
+        &.{
+            "https://github.com/test#support",
+        },
+    );
+    try expectFundingUrls(
+        \\custom:
+        \\  - "https://github.com/test#support"
+    ,
+        &.{
+            "https://github.com/test#support",
+        },
+    );
+    try expectFundingUrls(
+        \\custom: ["https://github.com/test#support"]
+    ,
+        &.{
+            "https://github.com/test#support",
+        },
+    );
+    try expectFundingUrls(
+        \\github: [test-test]
+    ,
+        &.{
+            "https://github.com/sponsors/test-test",
         },
     );
 }
