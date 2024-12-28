@@ -12,9 +12,18 @@ pub fn commitFile(gpa: std.mem.Allocator, dir: std.fs.Dir, file: []const u8, msg
     _ = try child.wait();
 }
 
+pub const MessageOptions = struct {
+    description: bool = false,
+};
+
 /// Create a commit message based on what `Package.update` did. Depending on what changed between
 /// the old and new package, the commit message will differ.
-pub fn createCommitMessage(gpa: std.mem.Allocator, package: Package.Named, m_old_package: ?Package) ![]u8 {
+pub fn createCommitMessage(
+    gpa: std.mem.Allocator,
+    package: Package.Named,
+    m_old_package: ?Package,
+    options: MessageOptions,
+) ![]u8 {
     const old_package = m_old_package orelse {
         return std.fmt.allocPrint(gpa, "{s}: Add {s}", .{
             package.name,
@@ -31,7 +40,7 @@ pub fn createCommitMessage(gpa: std.mem.Allocator, package: Package.Named, m_old
         return std.fmt.allocPrint(gpa, "{s}: Update hash", .{package.name});
     if (!std.mem.eql(u8, package.package.linux_x86_64.url, old_package.linux_x86_64.url))
         return std.fmt.allocPrint(gpa, "{s}: Update url", .{package.name});
-    if (!std.mem.eql(u8, package.package.info.description, old_package.info.description))
+    if (options.description and !std.mem.eql(u8, package.package.info.description, old_package.info.description))
         return std.fmt.allocPrint(gpa, "{s}: Update description", .{package.name});
     if (package.package.info.donate.len != old_package.info.donate.len)
         return std.fmt.allocPrint(gpa, "{s}: Update donations", .{package.name});
@@ -45,7 +54,9 @@ pub fn createCommitMessage(gpa: std.mem.Allocator, package: Package.Named, m_old
 }
 
 fn expectCreateCommitMessage(expected: []const u8, package: Package.Named, m_old_package: ?Package) !void {
-    const actual = try createCommitMessage(std.testing.allocator, package, m_old_package);
+    const actual = try createCommitMessage(std.testing.allocator, package, m_old_package, .{
+        .description = true,
+    });
     defer std.testing.allocator.free(actual);
 
     try std.testing.expectEqualStrings(expected, actual);

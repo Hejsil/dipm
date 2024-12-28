@@ -722,7 +722,9 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
             try packages.writeToFileOverride(pkgs_ini_file);
             try pkgs_ini_file.sync();
 
-            const msg = try git.createCommitMessage(program.arena, package, old_package);
+            const msg = try git.createCommitMessage(program.arena, package, old_package, .{
+                .description = options.update_description,
+            });
             try git.commitFile(program.gpa, pkgs_ini_dir, pkgs_ini_base_name, msg);
         }
     }
