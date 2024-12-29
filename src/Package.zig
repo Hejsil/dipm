@@ -478,6 +478,7 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
         .{ "liberapay", "https://liberapay.com/" },
         .{ "patreon", "https://www.patreon.com/" },
         .{ "open_collective", "https://opencollective.com/" },
+        .{ "polar", "https://polar.sh/" },
     });
 
     var tok = Tokenizer{ .str = string };
@@ -614,6 +615,7 @@ test fundingYmlToUrls {
         \\ko_fi: [test]
         \\liberapay: [test]
         \\open_collective: [test]
+        \\polar: [test]
     ,
         &.{
             "https://www.patreon.com/test",
@@ -621,6 +623,7 @@ test fundingYmlToUrls {
             "https://ko-fi.com/test",
             "https://liberapay.com/test",
             "https://opencollective.com/test",
+            "https://polar.sh/test",
         },
     );
     try expectFundingUrls(
