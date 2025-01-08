@@ -10,6 +10,7 @@ pub const Info = struct {
 
 pub const Update = struct {
     github: []const u8 = "",
+    index: []const u8 = "",
 };
 
 pub const Arch = struct {
@@ -86,10 +87,12 @@ pub fn write(package: Package, name: []const u8, writer: anytype) !void {
         try writer.print("donate = {s}\n", .{donate});
     try writer.writeAll("\n");
 
-    if (package.update.github.len != 0) {
-        try writer.print("[{s}.update]\n", .{name});
-        try writer.print("github = {s}\n\n", .{package.update.github});
-    }
+    try writer.print("[{s}.update]\n", .{name});
+    if (package.update.github.len != 0)
+        try writer.print("github = {s}\n", .{package.update.github});
+    if (package.update.index.len != 0)
+        try writer.print("index = {s}\n", .{package.update.index});
+    try writer.writeAll("\n");
 
     try writer.print("[{s}.linux_x86_64]\n", .{name});
     for (package.linux_x86_64.install_bin) |install|
@@ -121,6 +124,10 @@ pub fn fromUrl(options: struct {
     name: ?[]const u8 = null,
     url: []const u8,
 
+    /// The uri to a line separated list of download links. If not `null` this is used to get the
+    /// download url.
+    index_uri: ?[]const u8 = null,
+
     target: Target,
 }) !Named {
     const github_url = "https://github.com/";
@@ -140,6 +147,7 @@ pub fn fromUrl(options: struct {
                 .user = repo_user,
                 .name = repo_name,
             },
+            .index_uri = options.index_uri,
             .target = options.target,
         });
     } else {
@@ -168,6 +176,10 @@ pub fn fromGithub(options: struct {
     /// Name of the package. `null` means it should be inferred
     name: ?[]const u8 = null,
     repo: GithubRepo,
+
+    /// The uri to a line separated list of download links. If not `null` this is used to get the
+    /// download url.
+    index_uri: ?[]const u8 = null,
 
     /// Use this uri to download the repository json. If `null` then this uri will be used:
     /// https://api.github.com/repos/<user>/<repo>
@@ -216,6 +228,26 @@ pub fn fromGithub(options: struct {
     const name = try options.arena.dupe(u8, options.name orelse options.repo.name);
     const version = try options.arena.dupe(u8, versionFromTag(latest_release.tag_name));
 
+    var download_urls = std.ArrayList([]const u8).init(tmp_arena);
+    if (options.index_uri) |index_uri| {
+        var index = std.ArrayList(u8).init(tmp_arena);
+        const package_download_result = try download.download(index.writer(), .{
+            .client = options.http_client,
+            .uri_str = index_uri,
+            .progress = options.progress,
+        });
+        if (package_download_result.status != .ok)
+            return error.IndexDownloadFailed;
+
+        var it = std.mem.tokenizeScalar(u8, index.items, '\n');
+        while (it.next()) |download_url|
+            try download_urls.append(download_url);
+    } else {
+        try download_urls.ensureTotalCapacity(latest_release.assets.len);
+        for (latest_release.assets) |asset|
+            download_urls.appendAssumeCapacity(asset.browser_download_url);
+    }
+
     const download_url = try findDownloadUrl(.{
         .target = options.target,
         .extra_strings = &.{
@@ -228,7 +260,7 @@ pub fn fromGithub(options: struct {
             try std.fmt.allocPrint(tmp_arena, "{s}_{s}", .{ name, latest_release.tag_name }),
         },
         // This is only save because `assets` only have the field `browser_download_url`
-        .urls = @ptrCast(latest_release.assets),
+        .urls = download_urls.items,
     });
 
     var global_tmp_dir = try std.fs.cwd().makeOpenPath("/tmp/dipm/", .{});
@@ -287,7 +319,10 @@ pub fn fromGithub(options: struct {
                 .description = description,
                 .donate = donate,
             },
-            .update = .{ .github = github },
+            .update = .{
+                .github = github,
+                .index = try options.arena.dupe(u8, options.index_uri orelse ""),
+            },
             .linux_x86_64 = .{
                 .url = try options.arena.dupe(u8, download_url),
                 .hash = try options.arena.dupe(u8, &hash),
@@ -831,6 +866,9 @@ fn testFromGithub(options: struct {
         tmp_dir_path,
         "latest_release.json",
     });
+    const latest_release_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{
+        latest_release_file_path,
+    });
     try cwd.writeFile(.{
         .sub_path = latest_release_file_path,
         .data = try std.fmt.allocPrint(arena,
@@ -844,9 +882,25 @@ fn testFromGithub(options: struct {
         , .{ options.tag_name, static_binary_uri }),
     });
 
+    const index_file_path = try std.fs.path.join(arena, &.{
+        tmp_dir_path,
+        "index",
+    });
+    const index_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{index_file_path});
+    try cwd.writeFile(.{
+        .sub_path = index_file_path,
+        .data = try std.fmt.allocPrint(arena,
+            \\{s}
+            \\
+        , .{static_binary_uri}),
+    });
+
     const funding_file_path = try std.fs.path.join(arena, &.{
         tmp_dir_path,
         "FUNDING.yml",
+    });
+    const funding_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{
+        funding_file_path,
     });
     try cwd.writeFile(.{
         .sub_path = funding_file_path,
@@ -861,6 +915,9 @@ fn testFromGithub(options: struct {
         tmp_dir_path,
         "repository.json",
     });
+    const repository_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{
+        repository_file_path,
+    });
     try cwd.writeFile(.{
         .sub_path = repository_file_path,
         .data = try std.fmt.allocPrint(arena,
@@ -871,14 +928,22 @@ fn testFromGithub(options: struct {
         , .{options.description}),
     });
 
-    const latest_release_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{latest_release_file_path});
-    const repository_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{repository_file_path});
-    const funding_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{funding_file_path});
-    const package = try fromGithub(.{
+    const package_from_latest_release = try fromGithub(.{
         .arena = arena,
         .tmp_gpa = std.testing.allocator,
         .http_client = undefined, // Not used when downloading from file:// uris
         .repo = options.repo,
+        .repository_uri = repository_file_uri,
+        .latest_release_uri = latest_release_file_uri,
+        .funding_uri = funding_file_uri,
+        .target = options.target,
+    });
+    const package_from_index = try fromGithub(.{
+        .arena = arena,
+        .tmp_gpa = std.testing.allocator,
+        .http_client = undefined, // Not used when downloading from file:// uris
+        .repo = options.repo,
+        .index_uri = index_file_uri,
         .repository_uri = repository_file_uri,
         .latest_release_uri = latest_release_file_uri,
         .funding_uri = funding_file_uri,
@@ -892,10 +957,19 @@ fn testFromGithub(options: struct {
         "<url>",
         static_binary_uri,
     );
+    for ([_]Package.Named{ package_from_latest_release, package_from_index }) |package| {
+        var actual = std.ArrayList(u8).init(arena);
+        try package.package.write(package.name, actual.writer());
 
-    var actual = std.ArrayList(u8).init(arena);
-    try package.package.write(package.name, actual.writer());
-    try std.testing.expectEqualStrings(expected, actual.items);
+        // Remove index field
+        try std.testing.expectEqualStrings(expected, try std.mem.replaceOwned(
+            u8,
+            arena,
+            actual.items,
+            try std.fmt.allocPrint(arena, "index = {s}\n", .{index_file_uri}),
+            "",
+        ));
+    }
 }
 
 test fromGithub {
@@ -1180,41 +1254,40 @@ fn findDownloadUrl(options: struct {
     var best_index: usize = 0;
 
     for (options.urls, 0..) |url, i| {
-        const basename = std.fs.path.basename(url);
         var this_score: usize = 0;
 
-        this_score += std.mem.count(u8, basename, @tagName(options.target.arch));
-        this_score += std.mem.count(u8, basename, @tagName(options.target.os));
+        this_score += std.mem.count(u8, url, @tagName(options.target.arch));
+        this_score += std.mem.count(u8, url, @tagName(options.target.os));
 
         switch (options.target.os) {
             .linux => {
-                this_score += std.mem.count(u8, basename, "Linux");
+                this_score += std.mem.count(u8, url, "Linux");
 
                 // Targeting musl abi or the alpine distro tends mean the executable is statically
                 // linked
-                this_score += std.mem.count(u8, basename, "alpine");
-                this_score += std.mem.count(u8, basename, "musl");
-                this_score += std.mem.count(u8, basename, "static");
+                this_score += std.mem.count(u8, url, "alpine");
+                this_score += std.mem.count(u8, url, "musl");
+                this_score += std.mem.count(u8, url, "static");
             },
             else => {},
         }
 
         switch (options.target.arch) {
             .x86_64 => {
-                this_score += std.mem.count(u8, basename, "64bit");
-                this_score += std.mem.count(u8, basename, "amd64");
-                this_score += std.mem.count(u8, basename, "x64");
-                this_score += std.mem.count(u8, basename, "x86-64");
+                this_score += std.mem.count(u8, url, "64bit");
+                this_score += std.mem.count(u8, url, "amd64");
+                this_score += std.mem.count(u8, url, "x64");
+                this_score += std.mem.count(u8, url, "x86-64");
 
                 switch (options.target.os) {
                     .linux => {
-                        this_score += std.mem.count(u8, basename, "linux64");
+                        this_score += std.mem.count(u8, url, "linux64");
                     },
                     else => {},
                 }
             },
             .x86 => {
-                this_score += std.mem.count(u8, basename, "32bit");
+                this_score += std.mem.count(u8, url, "32bit");
             },
             else => {},
         }
@@ -1224,15 +1297,15 @@ fn findDownloadUrl(options: struct {
 
         var buf: [std.mem.page_size]u8 = undefined;
         for (options.extra_strings) |string| {
-            this_score += std.mem.count(u8, basename, string);
+            this_score += std.mem.count(u8, url, string);
             // We wonna pick `tau` instead of `taucorder`. Most of the time, these names are
             // separated with `_` or `-`
-            this_score += std.mem.count(u8, basename, try std.fmt.bufPrint(&buf, "{s}_", .{string}));
-            this_score += std.mem.count(u8, basename, try std.fmt.bufPrint(&buf, "{s}-", .{string}));
-            this_score += std.mem.count(u8, basename, try std.fmt.bufPrint(&buf, "_{s}", .{string}));
-            this_score += std.mem.count(u8, basename, try std.fmt.bufPrint(&buf, "-{s}", .{string}));
-            this_score += std.mem.count(u8, basename, try std.fmt.bufPrint(&buf, "_{s}_", .{string}));
-            this_score += std.mem.count(u8, basename, try std.fmt.bufPrint(&buf, "-{s}-", .{string}));
+            this_score += std.mem.count(u8, url, try std.fmt.bufPrint(&buf, "{s}_", .{string}));
+            this_score += std.mem.count(u8, url, try std.fmt.bufPrint(&buf, "{s}-", .{string}));
+            this_score += std.mem.count(u8, url, try std.fmt.bufPrint(&buf, "_{s}", .{string}));
+            this_score += std.mem.count(u8, url, try std.fmt.bufPrint(&buf, "-{s}", .{string}));
+            this_score += std.mem.count(u8, url, try std.fmt.bufPrint(&buf, "_{s}_", .{string}));
+            this_score += std.mem.count(u8, url, try std.fmt.bufPrint(&buf, "-{s}-", .{string}));
         }
 
         // Certain extensions indicate means the link downloads a signature, deb package or other
@@ -1255,15 +1328,15 @@ fn findDownloadUrl(options: struct {
             ".sig",
         };
         for (deprioritized_extensions) |ext|
-            this_score -|= @as(usize, @intFromBool(std.mem.endsWith(u8, basename, ext))) * 1000;
+            this_score -|= @as(usize, @intFromBool(std.mem.endsWith(u8, url, ext))) * 1000;
 
         // Avoid debug builds of binaries
-        this_score -|= std.mem.count(u8, basename, "debug");
+        this_score -|= std.mem.count(u8, url, "debug");
 
         switch (options.target.os) {
             .linux => {
                 // Targeting the gnu abi tends to not be statically linked
-                this_score -|= std.mem.count(u8, basename, "gnu");
+                this_score -|= std.mem.count(u8, url, "gnu");
             },
             else => {},
         }
@@ -2281,6 +2354,16 @@ test findDownloadUrl {
             "/uctags-2024.10.02-openbsd-7.5-amd64.tar.gz",
             "/uctags-2024.10.02-openbsd-7.5-amd64.tar.xz",
             "/uctags-debug-2024.10.02-1-x86_64.pkg.tar.xz",
+        },
+    }));
+    try std.testing.expectEqualStrings("https://dl.elv.sh/linux-amd64/elvish-v0.21.0.tar.gz", try findDownloadUrl(.{
+        .target = .{ .os = .linux, .arch = .x86_64 },
+        .extra_strings = &.{"elvish"},
+        .urls = &.{
+            "https://dl.elv.sh/darwin-arm64/elvish-v0.21.0.tar.gz",
+            "https://dl.elv.sh/darwin-amd64/elvish-v0.21.0.tar.gz",
+            "https://dl.elv.sh/linux-arm64/elvish-v0.21.0.tar.gz",
+            "https://dl.elv.sh/linux-amd64/elvish-v0.21.0.tar.gz",
         },
     }));
 
