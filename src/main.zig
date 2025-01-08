@@ -581,7 +581,7 @@ fn pkgsUpdateCommand(program: *Program) !void {
     var packages = try Packages.parseFromPath(program.gpa, cwd, options.pkgs_ini_path);
     defer packages.deinit();
 
-    var urls = std.ArrayList(UrlAndName).init(program.arena);
+    var urls = std.ArrayList(AddPackage).init(program.arena);
     for (packages_to_update.keys()) |package_name| {
         const package = packages.packages.get(package_name) orelse {
             std.log.err("{s} not found", .{package_name});
@@ -593,6 +593,7 @@ fn pkgsUpdateCommand(program: *Program) !void {
         });
         try urls.append(.{
             .name = package_name,
+            .index = if (package.update.index.len != 0) package.update.index else null,
             .url = url,
         });
     }
@@ -612,7 +613,7 @@ const pkgs_add_usage =
 ;
 
 fn pkgsAddCommand(program: *Program) !void {
-    var urls = std.ArrayList(UrlAndName).init(program.arena);
+    var urls = std.ArrayList(AddPackage).init(program.arena);
     var options = PackagesAddOptions{
         .commit = false,
         .update_description = true,
@@ -628,7 +629,7 @@ fn pkgsAddCommand(program: *Program) !void {
         if (program.args.flag(&.{ "-h", "--help" }))
             return program.stdout.writeAll(pkgs_add_usage);
         if (program.args.positional()) |url|
-            try urls.append(UrlAndName.fromString(url));
+            try urls.append(AddPackage.fromString(url));
     }
 
     options.urls = urls.items;
@@ -639,14 +640,15 @@ const PackagesAddOptions = struct {
     pkgs_ini_path: []const u8,
     commit: bool,
     update_description: bool,
-    urls: []const UrlAndName,
+    urls: []const AddPackage,
 };
 
-const UrlAndName = struct {
+const AddPackage = struct {
     url: []const u8,
+    index: ?[]const u8 = null,
     name: ?[]const u8 = null,
 
-    pub fn fromString(string: []const u8) UrlAndName {
+    pub fn fromString(string: []const u8) AddPackage {
         for (string, 0..) |c, i| switch (c) {
             '=' => return .{
                 .name = string[0..i],
@@ -660,8 +662,8 @@ const UrlAndName = struct {
     }
 };
 
-fn testUrlAndNameFromString(string: []const u8, expected: UrlAndName) !void {
-    const url_and_name = UrlAndName.fromString(string);
+fn testUrlAndNameFromString(string: []const u8, expected: AddPackage) !void {
+    const url_and_name = AddPackage.fromString(string);
     try std.testing.expectEqualStrings(expected.url, url_and_name.url);
     if (expected.name) |name| {
         try std.testing.expect(url_and_name.name != null);
@@ -707,6 +709,7 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
             .http_client = &http_client,
             .url = url.url,
             .name = url.name,
+            .index_uri = url.index,
             .target = .{ .os = builtin.os.tag, .arch = builtin.target.cpu.arch },
         }) catch |err| {
             std.log.err("{s} {s}", .{ @errorName(err), url.url });

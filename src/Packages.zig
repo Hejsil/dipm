@@ -180,6 +180,7 @@ pub fn parseInto(packages: *Packages, string: []const u8) !void {
                 },
                 .update => switch (try stringToEnum(UpdateField, prop.name)) {
                     .github => package.update.github = value,
+                    .index => package.update.index = value,
                 },
                 .linux_x86_64 => switch (try stringToEnum(ArchField, prop.name)) {
                     .url => package.linux_x86_64.url = value,
@@ -387,35 +388,46 @@ pub fn update(packages: *Packages, package: Package.Named, options: UpdateOption
     const entry = try packages.packages.getOrPut(gpa, package.name);
     if (entry.found_existing) {
         const old_package = entry.value_ptr.*;
-        entry.value_ptr.linux_x86_64.install_bin = try updateInstall(.{
-            .arena = packages.arena.allocator(),
-            .tmp_gpa = packages.arena.child_allocator,
-            .old_version = entry.value_ptr.*.info.version,
-            .old_installs = entry.value_ptr.*.linux_x86_64.install_bin,
-            .new_version = package.package.info.version,
-            .new_installs = package.package.linux_x86_64.install_bin,
-        });
-        entry.value_ptr.linux_x86_64.install_lib = try updateInstall(.{
-            .arena = packages.arena.allocator(),
-            .tmp_gpa = packages.arena.child_allocator,
-            .old_version = entry.value_ptr.*.info.version,
-            .old_installs = entry.value_ptr.*.linux_x86_64.install_lib,
-            .new_version = package.package.info.version,
-            .new_installs = package.package.linux_x86_64.install_lib,
-        });
-        entry.value_ptr.linux_x86_64.install_share = try updateInstall(.{
-            .arena = packages.arena.allocator(),
-            .tmp_gpa = packages.arena.child_allocator,
-            .old_version = entry.value_ptr.*.info.version,
-            .old_installs = entry.value_ptr.*.linux_x86_64.install_share,
-            .new_version = package.package.info.version,
-            .new_installs = package.package.linux_x86_64.install_share,
-        });
 
-        entry.value_ptr.info.version = package.package.info.version;
-        entry.value_ptr.info.donate = package.package.info.donate;
-        entry.value_ptr.linux_x86_64.url = package.package.linux_x86_64.url;
-        entry.value_ptr.linux_x86_64.hash = package.package.linux_x86_64.hash;
+        entry.value_ptr.* = .{
+            .info = .{
+                .version = package.package.info.version,
+                .donate = package.package.info.donate,
+                .description = old_package.info.description,
+            },
+            .update = .{
+                .github = package.package.update.github,
+                .index = package.package.update.index,
+            },
+            .linux_x86_64 = .{
+                .url = package.package.linux_x86_64.url,
+                .hash = package.package.linux_x86_64.hash,
+                .install_bin = try updateInstall(.{
+                    .arena = packages.arena.allocator(),
+                    .tmp_gpa = packages.arena.child_allocator,
+                    .old_version = old_package.info.version,
+                    .old_installs = old_package.linux_x86_64.install_bin,
+                    .new_version = package.package.info.version,
+                    .new_installs = package.package.linux_x86_64.install_bin,
+                }),
+                .install_lib = try updateInstall(.{
+                    .arena = packages.arena.allocator(),
+                    .tmp_gpa = packages.arena.child_allocator,
+                    .old_version = old_package.info.version,
+                    .old_installs = old_package.linux_x86_64.install_lib,
+                    .new_version = package.package.info.version,
+                    .new_installs = package.package.linux_x86_64.install_lib,
+                }),
+                .install_share = try updateInstall(.{
+                    .arena = packages.arena.allocator(),
+                    .tmp_gpa = packages.arena.child_allocator,
+                    .old_version = old_package.info.version,
+                    .old_installs = old_package.linux_x86_64.install_share,
+                    .new_version = package.package.info.version,
+                    .new_installs = package.package.linux_x86_64.install_share,
+                }),
+            },
+        };
 
         if (options.description)
             entry.value_ptr.info.description = package.package.info.description;
@@ -533,7 +545,10 @@ test update {
         .name = "test",
         .package = .{
             .info = .{ .version = "0.2.0" },
-            .update = .{ .github = "test/test" },
+            .update = .{
+                .github = "test/test",
+                .index = "https://index.com",
+            },
             .linux_x86_64 = .{
                 .hash = "test_hash2",
                 .url = "test_url2",
@@ -555,6 +570,7 @@ test update {
         \\
         \\[test.update]
         \\github = test/test
+        \\index = https://index.com
         \\
         \\[test.linux_x86_64]
         \\install_bin = test-0.2.0/test
@@ -574,6 +590,7 @@ test update {
         \\
         \\[test.update]
         \\github = test/test
+        \\index = https://index.com
         \\
         \\[test.linux_x86_64]
         \\install_bin = test-0.2.0/test
