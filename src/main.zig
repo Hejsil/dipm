@@ -613,7 +613,9 @@ const pkgs_add_usage =
 ;
 
 fn pkgsAddCommand(program: *Program) !void {
-    var urls = std.ArrayList(AddPackage).init(program.arena);
+    var url: ?[]const u8 = null;
+    var index: ?[]const u8 = null;
+    var name: ?[]const u8 = null;
     var options = PackagesAddOptions{
         .commit = false,
         .update_description = true,
@@ -624,15 +626,23 @@ fn pkgsAddCommand(program: *Program) !void {
     while (program.args.next()) {
         if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
             options.pkgs_ini_path = file;
+        if (program.args.option(&.{ "-n", "--name" })) |n|
+            name = n;
+        if (program.args.option(&.{ "-i", "--index" })) |i|
+            index = i;
         if (program.args.flag(&.{ "-c", "--commit" }))
             options.commit = true;
         if (program.args.flag(&.{ "-h", "--help" }))
             return program.stdout.writeAll(pkgs_add_usage);
-        if (program.args.positional()) |url|
-            try urls.append(AddPackage.fromString(url));
+        if (program.args.positional()) |u|
+            url = u;
     }
 
-    options.urls = urls.items;
+    options.urls = &.{.{
+        .url = url orelse return,
+        .index = index,
+        .name = name,
+    }};
     return program.pkgsAdd(options);
 }
 
@@ -647,41 +657,7 @@ const AddPackage = struct {
     url: []const u8,
     index: ?[]const u8 = null,
     name: ?[]const u8 = null,
-
-    pub fn fromString(string: []const u8) AddPackage {
-        for (string, 0..) |c, i| switch (c) {
-            '=' => return .{
-                .name = string[0..i],
-                .url = string[i + 1 ..],
-            },
-            'a'...'z', 'A'...'Z', '-' => {},
-            else => break,
-        };
-
-        return .{ .url = string };
-    }
 };
-
-fn testUrlAndNameFromString(string: []const u8, expected: AddPackage) !void {
-    const url_and_name = AddPackage.fromString(string);
-    try std.testing.expectEqualStrings(expected.url, url_and_name.url);
-    if (expected.name) |name| {
-        try std.testing.expect(url_and_name.name != null);
-        try std.testing.expectEqualStrings(name, url_and_name.name.?);
-    } else {
-        try std.testing.expect(url_and_name.name == null);
-    }
-}
-
-test "UrlAndName.fromString" {
-    try testUrlAndNameFromString("https://github.com/oxc-project/oxc", .{
-        .url = "https://github.com/oxc-project/oxc",
-    });
-    try testUrlAndNameFromString("oxlint=https://github.com/oxc-project/oxc", .{
-        .name = "oxlint",
-        .url = "https://github.com/oxc-project/oxc",
-    });
-}
 
 fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     var http_client = std.http.Client{ .allocator = program.gpa };
