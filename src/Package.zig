@@ -1333,6 +1333,9 @@ fn findDownloadUrl(options: struct {
         // Avoid debug builds of binaries
         this_score -|= std.mem.count(u8, url, "debug");
 
+        // Avoid release candidates
+        this_score -|= std.mem.count(u8, url, "rc");
+
         switch (options.target.os) {
             .linux => {
                 // Targeting the gnu abi tends to not be statically linked
@@ -2356,14 +2359,22 @@ test findDownloadUrl {
             "/uctags-debug-2024.10.02-1-x86_64.pkg.tar.xz",
         },
     }));
-    try std.testing.expectEqualStrings("https://dl.elv.sh/linux-amd64/elvish-v0.21.0.tar.gz", try findDownloadUrl(.{
+    try std.testing.expectEqualStrings("linux-amd64/elvish-v0.21.0.tar.gz", try findDownloadUrl(.{
         .target = .{ .os = .linux, .arch = .x86_64 },
         .extra_strings = &.{"elvish"},
         .urls = &.{
-            "https://dl.elv.sh/darwin-arm64/elvish-v0.21.0.tar.gz",
-            "https://dl.elv.sh/darwin-amd64/elvish-v0.21.0.tar.gz",
-            "https://dl.elv.sh/linux-arm64/elvish-v0.21.0.tar.gz",
-            "https://dl.elv.sh/linux-amd64/elvish-v0.21.0.tar.gz",
+            "darwin-arm64/elvish-v0.21.0.tar.gz",
+            "darwin-amd64/elvish-v0.21.0.tar.gz",
+            "linux-arm64/elvish-v0.21.0.tar.gz",
+            "linux-amd64/elvish-v0.21.0.tar.gz",
+        },
+    }));
+    try std.testing.expectEqualStrings("/elvish-v0.21.0.tar.gz", try findDownloadUrl(.{
+        .target = .{ .os = .linux, .arch = .x86_64 },
+        .extra_strings = &.{"elvish"},
+        .urls = &.{
+            "/elvish-v0.21.0-rc1.tar.gz",
+            "/elvish-v0.21.0.tar.gz",
         },
     }));
 
