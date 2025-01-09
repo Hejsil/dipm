@@ -1334,7 +1334,7 @@ fn findDownloadUrl(options: struct {
         this_score -|= std.mem.count(u8, url, "debug");
 
         // Avoid release candidates
-        this_score -|= std.mem.count(u8, url, "rc");
+        this_score -|= std.mem.count(u8, url, "rc") * 2;
 
         switch (options.target.os) {
             .linux => {
