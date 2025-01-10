@@ -104,7 +104,7 @@ pub fn parseInto(packages: *InstalledPackages, string: []const u8) !void {
         .property => {
             const prop = parsed.property(string).?;
             const value = try arena.dupe(u8, prop.value);
-            switch (try stringToEnum(PackageField, prop.name)) {
+            switch (std.meta.stringToEnum(PackageField, prop.name) orelse continue) {
                 .version => package.version = value,
                 .location => try location.append(value),
             }
@@ -114,10 +114,6 @@ pub fn parseInto(packages: *InstalledPackages, string: []const u8) !void {
             return;
         },
     };
-}
-
-fn stringToEnum(comptime T: type, str: []const u8) !T {
-    return std.meta.stringToEnum(T, str) orelse error.InvalidPackagesIni;
 }
 
 pub fn flush(packages: InstalledPackages) !void {
@@ -141,15 +137,19 @@ pub fn writeTo(packages: InstalledPackages, writer: anytype) !void {
     }
 }
 
-fn expectCanonical(string: []const u8) !void {
-    var packages = try parse(std.testing.allocator, string);
+fn expectTransform(from: []const u8, to: []const u8) !void {
+    var packages = try parse(std.testing.allocator, from);
     defer packages.deinit();
 
     var rendered = std.ArrayList(u8).init(std.testing.allocator);
     defer rendered.deinit();
 
     try packages.writeTo(rendered.writer());
-    try std.testing.expectEqualStrings(string, rendered.items);
+    try std.testing.expectEqualStrings(to, rendered.items);
+}
+
+fn expectCanonical(string: []const u8) !void {
+    return expectTransform(string, string);
 }
 
 test "parse" {
@@ -163,6 +163,18 @@ test "parse" {
         \\location = path1
         \\location = path2
         \\location = path3
+        \\
+    );
+    try expectTransform(
+        \\[test]
+        \\version = 0.0.0
+        \\location = path
+        \\invalid_field = test
+        \\
+    ,
+        \\[test]
+        \\version = 0.0.0
+        \\location = path
         \\
     );
 }

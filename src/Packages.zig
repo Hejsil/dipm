@@ -142,27 +142,32 @@ pub fn parseInto(packages: *Packages, string: []const u8) !void {
     // iteration of this loop.
     var tmp_package: Package = .{};
     var package: *Package = &tmp_package;
+    var package_field_invalid: bool = false;
     var package_field: PackageField = undefined;
     while (true) : (parsed = parser.next()) switch (parsed.kind) {
         .comment => {},
         .invalid => return error.InvalidPackagesIni,
         .section => {
-            package.info.donate = try donate.toOwnedSlice();
-            package.linux_x86_64.install_bin = try install_bin.toOwnedSlice();
-            package.linux_x86_64.install_lib = try install_lib.toOwnedSlice();
-            package.linux_x86_64.install_share = try install_share.toOwnedSlice();
-
             const section = parsed.section(string).?;
             var it = std.mem.splitScalar(u8, section.name, '.');
             const package_name_str = it.first();
             const package_field_str = it.rest();
+            package_field = std.meta.stringToEnum(PackageField, package_field_str) orelse {
+                package_field_invalid = true;
+                continue;
+            };
+            package_field_invalid = false;
+
+            package.info.donate = try donate.toOwnedSlice();
+            package.linux_x86_64.install_bin = try install_bin.toOwnedSlice();
+            package.linux_x86_64.install_lib = try install_lib.toOwnedSlice();
+            package.linux_x86_64.install_share = try install_share.toOwnedSlice();
 
             const entry = try packages.packages.getOrPutValue(gpa, package_name_str, .{});
             if (!entry.found_existing)
                 entry.key_ptr.* = try arena.dupe(u8, package_name_str);
 
             package = entry.value_ptr;
-            package_field = try stringToEnum(PackageField, package_field_str);
 
             try donate.appendSlice(package.info.donate);
             try install_bin.appendSlice(package.linux_x86_64.install_bin);
@@ -170,19 +175,22 @@ pub fn parseInto(packages: *Packages, string: []const u8) !void {
             try install_share.appendSlice(package.linux_x86_64.install_share);
         },
         .property => {
+            if (package_field_invalid)
+                continue;
+
             const prop = parsed.property(string).?;
             const value = try arena.dupe(u8, prop.value);
             switch (package_field) {
-                .info => switch (try stringToEnum(InfoField, prop.name)) {
+                .info => switch (std.meta.stringToEnum(InfoField, prop.name) orelse continue) {
                     .version => package.info.version = value,
                     .description => package.info.description = value,
                     .donate => try donate.append(value),
                 },
-                .update => switch (try stringToEnum(UpdateField, prop.name)) {
+                .update => switch (std.meta.stringToEnum(UpdateField, prop.name) orelse continue) {
                     .github => package.update.github = value,
                     .index => package.update.index = value,
                 },
-                .linux_x86_64 => switch (try stringToEnum(ArchField, prop.name)) {
+                .linux_x86_64 => switch (std.meta.stringToEnum(ArchField, prop.name) orelse continue) {
                     .url => package.linux_x86_64.url = value,
                     .hash => package.linux_x86_64.hash = value,
                     .install_bin => try install_bin.append(value),
@@ -199,10 +207,6 @@ pub fn parseInto(packages: *Packages, string: []const u8) !void {
             return;
         },
     };
-}
-
-fn stringToEnum(comptime T: type, str: []const u8) !T {
-    return std.meta.stringToEnum(T, str) orelse error.InvalidPackagesIni;
 }
 
 pub fn writeToFileOverride(packages: Packages, file: std.fs.File) !void {
@@ -234,14 +238,18 @@ fn expectWrite(packages: *Packages, string: []const u8) !void {
     try std.testing.expectEqualStrings(string, rendered.items);
 }
 
-fn expectCanonical(string: []const u8) !void {
-    var packages = try parse(std.testing.allocator, string);
+fn expectTransform(from: []const u8, to: []const u8) !void {
+    var packages = try parse(std.testing.allocator, from);
     defer packages.deinit();
 
-    return expectWrite(&packages, string);
+    return expectWrite(&packages, to);
 }
 
-test "parse" {
+fn expectCanonical(string: []const u8) !void {
+    return expectTransform(string, string);
+}
+
+test parse {
     try expectCanonical(
         \\[test.info]
         \\version = 0.0.0
@@ -275,6 +283,65 @@ test "parse" {
         \\install_share = test24
         \\url = test2
         \\hash = test2
+        \\
+    );
+    try expectTransform(
+        \\[test.info]
+        \\version = 0.0.0
+        \\description = Test package 1
+        \\donate = donate/link1
+        \\invalid_field = test
+        \\
+        \\[test.update]
+        \\github = test/test
+        \\
+        \\[test.linux_x86_64]
+        \\url = test
+        \\hash = test
+        \\
+    ,
+        \\[test.info]
+        \\version = 0.0.0
+        \\description = Test package 1
+        \\donate = donate/link1
+        \\
+        \\[test.update]
+        \\github = test/test
+        \\
+        \\[test.linux_x86_64]
+        \\url = test
+        \\hash = test
+        \\
+    );
+    try expectTransform(
+        \\[test.info]
+        \\version = 0.0.0
+        \\description = Test package 1
+        \\donate = donate/link1
+        \\
+        \\[test.update]
+        \\github = test/test
+        \\
+        \\[test.linux_x86_64]
+        \\url = test
+        \\hash = test
+        \\
+        \\[test.invalid_section]
+        \\url = test
+        \\hash = test
+        \\
+    ,
+        \\[test.info]
+        \\version = 0.0.0
+        \\description = Test package 1
+        \\donate = donate/link1
+        \\
+        \\[test.update]
+        \\github = test/test
+        \\
+        \\[test.linux_x86_64]
+        \\url = test
+        \\hash = test
         \\
     );
 }
