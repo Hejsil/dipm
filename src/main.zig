@@ -591,7 +591,7 @@ fn pkgsUpdateCommand(program: *Program) !void {
         try add_packages.append(.{
             .name = package_name,
             .version = package.update.version,
-            .download = package.update.download,
+            .download = if (package.update.download.len == 0) null else package.update.download,
         });
     }
 
