@@ -124,8 +124,8 @@ pub fn fromUrl(options: struct {
     name: ?[]const u8 = null,
     url: []const u8,
 
-    /// The uri to a line separated list of download links. If not `null` this is used to get the
-    /// download url.
+    /// The uri to somewhere that contains all the packages download links. If not `null` this is
+    /// used to get the download url.
     index_uri: ?[]const u8 = null,
 
     target: Target,
@@ -177,8 +177,8 @@ pub fn fromGithub(options: struct {
     name: ?[]const u8 = null,
     repo: GithubRepo,
 
-    /// The uri to a line separated list of download links. If not `null` this is used to get the
-    /// download url.
+    /// The uri to somewhere that contains all the packages download links. If not `null` this is
+    /// used to get the download url.
     index_uri: ?[]const u8 = null,
 
     /// Use this uri to download the repository json. If `null` then this uri will be used:
@@ -239,7 +239,7 @@ pub fn fromGithub(options: struct {
         if (package_download_result.status != .ok)
             return error.IndexDownloadFailed;
 
-        var it = std.mem.tokenizeScalar(u8, index.items, '\n');
+        var it = UrlsIterator.init(index.items);
         while (it.next()) |download_url|
             try download_urls.append(download_url);
     } else {
@@ -753,6 +753,98 @@ test fundingYmlToUrls {
     ,
         &.{
             "https://github.com/sponsors/test-test",
+        },
+    );
+}
+
+const UrlsIterator = struct {
+    str: []const u8,
+    i: usize,
+
+    fn init(str: []const u8) @This() {
+        return .{ .str = str, .i = 0 };
+    }
+
+    fn next(it: *UrlsIterator) ?[]const u8 {
+        const url_start = "://";
+        while (true) {
+            var start = std.mem.indexOfPos(u8, it.str, it.i, url_start) orelse return null;
+            it.i = start + url_start.len;
+
+            const prefixes = [_][]const u8{
+                "https",
+                "file",
+            };
+
+            for (prefixes) |prefix| {
+                if (std.mem.endsWith(u8, it.str[0..start], prefix)) {
+                    start -= prefix.len;
+                    break;
+                }
+            } else {
+                continue;
+            }
+
+            while (it.i < it.str.len) : (it.i += 1) switch (it.str[it.i]) {
+                'a'...'z', 'A'...'Z', '0'...'9', '/', '.', '_', '-' => {},
+                else => break,
+            };
+
+            return it.str[start..it.i];
+        }
+    }
+};
+
+fn testUrlsIterator(str: []const u8, expected: []const []const u8) !void {
+    var it = UrlsIterator.init(str);
+    for (expected) |expect| {
+        const next = it.next();
+        try std.testing.expect(next != null);
+        try std.testing.expectEqualStrings(expect, next.?);
+    }
+
+    try std.testing.expect(it.next() == null);
+}
+
+test UrlsIterator {
+    try testUrlsIterator(
+        \\https://dl.elv.sh/linux-amd64/elvish-v0.21.0-rc1.sha256sum
+        \\https://dl.elv.sh/linux-amd64/elvish-v0.21.0-rc1.tar.gz
+        \\https://dl.elv.sh/linux-amd64/elvish-v0.21.0-rc1.tar.gz.sha256sum
+        \\https://dl.elv.sh/linux-amd64/elvish-v0.21.0.sha256sum
+        \\https://dl.elv.sh/linux-amd64/elvish-v0.21.0.tar.gz
+        \\https://dl.elv.sh/linux-amd64/elvish-v0.21.0.tar.gz.sha256sum
+    ,
+        &.{
+            "https://dl.elv.sh/linux-amd64/elvish-v0.21.0-rc1.sha256sum",
+            "https://dl.elv.sh/linux-amd64/elvish-v0.21.0-rc1.tar.gz",
+            "https://dl.elv.sh/linux-amd64/elvish-v0.21.0-rc1.tar.gz.sha256sum",
+            "https://dl.elv.sh/linux-amd64/elvish-v0.21.0.sha256sum",
+            "https://dl.elv.sh/linux-amd64/elvish-v0.21.0.tar.gz",
+            "https://dl.elv.sh/linux-amd64/elvish-v0.21.0.tar.gz.sha256sum",
+        },
+    );
+    try testUrlsIterator(
+        \\<td class="">x86_64</td>
+        \\<td class="">
+        \\<a href="https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz">zig-linux-x86_64-0.13.0.tar.xz</a>
+        \\</td>
+        \\<td class="">
+        \\<a href="https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz.minisig">minisig</a>
+        \\</td>
+    ,
+        &.{
+            "https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz",
+            "https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz.minisig",
+        },
+    );
+    try testUrlsIterator(
+        \\test://
+        \\https://test.test
+        \\://
+    ,
+        &.{
+            "https://test.test",
         },
     );
 }
