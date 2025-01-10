@@ -254,6 +254,8 @@ pub fn fromGithub(options: struct {
         .target = options.target,
         .extra_strings = &.{
             name,
+            version,
+            latest_release.tag_name,
 
             // Pick `sccache-v0.8.1` over `sccache-dist-v0.8.1`
             try std.fmt.allocPrint(tmp_arena, "{s}-{s}", .{ name, version }),
