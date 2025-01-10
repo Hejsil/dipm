@@ -72,7 +72,7 @@ test createCommitMessage {
                     .version = "0.1.0",
                     .description = "Description 1",
                 },
-                .update = .{ .github = "" },
+                .update = .{},
                 .linux_x86_64 = .{
                     .url = "a",
                     .hash = "a",
@@ -90,7 +90,7 @@ test createCommitMessage {
                     .version = "0.1.0",
                     .description = "Description 1",
                 },
-                .update = .{ .github = "" },
+                .update = .{},
                 .linux_x86_64 = .{
                     .url = "a",
                     .hash = "a",
@@ -102,7 +102,7 @@ test createCommitMessage {
                 .version = "0.2.0",
                 .description = "Description 2",
             },
-            .update = .{ .github = "" },
+            .update = .{},
             .linux_x86_64 = .{
                 .url = "b",
                 .hash = "b",
@@ -118,7 +118,7 @@ test createCommitMessage {
                     .version = "0.1.0",
                     .description = "Description 1",
                 },
-                .update = .{ .github = "" },
+                .update = .{},
                 .linux_x86_64 = .{
                     .url = "a",
                     .hash = "a",
@@ -130,7 +130,7 @@ test createCommitMessage {
                 .version = "0.1.0",
                 .description = "Description 2",
             },
-            .update = .{ .github = "" },
+            .update = .{},
             .linux_x86_64 = .{
                 .url = "b",
                 .hash = "b",
@@ -146,7 +146,7 @@ test createCommitMessage {
                     .version = "0.1.0",
                     .description = "Description 1",
                 },
-                .update = .{ .github = "" },
+                .update = .{},
                 .linux_x86_64 = .{
                     .url = "a",
                     .hash = "a",
@@ -158,7 +158,7 @@ test createCommitMessage {
                 .version = "0.1.0",
                 .description = "Description 2",
             },
-            .update = .{ .github = "" },
+            .update = .{},
             .linux_x86_64 = .{
                 .url = "b",
                 .hash = "a",
@@ -174,7 +174,7 @@ test createCommitMessage {
                     .version = "0.1.0",
                     .description = "Description 1",
                 },
-                .update = .{ .github = "" },
+                .update = .{},
                 .linux_x86_64 = .{
                     .url = "a",
                     .hash = "a",
@@ -186,7 +186,7 @@ test createCommitMessage {
                 .version = "0.1.0",
                 .description = "Description 2",
             },
-            .update = .{ .github = "" },
+            .update = .{},
             .linux_x86_64 = .{
                 .url = "a",
                 .hash = "a",
@@ -203,7 +203,7 @@ test createCommitMessage {
                     .description = "Description 1",
                     .donate = &.{},
                 },
-                .update = .{ .github = "" },
+                .update = .{},
                 .linux_x86_64 = .{
                     .url = "a",
                     .hash = "a",
@@ -216,7 +216,7 @@ test createCommitMessage {
                 .description = "Description 1",
                 .donate = &.{"a"},
             },
-            .update = .{ .github = "" },
+            .update = .{},
             .linux_x86_64 = .{
                 .url = "a",
                 .hash = "a",
@@ -233,7 +233,7 @@ test createCommitMessage {
                     .description = "Description 1",
                     .donate = &.{"a"},
                 },
-                .update = .{ .github = "" },
+                .update = .{},
                 .linux_x86_64 = .{
                     .url = "a",
                     .hash = "a",
@@ -246,7 +246,7 @@ test createCommitMessage {
                 .description = "Description 1",
                 .donate = &.{"b"},
             },
-            .update = .{ .github = "" },
+            .update = .{},
             .linux_x86_64 = .{
                 .url = "a",
                 .hash = "a",

@@ -561,7 +561,7 @@ fn pkgsUpdateCommand(program: *Program) !void {
         .commit = false,
         .update_description = false,
         .pkgs_ini_path = "./pkgs.ini",
-        .urls = undefined,
+        .add_packages = undefined,
     };
 
     while (program.args.next()) {
@@ -581,24 +581,21 @@ fn pkgsUpdateCommand(program: *Program) !void {
     var packages = try Packages.parseFromPath(program.gpa, cwd, options.pkgs_ini_path);
     defer packages.deinit();
 
-    var urls = std.ArrayList(AddPackage).init(program.arena);
+    var add_packages = std.ArrayList(AddPackage).init(program.arena);
     for (packages_to_update.keys()) |package_name| {
         const package = packages.packages.get(package_name) orelse {
             std.log.err("{s} not found", .{package_name});
             continue;
         };
 
-        const url = try std.fmt.allocPrint(program.arena, "https://github.com/{s}", .{
-            package.update.github,
-        });
-        try urls.append(.{
+        try add_packages.append(.{
             .name = package_name,
-            .index = if (package.update.index.len != 0) package.update.index else null,
-            .url = url,
+            .version = package.update.version,
+            .download = package.update.download,
         });
     }
 
-    options.urls = urls.items;
+    options.add_packages = add_packages.items;
     return program.pkgsAdd(options);
 }
 
@@ -613,14 +610,14 @@ const pkgs_add_usage =
 ;
 
 fn pkgsAddCommand(program: *Program) !void {
-    var url: ?[]const u8 = null;
-    var index: ?[]const u8 = null;
+    var version: ?[]const u8 = null;
+    var down: ?[]const u8 = null;
     var name: ?[]const u8 = null;
     var options = PackagesAddOptions{
         .commit = false,
         .update_description = true,
         .pkgs_ini_path = "./pkgs.ini",
-        .urls = undefined,
+        .add_packages = undefined,
     };
 
     while (program.args.next()) {
@@ -628,19 +625,19 @@ fn pkgsAddCommand(program: *Program) !void {
             options.pkgs_ini_path = file;
         if (program.args.option(&.{ "-n", "--name" })) |n|
             name = n;
-        if (program.args.option(&.{ "-i", "--index" })) |i|
-            index = i;
+        if (program.args.option(&.{ "-d", "--download" })) |i|
+            down = i;
         if (program.args.flag(&.{ "-c", "--commit" }))
             options.commit = true;
         if (program.args.flag(&.{ "-h", "--help" }))
             return program.stdout.writeAll(pkgs_add_usage);
-        if (program.args.positional()) |u|
-            url = u;
+        if (program.args.positional()) |url|
+            version = url;
     }
 
-    options.urls = &.{.{
-        .url = url orelse return,
-        .index = index,
+    options.add_packages = &.{.{
+        .version = version orelse return,
+        .download = down,
         .name = name,
     }};
     return program.pkgsAdd(options);
@@ -650,12 +647,12 @@ const PackagesAddOptions = struct {
     pkgs_ini_path: []const u8,
     commit: bool,
     update_description: bool,
-    urls: []const AddPackage,
+    add_packages: []const AddPackage,
 };
 
 const AddPackage = struct {
-    url: []const u8,
-    index: ?[]const u8 = null,
+    version: []const u8,
+    download: ?[]const u8 = null,
     name: ?[]const u8 = null,
 };
 
@@ -675,20 +672,20 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     var packages = try Packages.parseFile(program.gpa, pkgs_ini_file);
     defer packages.deinit();
 
-    for (options.urls) |url| {
-        const progress = program.progress.start(url.name orelse url.url, 1);
+    for (options.add_packages) |add_package| {
+        const progress = program.progress.start(add_package.name orelse add_package.version, 1);
         defer program.progress.end(progress);
 
         const package = Package.fromUrl(.{
             .arena = packages.arena.allocator(),
             .tmp_gpa = program.gpa,
             .http_client = &http_client,
-            .url = url.url,
-            .name = url.name,
-            .index_uri = url.index,
+            .name = add_package.name,
+            .version_uri = add_package.version,
+            .download_uri = add_package.download,
             .target = .{ .os = builtin.os.tag, .arch = builtin.target.cpu.arch },
         }) catch |err| {
-            std.log.err("{s} {s}", .{ @errorName(err), url.url });
+            std.log.err("{s} {s}", .{ @errorName(err), add_package.version });
             continue;
         };
 

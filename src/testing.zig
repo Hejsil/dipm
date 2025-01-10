@@ -593,7 +593,7 @@ pub fn setupPrefix(options: struct {
         var url_buf: [std.fs.max_path_bytes]u8 = undefined;
         try Package.write(.{
             .info = .{ .version = options.version },
-            .update = .{ .github = "" },
+            .update = .{},
             .linux_x86_64 = .{
                 .url = try std.fmt.bufPrint(&url_buf, "file://{s}/{s}", .{
                     pkgs_dir_path,

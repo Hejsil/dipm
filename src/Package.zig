@@ -9,8 +9,8 @@ pub const Info = struct {
 };
 
 pub const Update = struct {
-    github: []const u8 = "",
-    index: []const u8 = "",
+    version: []const u8 = "",
+    download: []const u8 = "",
 };
 
 pub const Arch = struct {
@@ -88,10 +88,10 @@ pub fn write(package: Package, name: []const u8, writer: anytype) !void {
     try writer.writeAll("\n");
 
     try writer.print("[{s}.update]\n", .{name});
-    if (package.update.github.len != 0)
-        try writer.print("github = {s}\n", .{package.update.github});
-    if (package.update.index.len != 0)
-        try writer.print("index = {s}\n", .{package.update.index});
+    if (package.update.version.len != 0)
+        try writer.print("version = {s}\n", .{package.update.version});
+    if (package.update.download.len != 0)
+        try writer.print("download = {s}\n", .{package.update.download});
     try writer.writeAll("\n");
 
     try writer.print("[{s}.linux_x86_64]\n", .{name});
@@ -122,17 +122,19 @@ pub fn fromUrl(options: struct {
 
     /// Name of the package. `null` means it should be inferred
     name: ?[]const u8 = null,
-    url: []const u8,
+
+    /// The uri to the place where the version of the package can be obtained.
+    version_uri: []const u8,
 
     /// The uri to somewhere that contains all the packages download links. If not `null` this is
     /// used to get the download url.
-    index_uri: ?[]const u8 = null,
+    download_uri: ?[]const u8 = null,
 
     target: Target,
 }) !Named {
     const github_url = "https://github.com/";
-    if (std.mem.startsWith(u8, options.url, github_url)) {
-        const repo = options.url[github_url.len..];
+    if (std.mem.startsWith(u8, options.version_uri, github_url)) {
+        const repo = options.version_uri[github_url.len..];
         var repo_split = std.mem.splitScalar(u8, repo, '/');
 
         const repo_user = repo_split.first();
@@ -147,7 +149,7 @@ pub fn fromUrl(options: struct {
                 .user = repo_user,
                 .name = repo_name,
             },
-            .index_uri = options.index_uri,
+            .download_uri = options.download_uri,
             .target = options.target,
         });
     } else {
@@ -179,7 +181,7 @@ pub fn fromGithub(options: struct {
 
     /// The uri to somewhere that contains all the packages download links. If not `null` this is
     /// used to get the download url.
-    index_uri: ?[]const u8 = null,
+    download_uri: ?[]const u8 = null,
 
     /// Use this uri to download the repository json. If `null` then this uri will be used:
     /// https://api.github.com/repos/<user>/<repo>
@@ -229,17 +231,17 @@ pub fn fromGithub(options: struct {
     const version = try options.arena.dupe(u8, versionFromTag(latest_release.tag_name));
 
     var download_urls = std.ArrayList([]const u8).init(tmp_arena);
-    if (options.index_uri) |index_uri| {
-        var index = std.ArrayList(u8).init(tmp_arena);
-        const package_download_result = try download.download(index.writer(), .{
+    if (options.download_uri) |download_uri| {
+        var content = std.ArrayList(u8).init(tmp_arena);
+        const package_download_result = try download.download(content.writer(), .{
             .client = options.http_client,
-            .uri_str = index_uri,
+            .uri_str = download_uri,
             .progress = options.progress,
         });
         if (package_download_result.status != .ok)
             return error.IndexDownloadFailed;
 
-        var it = UrlsIterator.init(index.items);
+        var it = UrlsIterator.init(content.items);
         while (it.next()) |download_url|
             try download_urls.append(download_url);
     } else {
@@ -307,7 +309,7 @@ pub fn fromGithub(options: struct {
     });
 
     const hash = std.fmt.bytesToHex(package_download_result.hash, .lower);
-    const github = try std.fmt.allocPrint(options.arena, "{s}/{s}", .{
+    const version_uri = try std.fmt.allocPrint(options.arena, "https://github.com/{s}/{s}", .{
         options.repo.user,
         options.repo.name,
     });
@@ -320,8 +322,8 @@ pub fn fromGithub(options: struct {
                 .donate = donate,
             },
             .update = .{
-                .github = github,
-                .index = try options.arena.dupe(u8, options.index_uri orelse ""),
+                .version = version_uri,
+                .download = try options.arena.dupe(u8, options.download_uri orelse ""),
             },
             .linux_x86_64 = .{
                 .url = try options.arena.dupe(u8, download_url),
@@ -974,13 +976,13 @@ fn testFromGithub(options: struct {
         , .{ options.tag_name, static_binary_uri }),
     });
 
-    const index_file_path = try std.fs.path.join(arena, &.{
+    const download_file_path = try std.fs.path.join(arena, &.{
         tmp_dir_path,
         "index",
     });
-    const index_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{index_file_path});
+    const download_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{download_file_path});
     try cwd.writeFile(.{
-        .sub_path = index_file_path,
+        .sub_path = download_file_path,
         .data = try std.fmt.allocPrint(arena,
             \\{s}
             \\
@@ -1035,7 +1037,7 @@ fn testFromGithub(options: struct {
         .tmp_gpa = std.testing.allocator,
         .http_client = undefined, // Not used when downloading from file:// uris
         .repo = options.repo,
-        .index_uri = index_file_uri,
+        .download_uri = download_file_uri,
         .repository_uri = repository_file_uri,
         .latest_release_uri = latest_release_file_uri,
         .funding_uri = funding_file_uri,
@@ -1053,12 +1055,12 @@ fn testFromGithub(options: struct {
         var actual = std.ArrayList(u8).init(arena);
         try package.package.write(package.name, actual.writer());
 
-        // Remove index field
+        // Remove download field
         try std.testing.expectEqualStrings(expected, try std.mem.replaceOwned(
             u8,
             arena,
             actual.items,
-            try std.fmt.allocPrint(arena, "index = {s}\n", .{index_file_uri}),
+            try std.fmt.allocPrint(arena, "download = {s}\n", .{download_file_uri}),
             "",
         ));
     }
@@ -1078,7 +1080,7 @@ test fromGithub {
         \\donate = https://ko-fi.com/junegunn
         \\
         \\[fzf.update]
-        \\github = junegunn/fzf
+        \\version = https://github.com/junegunn/fzf
         \\
         \\[fzf.linux_x86_64]
         \\install_bin = junegunn-fzf-v0.54.0
@@ -1100,7 +1102,7 @@ test fromGithub {
         \\donate = https://ko-fi.com/googlefonts
         \\
         \\[fontc.update]
-        \\github = googlefonts/fontc
+        \\version = https://github.com/googlefonts/fontc
         \\
         \\[fontc.linux_x86_64]
         \\install_bin = googlefonts-fontc-fontc-v0.0.1

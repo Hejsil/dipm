@@ -187,8 +187,8 @@ pub fn parseInto(packages: *Packages, string: []const u8) !void {
                     .donate => try donate.append(value),
                 },
                 .update => switch (std.meta.stringToEnum(UpdateField, prop.name) orelse continue) {
-                    .github => package.update.github = value,
-                    .index => package.update.index = value,
+                    .version => package.update.version = value,
+                    .download => package.update.download = value,
                 },
                 .linux_x86_64 => switch (std.meta.stringToEnum(ArchField, prop.name) orelse continue) {
                     .url => package.linux_x86_64.url = value,
@@ -257,7 +257,7 @@ test parse {
         \\donate = donate/link1
         \\
         \\[test.update]
-        \\github = test/test
+        \\version = https://github.com/test/test
         \\
         \\[test.linux_x86_64]
         \\install_bin = test1
@@ -274,7 +274,7 @@ test parse {
         \\donate = donate/link3
         \\
         \\[test2.update]
-        \\github = test2/test2
+        \\version = https://github.com/test2/test2
         \\
         \\[test2.linux_x86_64]
         \\install_bin = test21
@@ -293,7 +293,7 @@ test parse {
         \\invalid_field = test
         \\
         \\[test.update]
-        \\github = test/test
+        \\version = https://github.com/test/test
         \\
         \\[test.linux_x86_64]
         \\url = test
@@ -306,7 +306,7 @@ test parse {
         \\donate = donate/link1
         \\
         \\[test.update]
-        \\github = test/test
+        \\version = https://github.com/test/test
         \\
         \\[test.linux_x86_64]
         \\url = test
@@ -320,7 +320,7 @@ test parse {
         \\donate = donate/link1
         \\
         \\[test.update]
-        \\github = test/test
+        \\version = https://github.com/test/test
         \\
         \\[test.linux_x86_64]
         \\url = test
@@ -337,7 +337,7 @@ test parse {
         \\donate = donate/link1
         \\
         \\[test.update]
-        \\github = test/test
+        \\version = https://github.com/test/test
         \\
         \\[test.linux_x86_64]
         \\url = test
@@ -379,7 +379,7 @@ test sort {
         .name = "btest",
         .package = .{
             .info = .{ .version = "0.2.0" },
-            .update = .{ .github = "test/test" },
+            .update = .{ .version = "https://github.com/test/test" },
             .linux_x86_64 = .{
                 .hash = "test_hash",
                 .url = "test_url",
@@ -390,7 +390,7 @@ test sort {
         .name = "atest",
         .package = .{
             .info = .{ .version = "0.2.0" },
-            .update = .{ .github = "test/test" },
+            .update = .{ .version = "https://github.com/test/test" },
             .linux_x86_64 = .{
                 .hash = "test_hash",
                 .url = "test_url",
@@ -402,7 +402,7 @@ test sort {
         \\version = 0.2.0
         \\
         \\[btest.update]
-        \\github = test/test
+        \\version = https://github.com/test/test
         \\
         \\[btest.linux_x86_64]
         \\url = test_url
@@ -412,7 +412,7 @@ test sort {
         \\version = 0.2.0
         \\
         \\[atest.update]
-        \\github = test/test
+        \\version = https://github.com/test/test
         \\
         \\[atest.linux_x86_64]
         \\url = test_url
@@ -426,7 +426,7 @@ test sort {
         \\version = 0.2.0
         \\
         \\[atest.update]
-        \\github = test/test
+        \\version = https://github.com/test/test
         \\
         \\[atest.linux_x86_64]
         \\url = test_url
@@ -436,7 +436,7 @@ test sort {
         \\version = 0.2.0
         \\
         \\[btest.update]
-        \\github = test/test
+        \\version = https://github.com/test/test
         \\
         \\[btest.linux_x86_64]
         \\url = test_url
@@ -463,8 +463,8 @@ pub fn update(packages: *Packages, package: Package.Named, options: UpdateOption
                 .description = old_package.info.description,
             },
             .update = .{
-                .github = package.package.update.github,
-                .index = package.package.update.index,
+                .version = package.package.update.version,
+                .download = package.package.update.download,
             },
             .linux_x86_64 = .{
                 .url = package.package.linux_x86_64.url,
@@ -577,7 +577,7 @@ test update {
                 .description = "Test package",
                 .donate = &.{ "donate-link", "donate-link" },
             },
-            .update = .{ .github = "test/test" },
+            .update = .{ .version = "https://github.com/test/test" },
             .linux_x86_64 = .{
                 .hash = "test_hash1",
                 .url = "test_url1",
@@ -598,7 +598,7 @@ test update {
         \\donate = donate-link
         \\
         \\[test.update]
-        \\github = test/test
+        \\version = https://github.com/test/test
         \\
         \\[test.linux_x86_64]
         \\install_bin = test-0.1.0/test
@@ -613,8 +613,8 @@ test update {
         .package = .{
             .info = .{ .version = "0.2.0" },
             .update = .{
-                .github = "test/test",
-                .index = "https://index.com",
+                .version = "https://github.com/test/test",
+                .download = "https://download.com",
             },
             .linux_x86_64 = .{
                 .hash = "test_hash2",
@@ -636,8 +636,8 @@ test update {
         \\description = Test package
         \\
         \\[test.update]
-        \\github = test/test
-        \\index = https://index.com
+        \\version = https://github.com/test/test
+        \\download = https://download.com
         \\
         \\[test.linux_x86_64]
         \\install_bin = test-0.2.0/test
@@ -656,8 +656,8 @@ test update {
         \\version = 0.2.0
         \\
         \\[test.update]
-        \\github = test/test
-        \\index = https://index.com
+        \\version = https://github.com/test/test
+        \\download = https://download.com
         \\
         \\[test.linux_x86_64]
         \\install_bin = test-0.2.0/test
