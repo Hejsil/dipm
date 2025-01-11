@@ -2,7 +2,7 @@ gpa: std.mem.Allocator,
 
 http_client: ?*std.http.Client,
 packages: *const Packages,
-installed_packages: *InstalledPackages,
+installed_packages: InstalledPackages,
 
 diagnostics: *Diagnostics,
 progress: *Progress,
@@ -37,6 +37,12 @@ pub fn init(options: Options) !PackageManager {
     });
     errdefer own_tmp_dir.close();
 
+    var installed_packages = try InstalledPackages.open(.{
+        .gpa = options.gpa,
+        .prefix = options.prefix,
+    });
+    errdefer installed_packages.deinit();
+
     return PackageManager{
         .gpa = allocator,
         .http_client = options.http_client,
@@ -49,7 +55,7 @@ pub fn init(options: Options) !PackageManager {
         .share_dir = share_dir,
         .own_tmp_dir = own_tmp_dir,
         .packages = options.packages,
-        .installed_packages = options.installed_packages,
+        .installed_packages = installed_packages,
     };
 }
 
@@ -57,7 +63,6 @@ pub const Options = struct {
     gpa: std.mem.Allocator,
     http_client: ?*std.http.Client = null,
     packages: *const Packages,
-    installed_packages: *InstalledPackages,
 
     /// Successes and failures are reported to the diagnostics. Set this for more details
     /// about failures.
@@ -80,6 +85,7 @@ pub fn cleanup(pm: PackageManager) !void {
 }
 
 pub fn deinit(pm: *PackageManager) void {
+    pm.installed_packages.deinit();
     pm.bin_dir.close();
     pm.lib_dir.close();
     pm.prefix_dir.close();

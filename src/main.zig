@@ -263,12 +263,6 @@ fn installCommand(program: *Program) !void {
     var http_client = std.http.Client{ .allocator = program.gpa };
     defer http_client.deinit();
 
-    var installed_packages = try InstalledPackages.open(.{
-        .gpa = program.gpa,
-        .prefix = program.prefix(),
-    });
-    defer installed_packages.deinit();
-
     var packages = try Packages.download(.{
         .gpa = program.gpa,
         .http_client = &http_client,
@@ -284,7 +278,6 @@ fn installCommand(program: *Program) !void {
         .gpa = program.gpa,
         .http_client = &http_client,
         .packages = &packages,
-        .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .prefix = program.prefix(),
@@ -314,12 +307,6 @@ fn uninstallCommand(program: *Program) !void {
             packages_to_uninstall.appendAssumeCapacity(name);
     }
 
-    var installed_packages = try InstalledPackages.open(.{
-        .gpa = program.gpa,
-        .prefix = program.prefix(),
-    });
-    defer installed_packages.deinit();
-
     // Uninstall does not need to download packages
     var packages = Packages.init(program.gpa);
     defer packages.deinit();
@@ -327,7 +314,6 @@ fn uninstallCommand(program: *Program) !void {
     var pm = try PackageManager.init(.{
         .gpa = program.gpa,
         .packages = &packages,
-        .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .prefix = program.prefix(),
@@ -366,12 +352,6 @@ fn updateCommand(program: *Program) !void {
     var http_client = std.http.Client{ .allocator = program.gpa };
     defer http_client.deinit();
 
-    var installed_packages = try InstalledPackages.open(.{
-        .gpa = program.gpa,
-        .prefix = program.prefix(),
-    });
-    defer installed_packages.deinit();
-
     var packages = try Packages.download(.{
         .gpa = program.gpa,
         .http_client = &http_client,
@@ -387,7 +367,6 @@ fn updateCommand(program: *Program) !void {
         .gpa = program.gpa,
         .http_client = &http_client,
         .packages = &packages,
-        .installed_packages = &installed_packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .prefix = program.prefix(),
