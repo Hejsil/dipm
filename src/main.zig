@@ -260,27 +260,13 @@ fn installCommand(program: *Program) !void {
             packages_to_install.appendAssumeCapacity(name);
     }
 
-    var http_client = std.http.Client{ .allocator = program.gpa };
-    defer http_client.deinit();
-
-    var packages = try Packages.download(.{
+    var pm = try PackageManager.init(.{
         .gpa = program.gpa,
-        .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .prefix = program.prefix(),
         .pkgs_uri = program.pkgsUri(),
         .download = .only_if_required,
-    });
-    defer packages.deinit();
-
-    var pm = try PackageManager.init(.{
-        .gpa = program.gpa,
-        .http_client = &http_client,
-        .packages = &packages,
-        .diagnostics = program.diagnostics,
-        .progress = program.progress,
-        .prefix = program.prefix(),
     });
     defer pm.deinit();
 
@@ -313,10 +299,11 @@ fn uninstallCommand(program: *Program) !void {
 
     var pm = try PackageManager.init(.{
         .gpa = program.gpa,
-        .packages = &packages,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .prefix = program.prefix(),
+        .pkgs_uri = program.pkgsUri(),
+        .download = .only_if_required,
     });
     defer pm.deinit();
 
@@ -349,27 +336,13 @@ fn updateCommand(program: *Program) !void {
             packages_to_update.appendAssumeCapacity(name);
     }
 
-    var http_client = std.http.Client{ .allocator = program.gpa };
-    defer http_client.deinit();
-
-    var packages = try Packages.download(.{
+    var pm = try PackageManager.init(.{
         .gpa = program.gpa,
-        .http_client = &http_client,
         .diagnostics = program.diagnostics,
         .progress = program.progress,
         .prefix = program.prefix(),
         .pkgs_uri = program.pkgsUri(),
         .download = .always,
-    });
-    defer packages.deinit();
-
-    var pm = try PackageManager.init(.{
-        .gpa = program.gpa,
-        .http_client = &http_client,
-        .packages = &packages,
-        .diagnostics = program.diagnostics,
-        .progress = program.progress,
-        .prefix = program.prefix(),
     });
     defer pm.deinit();
 

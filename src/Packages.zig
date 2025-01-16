@@ -14,10 +14,18 @@ pub fn deinit(packages: *Packages) void {
     packages.* = undefined;
 }
 
+pub const Download = enum {
+    /// Always download the latest index
+    always,
+
+    /// Only download the index if it doesn't exist locally
+    only_if_required,
+};
+
 const DownloadOptions = struct {
     gpa: std.mem.Allocator,
 
-    http_client: *std.http.Client,
+    http_client: ?*std.http.Client = null,
 
     /// Successes and failures are reported to the diagnostics. Set this for more details
     /// about failures.
@@ -31,13 +39,7 @@ const DownloadOptions = struct {
     pkgs_uri: []const u8,
 
     /// The download behavior of the index.
-    download: enum {
-        /// Always download the latest index
-        always,
-
-        /// Only download the index if it doesn't exist locally
-        only_if_required,
-    },
+    download: Download,
 };
 
 pub fn download(options: DownloadOptions) !Packages {

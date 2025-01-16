@@ -1,7 +1,7 @@
 gpa: std.mem.Allocator,
 
-http_client: ?*std.http.Client,
-packages: *const Packages,
+http_client: std.http.Client,
+packages: Packages,
 installed_packages: InstalledPackages,
 
 diagnostics: *Diagnostics,
@@ -17,8 +17,6 @@ share_dir: std.fs.Dir,
 own_tmp_dir: std.fs.Dir,
 
 pub fn init(options: Options) !PackageManager {
-    const allocator = options.gpa;
-
     const cwd = std.fs.cwd();
     var prefix_dir = try cwd.makeOpenPath(options.prefix, .{});
     errdefer prefix_dir.close();
@@ -37,15 +35,29 @@ pub fn init(options: Options) !PackageManager {
     });
     errdefer own_tmp_dir.close();
 
+    var http_client = std.http.Client{ .allocator = options.gpa };
+    errdefer http_client.deinit();
+
     var installed_packages = try InstalledPackages.open(.{
         .gpa = options.gpa,
         .prefix = options.prefix,
     });
     errdefer installed_packages.deinit();
 
+    var packages = try Packages.download(.{
+        .gpa = options.gpa,
+        .http_client = &http_client,
+        .diagnostics = options.diagnostics,
+        .progress = options.progress,
+        .prefix = options.prefix,
+        .pkgs_uri = options.pkgs_uri,
+        .download = options.download,
+    });
+    errdefer packages.deinit();
+
     return PackageManager{
-        .gpa = allocator,
-        .http_client = options.http_client,
+        .gpa = options.gpa,
+        .http_client = http_client,
         .diagnostics = options.diagnostics,
         .progress = options.progress,
         .target = options.target,
@@ -54,15 +66,13 @@ pub fn init(options: Options) !PackageManager {
         .lib_dir = lib_dir,
         .share_dir = share_dir,
         .own_tmp_dir = own_tmp_dir,
-        .packages = options.packages,
+        .packages = packages,
         .installed_packages = installed_packages,
     };
 }
 
 pub const Options = struct {
     gpa: std.mem.Allocator,
-    http_client: ?*std.http.Client = null,
-    packages: *const Packages,
 
     /// Successes and failures are reported to the diagnostics. Set this for more details
     /// about failures.
@@ -71,6 +81,10 @@ pub const Options = struct {
 
     /// The prefix path where the package manager will work and install packages
     prefix: []const u8,
+    pkgs_uri: []const u8,
+
+    /// The download behavior of the index.
+    download: Packages.Download,
 
     target: Target = .{
         .arch = builtin.cpu.arch,
@@ -85,6 +99,8 @@ pub fn cleanup(pm: PackageManager) !void {
 }
 
 pub fn deinit(pm: *PackageManager) void {
+    pm.http_client.deinit();
+    pm.packages.deinit();
     pm.installed_packages.deinit();
     pm.bin_dir.close();
     pm.lib_dir.close();
@@ -186,7 +202,7 @@ const DownloadAndExtractReturnType =
     @typeInfo(@TypeOf(downloadAndExtractPackage)).@"fn".return_type.?;
 
 fn downloadAndExtractPackage(
-    pm: *const PackageManager,
+    pm: *PackageManager,
     dir: std.fs.Dir,
     package: Package.Specific,
 ) !void {
@@ -206,7 +222,7 @@ fn downloadAndExtractPackage(
         defer pm.progress.end(download_progress);
 
         const download_result = download.download(downloaded_file.writer(), .{
-            .client = pm.http_client,
+            .client = &pm.http_client,
             .uri_str = package.install.url,
             .progress = download_progress,
         }) catch |err| {
@@ -399,9 +415,11 @@ fn uninstallOneUnchecked(
     _ = pm.installed_packages.packages.orderedRemove(package_name);
 }
 
-pub fn updateAll(pm: *PackageManager, options: struct {
+pub const UpdateOptions = struct {
     force: bool = false,
-}) !void {
+};
+
+pub fn updateAll(pm: *PackageManager, options: UpdateOptions) !void {
     const installed_packages = pm.installed_packages.packages.keys();
     const packages_to_update = try pm.gpa.dupe([]const u8, installed_packages);
     defer pm.gpa.free(packages_to_update);
@@ -412,9 +430,11 @@ pub fn updateAll(pm: *PackageManager, options: struct {
     });
 }
 
-pub fn updateMany(pm: *PackageManager, package_names: []const []const u8, options: struct {
-    force: bool = false,
-}) !void {
+pub fn updateMany(
+    pm: *PackageManager,
+    package_names: []const []const u8,
+    options: UpdateOptions,
+) !void {
     return pm.updatePackages(package_names, .{
         .up_to_date_diag = true,
         .force = options.force,
