@@ -520,7 +520,12 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
         .{ "polar", "https://polar.sh/" },
     });
 
-    var tok = Tokenizer{ .str = string };
+    var tok = Tokenizer{ .str = blk: {
+        var res = std.mem.trimLeft(u8, string, "");
+        if (std.mem.startsWith(u8, res, "---"))
+            res = res[3..];
+        break :blk res;
+    } };
     var curr = tok.next();
     while (curr.len != 0) {
         if (curr[0] == '\n') {
@@ -757,6 +762,18 @@ test fundingYmlToUrls {
     ,
         &.{
             "https://github.com/sponsors/test-test",
+        },
+    );
+    try expectFundingUrls(
+        \\---
+        \\github: test
+        \\ko_fi: test
+        \\custom: "https://www.paypal.me/test"
+    ,
+        &.{
+            "https://github.com/sponsors/test",
+            "https://ko-fi.com/test",
+            "https://www.paypal.me/test",
         },
     );
 }
