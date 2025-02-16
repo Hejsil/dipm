@@ -486,7 +486,7 @@ test "dipm install fails-download" {
     );
 }
 
-fn fuzz(fuzz_input: []const u8) !void {
+fn fuzz(_: void, fuzz_input: []const u8) !void {
     var args = std.ArrayList([]const u8).init(std.testing.allocator);
     defer args.deinit();
 
@@ -507,7 +507,7 @@ fn fuzz(fuzz_input: []const u8) !void {
 }
 
 test "fuzz" {
-    try std.testing.fuzz(fuzz, .{});
+    try std.testing.fuzz({}, fuzz, .{});
 }
 
 pub fn runMain(options: struct {

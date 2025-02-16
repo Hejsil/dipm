@@ -1408,7 +1408,7 @@ fn findDownloadUrl(options: struct {
         // The above rules are the most important
         this_score *= 10;
 
-        var buf: [std.mem.page_size]u8 = undefined;
+        var buf: [1024]u8 = undefined;
         for (options.extra_strings) |string| {
             this_score += std.mem.count(u8, url, string);
             // We wonna pick `tau` instead of `taucorder`. Most of the time, these names are

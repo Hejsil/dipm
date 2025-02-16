@@ -369,7 +369,7 @@ fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
 }
 
 test "fuzz" {
-    try std.testing.fuzz(fuzz.fnFromParseAndWrite(parseAndWrite), .{});
+    try std.testing.fuzz({}, fuzz.fnFromParseAndWrite(parseAndWrite), .{});
 }
 
 pub const Result = struct {

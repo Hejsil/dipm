@@ -360,7 +360,7 @@ fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
 }
 
 test "parse.fuzz" {
-    try std.testing.fuzz(fuzz.fnFromParseAndWrite(parseAndWrite), .{});
+    try std.testing.fuzz({}, fuzz.fnFromParseAndWrite(parseAndWrite), .{});
 }
 
 pub fn sort(packages: *Packages) void {

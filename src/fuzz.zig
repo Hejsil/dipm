@@ -1,8 +1,8 @@
 pub fn fnFromParseAndWrite(
     comptime parseAndWrite: fn (std.mem.Allocator, []const u8) anyerror![]u8,
-) fn (input: []const u8) anyerror!void {
+) fn (void, []const u8) anyerror!void {
     return struct {
-        fn fuzz(fuzz_input: []const u8) !void {
+        fn fuzz(_: void, fuzz_input: []const u8) !void {
             const allocator = std.testing.allocator;
             // This fuzz test ensure that once parsed and written out once, doing so again should
             // yield the same result.
