@@ -257,8 +257,7 @@ pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !v
     }
 
     const show_donate_reminder = opt.is_tty and !diagnostics.hasFailed() and
-        (diagnostics.successes.installs.items.len != 0 or
-        diagnostics.successes.updates.items.len != 0);
+        (diagnostics.successes.installs.items.len != 0 or diagnostics.successes.updates.items.len != 0);
 
     if (show_donate_reminder) {
         try writer.writeAll("\n");
