@@ -518,6 +518,7 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
         .{ "patreon", "https://www.patreon.com/" },
         .{ "open_collective", "https://opencollective.com/" },
         .{ "polar", "https://polar.sh/" },
+        .{ "thanks_dev", "https://thanks.dev/" },
     });
 
     var tok = Tokenizer{ .str = blk: {
@@ -596,6 +597,10 @@ fn expectFundingUrls(funding_yml: []const u8, expected: []const []const u8) !voi
     const len = @min(expected.len, actual.len);
     for (expected[0..len], actual[0..len]) |e, a|
         try std.testing.expectEqualStrings(e, a);
+    for (expected[len..]) |e|
+        try std.testing.expectEqualStrings(e, "");
+    for (actual[len..]) |a|
+        try std.testing.expectEqualStrings("", a);
     try std.testing.expectEqual(expected.len, actual.len);
 }
 
@@ -660,6 +665,7 @@ test fundingYmlToUrls {
         \\liberapay: [test]
         \\open_collective: [test]
         \\polar: [test]
+        \\thanks_dev: [test]
     ,
         &.{
             "https://www.patreon.com/test",
@@ -668,6 +674,7 @@ test fundingYmlToUrls {
             "https://liberapay.com/test",
             "https://opencollective.com/test",
             "https://polar.sh/test",
+            "https://thanks.dev/test",
         },
     );
     try expectFundingUrls(
