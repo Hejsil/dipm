@@ -1,7 +1,7 @@
 .{
     .name = .dipm,
-    .version = "0.0.0",
-    .fingerprint = 0xce3a2bf450039c7e,
+    .version = "0.30.2",
+    .fingerprint = 0xce3a2bf46fc8eacf,
     .dependencies = .{},
     .paths = .{
         "build.zig",
