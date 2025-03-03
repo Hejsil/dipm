@@ -1,6 +1,7 @@
 .{
-    .name = "dipm",
+    .name = .dipm,
     .version = "0.0.0",
+    .fingerprint = 0xce3a2bf450039c7e,
     .dependencies = .{},
     .paths = .{
         "build.zig",
