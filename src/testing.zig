@@ -2,7 +2,7 @@ test "dipm install test-file" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-file" } });
+    try prefix.run(&.{ "install", "test-file" });
     try prefix.expectFile("stderr",
         \\✓ test-file 0.1.0
         \\
@@ -29,7 +29,7 @@ test "dipm install test-xz" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-xz" } });
+    try prefix.run(&.{ "install", "test-xz" });
     try prefix.expectFile("stderr",
         \\✓ test-xz 0.1.0
         \\
@@ -56,7 +56,7 @@ test "dipm install test-gz" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-gz" } });
+    try prefix.run(&.{ "install", "test-gz" });
     try prefix.expectFile("stderr",
         \\✓ test-gz 0.1.0
         \\
@@ -83,7 +83,7 @@ test "install test-zst" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-zst" } });
+    try prefix.run(&.{ "install", "test-zst" });
     try prefix.expectFile("stderr",
         \\✓ test-zst 0.1.0
         \\
@@ -110,10 +110,7 @@ test "dipm install test-zst test-zst test-xz test-xz" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{
-        .prefix = prefix,
-        .args = &.{ "install", "test-zst", "test-zst", "test-xz", "test-xz" },
-    });
+    try prefix.run(&.{ "install", "test-zst", "test-zst", "test-xz", "test-xz" });
     try prefix.expectFile("stderr",
         \\✓ test-zst 0.1.0
         \\✓ test-xz 0.1.0
@@ -125,13 +122,13 @@ test "dipm install test-file && dipm install test-file" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-file" } });
+    try prefix.run(&.{ "install", "test-file" });
     try prefix.expectFile("stderr",
         \\✓ test-file 0.1.0
         \\
     );
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-file" } });
+    try prefix.run(&.{ "install", "test-file" });
     try prefix.expectFile("stderr",
         \\⚠ test-file
         \\└── Package already installed
@@ -143,13 +140,13 @@ test "dipm install test-file && dipm uninstall test-file" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-file" } });
+    try prefix.run(&.{ "install", "test-file" });
     try prefix.expectFile("stderr",
         \\✓ test-file 0.1.0
         \\
     );
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "uninstall", "test-file" } });
+    try prefix.run(&.{ "uninstall", "test-file" });
     try prefix.expectFile("stderr",
         \\✓ test-file 0.1.0 -> ✗
         \\
@@ -166,7 +163,7 @@ test "dipm uninstall test-file" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "uninstall", "test-file" } });
+    try prefix.run(&.{ "uninstall", "test-file" });
     try prefix.expectFile("stderr",
         \\⚠ test-file
         \\└── Package is not installed
@@ -178,19 +175,19 @@ test "dipm install test-file && dipm uninstall test-file && dipm uninstall test-
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-file" } });
+    try prefix.run(&.{ "install", "test-file" });
     try prefix.expectFile("stderr",
         \\✓ test-file 0.1.0
         \\
     );
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "uninstall", "test-file" } });
+    try prefix.run(&.{ "uninstall", "test-file" });
     try prefix.expectFile("stderr",
         \\✓ test-file 0.1.0 -> ✗
         \\
     );
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "uninstall", "test-file" } });
+    try prefix.run(&.{ "uninstall", "test-file" });
     try prefix.expectFile("stderr",
         \\⚠ test-file
         \\└── Package is not installed
@@ -202,7 +199,7 @@ test "dipm install test-xz test-zst && dipm update test-xz" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-xz", "test-zst" } });
+    try prefix.run(&.{ "install", "test-xz", "test-zst" });
     try prefix.expectFile("stderr",
         \\✓ test-xz 0.1.0
         \\✓ test-zst 0.1.0
@@ -232,7 +229,7 @@ test "dipm install test-xz test-zst && dipm update test-xz" {
     var prefix_v2 = try setupPrefix(.{ .version = "0.2.0", .prefix = prefix.prefix });
     defer prefix_v2.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "update", "test-xz" } });
+    try prefix.run(&.{ "update", "test-xz" });
     try prefix.expectFile("stderr",
         \\✓ test-xz 0.1.0 -> 0.2.0
         \\
@@ -261,7 +258,7 @@ test "dipm install test-xz test-zst && dipm update" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-xz", "test-zst" } });
+    try prefix.run(&.{ "install", "test-xz", "test-zst" });
     try prefix.expectFile("stderr",
         \\✓ test-xz 0.1.0
         \\✓ test-zst 0.1.0
@@ -291,7 +288,7 @@ test "dipm install test-xz test-zst && dipm update" {
     var prefix_v2 = try setupPrefix(.{ .version = "0.2.0", .prefix = prefix.prefix });
     defer prefix_v2.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{"update"} });
+    try prefix.run(&.{"update"});
     try prefix.expectFile("stderr",
         \\✓ test-xz 0.1.0 -> 0.2.0
         \\✓ test-zst 0.1.0 -> 0.2.0
@@ -321,7 +318,7 @@ test "dipm install test-xz test-gz && dipm update && dipm uninstall test-xz test
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-xz", "test-gz" } });
+    try prefix.run(&.{ "install", "test-xz", "test-gz" });
     try prefix.expectFile("stderr",
         \\✓ test-xz 0.1.0
         \\✓ test-gz 0.1.0
@@ -332,14 +329,14 @@ test "dipm install test-xz test-gz && dipm update && dipm uninstall test-xz test
     var prefix_v2 = try setupPrefix(.{ .version = "0.2.0", .prefix = prefix.prefix });
     defer prefix_v2.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{"update"} });
+    try prefix.run(&.{"update"});
     try prefix.expectFile("stderr",
         \\✓ test-xz 0.1.0 -> 0.2.0
         \\✓ test-gz 0.1.0 -> 0.2.0
         \\
     );
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "uninstall", "test-xz", "test-gz" } });
+    try prefix.run(&.{ "uninstall", "test-xz", "test-gz" });
     try prefix.expectFile("stderr",
         \\✓ test-xz 0.2.0 -> ✗
         \\✓ test-gz 0.2.0 -> ✗
@@ -351,7 +348,7 @@ test "dipm install wrong-hash" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    const res = runMain(.{ .prefix = prefix, .args = &.{ "install", "wrong-hash" } });
+    const res = prefix.run(&.{ "install", "wrong-hash" });
     try std.testing.expectError(Diagnostics.Error.DiagnosticsReported, res);
     try prefix.expectFile("stderr",
         \\✗ wrong-hash 0.1.0
@@ -366,7 +363,7 @@ test "dipm install not-found" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "not-found" } });
+    try prefix.run(&.{ "install", "not-found" });
     try prefix.expectFile("stderr",
         \\⚠ not-found
         \\└── Package not found
@@ -378,13 +375,13 @@ test "dipm install test-xz test-xz && dipm uninstall test-xz test-xz" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-xz", "test-xz" } });
+    try prefix.run(&.{ "install", "test-xz", "test-xz" });
     try prefix.expectFile("stderr",
         \\✓ test-xz 0.1.0
         \\
     );
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "uninstall", "test-xz", "test-xz" } });
+    try prefix.run(&.{ "uninstall", "test-xz", "test-xz" });
     try prefix.expectFile("stderr",
         \\✓ test-xz 0.1.0 -> ✗
         \\
@@ -395,7 +392,7 @@ test "dipm install not-found not-found" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "not-found", "not-found" } });
+    try prefix.run(&.{ "install", "not-found", "not-found" });
     try prefix.expectFile("stderr",
         \\⚠ not-found
         \\└── Package not found
@@ -407,16 +404,13 @@ test "dipm install test-file && dipm update test-file" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{
-        .args = &.{ "install", "test-file" },
-        .prefix = prefix,
-    });
+    try prefix.run(&.{ "install", "test-file" });
     try prefix.expectFile("stderr",
         \\✓ test-file 0.1.0
         \\
     );
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "update", "test-file" } });
+    try prefix.run(&.{ "update", "test-file" });
     try prefix.expectFile("stderr",
         \\⚠ test-file 0.1.0
         \\└── Package is up to date
@@ -428,13 +422,13 @@ test "dipm install test-file && dipm update --force test-file" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-file" } });
+    try prefix.run(&.{ "install", "test-file" });
     try prefix.expectFile("stderr",
         \\✓ test-file 0.1.0
         \\
     );
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "update", "--force", "test-file" } });
+    try prefix.run(&.{ "update", "--force", "test-file" });
     try prefix.expectFile("stderr",
         \\✓ test-file 0.1.0 -> 0.1.0
         \\
@@ -445,13 +439,13 @@ test "dipm install test-file && dipm update" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-file" } });
+    try prefix.run(&.{ "install", "test-file" });
     try prefix.expectFile("stderr",
         \\✓ test-file 0.1.0
         \\
     );
 
-    try runMain(.{ .prefix = prefix, .args = &.{"update"} });
+    try prefix.run(&.{"update"});
     try prefix.expectFile("stderr",
         \\
     );
@@ -461,13 +455,13 @@ test "dipm install test-file && dipm update --force" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "test-file" } });
+    try prefix.run(&.{ "install", "test-file" });
     try prefix.expectFile("stderr",
         \\✓ test-file 0.1.0
         \\
     );
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "update", "--force" } });
+    try prefix.run(&.{ "update", "--force" });
     try prefix.expectFile("stderr",
         \\✓ test-file 0.1.0 -> 0.1.0
         \\
@@ -478,7 +472,7 @@ test "dipm install fails-download" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    const res = runMain(.{ .prefix = prefix, .args = &.{ "install", "fails-download" } });
+    const res = prefix.run(&.{ "install", "fails-download" });
     try std.testing.expectError(Diagnostics.Error.DiagnosticsReported, res);
     try prefix.expectFileStartsWith("stderr",
         \\✗ fails-download 0.1.0
@@ -490,8 +484,8 @@ test "dipm install packages with shared files in bin/" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "dup-bin1" } });
-    const res = runMain(.{ .prefix = prefix, .args = &.{ "install", "dup-bin2" } });
+    try prefix.run(&.{ "install", "dup-bin1" });
+    const res = prefix.run(&.{ "install", "dup-bin2" });
     try std.testing.expectError(Diagnostics.Error.DiagnosticsReported, res);
     try prefix.expectFileStartsWith("stderr",
         \\✗ dup-bin2
@@ -504,8 +498,8 @@ test "dipm install packages with shared files in lib/" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try runMain(.{ .prefix = prefix, .args = &.{ "install", "dup-lib1" } });
-    const res = runMain(.{ .prefix = prefix, .args = &.{ "install", "dup-lib2" } });
+    try prefix.run(&.{ "install", "dup-lib1" });
+    const res = prefix.run(&.{ "install", "dup-lib2" });
     try std.testing.expectError(Diagnostics.Error.DiagnosticsReported, res);
     try prefix.expectFileStartsWith("stderr",
         \\✗ dup-lib2
@@ -527,7 +521,7 @@ fn fuzz(_: void, fuzz_input: []const u8) !void {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    runMain(.{ .prefix = prefix, .args = args.items }) catch |err| switch (err) {
+    prefix.run(args.items) catch |err| switch (err) {
         Diagnostics.Error.DiagnosticsReported => {},
         error.InvalidArgument => {},
         else => try std.testing.expect(false),
@@ -536,30 +530,6 @@ fn fuzz(_: void, fuzz_input: []const u8) !void {
 
 test "fuzz" {
     try std.testing.fuzz({}, fuzz, .{});
-}
-
-pub fn runMain(options: struct {
-    gpa: std.mem.Allocator = std.testing.allocator,
-    args: []const []const u8,
-    prefix: Prefix,
-}) !void {
-    var dir = try std.fs.cwd().openDir(options.prefix.prefix, .{});
-    defer dir.close();
-
-    var stdout = try dir.createFile("stdout", .{ .read = true });
-    defer stdout.close();
-
-    var stderr = try dir.createFile("stderr", .{ .read = true });
-    defer stderr.close();
-
-    try main.mainFull(.{
-        .gpa = options.gpa,
-        .args = options.args,
-        .stdout = stdout,
-        .stderr = stderr,
-        .forced_prefix = options.prefix.prefix,
-        .forced_pkgs_uri = options.prefix.pkgs_uri,
-    });
 }
 
 pub fn setupPrefix(options: struct {
@@ -663,6 +633,26 @@ pub const Prefix = struct {
         std.fs.cwd().deleteTree(prefix.prefix) catch {};
         prefix.gpa.free(prefix.pkgs_uri);
         prefix.gpa.free(prefix.prefix);
+    }
+
+    pub fn run(prefix: Prefix, args: []const []const u8) !void {
+        var dir = try std.fs.cwd().openDir(prefix.prefix, .{});
+        defer dir.close();
+
+        var stdout = try dir.createFile("stdout", .{ .read = true });
+        defer stdout.close();
+
+        var stderr = try dir.createFile("stderr", .{ .read = true });
+        defer stderr.close();
+
+        try main.mainFull(.{
+            .gpa = prefix.gpa,
+            .args = args,
+            .stdout = stdout,
+            .stderr = stderr,
+            .forced_prefix = prefix.prefix,
+            .forced_pkgs_uri = prefix.pkgs_uri,
+        });
     }
 
     pub fn expectNoFile(prefix: Prefix, file: []const u8) !void {
