@@ -9,11 +9,14 @@ progress: *Progress,
 
 target: Target,
 
+lock: std.fs.File,
+
 prefix_dir: std.fs.Dir,
 bin_dir: std.fs.Dir,
 lib_dir: std.fs.Dir,
 share_dir: std.fs.Dir,
 
+own_data_dir: std.fs.Dir,
 own_tmp_dir: std.fs.Dir,
 
 pub fn init(options: Options) !PackageManager {
@@ -30,10 +33,16 @@ pub fn init(options: Options) !PackageManager {
     var share_dir = try prefix_dir.makeOpenPath(paths.share_subpath, .{});
     errdefer share_dir.close();
 
+    var own_data_dir = try prefix_dir.makeOpenPath(paths.own_data_subpath, .{});
+    errdefer own_data_dir.close();
+
     var own_tmp_dir = try prefix_dir.makeOpenPath(paths.own_tmp_subpath, .{
         .iterate = true,
     });
     errdefer own_tmp_dir.close();
+
+    var lock = try own_data_dir.createFile("lock", .{ .lock = .exclusive });
+    errdefer lock.close();
 
     var http_client = std.http.Client{ .allocator = options.gpa };
     errdefer http_client.deinit();
@@ -61,10 +70,12 @@ pub fn init(options: Options) !PackageManager {
         .diagnostics = options.diagnostics,
         .progress = options.progress,
         .target = options.target,
+        .lock = lock,
         .prefix_dir = prefix_dir,
         .bin_dir = bin_dir,
         .lib_dir = lib_dir,
         .share_dir = share_dir,
+        .own_data_dir = own_data_dir,
         .own_tmp_dir = own_tmp_dir,
         .packages = packages,
         .installed_packages = installed_packages,
@@ -102,13 +113,16 @@ pub fn deinit(pm: *PackageManager) void {
     pm.http_client.deinit();
     pm.packages.deinit();
     pm.installed_packages.deinit();
+    pm.lock.close();
+    pm.prefix_dir.close();
     pm.bin_dir.close();
     pm.lib_dir.close();
-    pm.prefix_dir.close();
     pm.share_dir.close();
+    pm.own_data_dir.close();
+    pm.own_tmp_dir.close();
 }
 
-pub fn isInstalled(pm: *const PackageManager, package_name: []const u8) bool {
+fn isInstalled(pm: *const PackageManager, package_name: []const u8) bool {
     return pm.installed_packages.packages.contains(package_name);
 }
 
@@ -279,6 +293,7 @@ fn installExtractedPackage(
 ) !void {
     const gpa = pm.installed_packages.arena.child_allocator;
     const arena = pm.installed_packages.arena.allocator();
+
     var locations = std.ArrayList([]const u8).init(arena);
     defer locations.deinit();
 
