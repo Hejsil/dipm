@@ -155,8 +155,7 @@ pub fn installMany(pm: *PackageManager, package_names: []const []const u8) !void
     //         If this fails, packages can be left in a partially updated state
     for (downloads.jobs.items) |downloaded| {
         downloaded.result catch |err| switch (err) {
-            DiagnosticError.DiagnosticsInvalidHash => continue,
-            DiagnosticError.DiagnosticsDownloadFailed => continue,
+            Diagnostics.Error.DiagnosticsReported => continue,
             else => |e| return e,
         };
 
@@ -246,7 +245,7 @@ fn downloadAndExtractPackage(
                 .url = package.install.url,
                 .err = err,
             });
-            return DiagnosticError.DiagnosticsDownloadFailed;
+            return Diagnostics.Error.DiagnosticsReported;
         };
         if (download_result.status != .ok) {
             try pm.diagnostics.downloadFailedWithStatus(.{
@@ -255,7 +254,7 @@ fn downloadAndExtractPackage(
                 .url = package.install.url,
                 .status = download_result.status,
             });
-            return DiagnosticError.DiagnosticsDownloadFailed;
+            return Diagnostics.Error.DiagnosticsReported;
         }
 
         const actual_hash = std.fmt.bytesToHex(download_result.hash, .lower);
@@ -266,7 +265,7 @@ fn downloadAndExtractPackage(
                 .expected_hash = package.install.hash,
                 .actual_hash = &actual_hash,
             });
-            return DiagnosticError.DiagnosticsInvalidHash;
+            return Diagnostics.Error.DiagnosticsReported;
         }
     }
 
@@ -310,20 +309,45 @@ fn installExtractedPackage(
     for (package.install.install_bin) |install_field| {
         const the_install = Package.Install.fromString(install_field);
         const path = try std.fs.path.join(arena, &.{ paths.bin_subpath, the_install.to });
-        try installBin(the_install, from_dir, pm.bin_dir);
+        installBin(the_install, from_dir, pm.bin_dir) catch |err| switch (err) {
+            error.PathAlreadyExists => {
+                try pm.diagnostics.pathAlreadyExists(.{
+                    .name = package.name,
+                    .path = path,
+                });
+                return Diagnostics.Error.DiagnosticsReported;
+            },
+            else => |e| return e,
+        };
         locations.appendAssumeCapacity(path);
     }
-    for (package.install.install_lib) |install_field| {
-        const the_install = Package.Install.fromString(install_field);
-        const path = try std.fs.path.join(arena, &.{ paths.lib_subpath, the_install.to });
-        try installGeneric(the_install, from_dir, pm.lib_dir);
-        locations.appendAssumeCapacity(path);
-    }
-    for (package.install.install_share) |install_field| {
-        const the_install = Package.Install.fromString(install_field);
-        const path = try std.fs.path.join(arena, &.{ paths.share_subpath, the_install.to });
-        try installGeneric(the_install, from_dir, pm.share_dir);
-        locations.appendAssumeCapacity(path);
+
+    const GenericInstall = struct {
+        dir: std.fs.Dir,
+        path: []const u8,
+        installs: []const []const u8,
+    };
+
+    const generic_installs = [_]GenericInstall{
+        .{ .dir = pm.lib_dir, .path = paths.lib_subpath, .installs = package.install.install_lib },
+        .{ .dir = pm.share_dir, .path = paths.share_subpath, .installs = package.install.install_share },
+    };
+    for (generic_installs) |install| {
+        for (install.installs) |install_field| {
+            const the_install = Package.Install.fromString(install_field);
+            const path = try std.fs.path.join(arena, &.{ install.path, the_install.to });
+            installGeneric(the_install, from_dir, install.dir) catch |err| switch (err) {
+                error.PathAlreadyExists => {
+                    try pm.diagnostics.pathAlreadyExists(.{
+                        .name = package.name,
+                        .path = path,
+                    });
+                    return Diagnostics.Error.DiagnosticsReported;
+                },
+                else => |e| return e,
+            };
+            locations.appendAssumeCapacity(path);
+        }
     }
 
     // Caller ensures that package is not installed
@@ -335,15 +359,7 @@ fn installExtractedPackage(
 }
 
 fn installBin(the_install: Package.Install, from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
-    try from_dir.copyFile(the_install.from, to_dir, the_install.to, .{});
-
-    const installed_file = try to_dir.openFile(the_install.to, .{});
-    defer installed_file.close();
-
-    const metadata = try installed_file.metadata();
-    var permissions = metadata.permissions();
-    permissions.inner.unixSet(.user, .{ .execute = true });
-    try installed_file.setPermissions(permissions);
+    return installFile(the_install, from_dir, to_dir, .{ .executable = true });
 }
 
 fn installGeneric(the_install: Package.Install, from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
@@ -353,20 +369,28 @@ fn installGeneric(the_install: Package.Install, from_dir: std.fs.Dir, to_dir: st
         .directory => {
             var child_from_dir = try from_dir.openDir(the_install.from, .{ .iterate = true });
             defer child_from_dir.close();
-            var child_to_dir = try to_dir.makeOpenPath(the_install.to, .{});
-            defer child_to_dir.close();
 
-            try fs.copyTree(child_from_dir, child_to_dir);
-        },
-        .sym_link, .file => {
             const install_base_name = std.fs.path.basename(the_install.to);
             const child_to_dir_path = std.fs.path.dirname(the_install.to) orelse ".";
             var child_to_dir = try to_dir.makeOpenPath(child_to_dir_path, .{});
             defer child_to_dir.close();
 
-            try from_dir.copyFile(the_install.from, child_to_dir, install_base_name, .{});
-        },
+            var tmp_dir = try fs.tmpDir(child_to_dir, .{});
+            defer tmp_dir.deleteAndClose();
 
+            try fs.copyTree(child_from_dir, tmp_dir.dir);
+
+            if (fs.exists(child_to_dir, install_base_name))
+                return error.PathAlreadyExists;
+
+            // RACE: If something is fast enough, it could write to `the_install.to` before
+            //       `rename` completes. In that case, their content will be overwritten. To
+            //       prevent this, we would need to copy to a temp file, then `renameat2` with
+            //       `RENAME_NOREPLACE`
+
+            try child_to_dir.rename(&tmp_dir.name, install_base_name);
+        },
+        .sym_link, .file => return installFile(the_install, from_dir, to_dir, .{}),
         .block_device,
         .character_device,
         .named_pipe,
@@ -377,6 +401,46 @@ fn installGeneric(the_install: Package.Install, from_dir: std.fs.Dir, to_dir: st
         .unknown,
         => return error.CouldNotCopyEntireTree,
     }
+}
+
+const InstallFileOptions = struct {
+    executable: bool = false,
+};
+
+fn installFile(
+    the_install: Package.Install,
+    from_dir: std.fs.Dir,
+    to_dir: std.fs.Dir,
+    options: InstallFileOptions,
+) !void {
+    const install_base_name = std.fs.path.basename(the_install.to);
+    const child_to_dir_path = std.fs.path.dirname(the_install.to) orelse ".";
+    var child_to_dir = try to_dir.makeOpenPath(child_to_dir_path, .{});
+    defer child_to_dir.close();
+
+    var from_file = try from_dir.openFile(the_install.from, .{});
+    defer from_file.close();
+
+    var to_file = try child_to_dir.atomicFile(install_base_name, .{});
+    defer to_file.deinit();
+
+    _ = try from_file.copyRangeAll(0, to_file.file, 0, std.math.maxInt(u64));
+
+    if (options.executable) {
+        const metadata = try to_file.file.metadata();
+        var permissions = metadata.permissions();
+        permissions.inner.unixSet(.user, .{ .execute = true });
+        try to_file.file.setPermissions(permissions);
+    }
+
+    if (fs.exists(child_to_dir, install_base_name))
+        return error.PathAlreadyExists;
+
+    // RACE: If something is fast enough, it could write to `the_install.to` before `finish`
+    //       completes the rename. In that case, their content will be overwritten. To prevent
+    //       this, we would need to copy to a temp file, then `renameat2` with `RENAME_NOREPLACE`
+
+    try to_file.finish();
 }
 
 pub fn uninstallMany(pm: *PackageManager, package_names: []const []const u8) !void {
@@ -499,8 +563,7 @@ fn updatePackages(pm: *PackageManager, package_names: []const []const u8, option
     //         If this fails, packages can be left in a partially updated state
     for (downloads.jobs.items) |downloaded| {
         downloaded.result catch |err| switch (err) {
-            DiagnosticError.DiagnosticsInvalidHash => continue,
-            DiagnosticError.DiagnosticsDownloadFailed => continue,
+            Diagnostics.Error.DiagnosticsReported => continue,
             else => |e| return e,
         };
 
@@ -581,11 +644,6 @@ const DownloadAndExtractJob = struct {
     fn run(job: *DownloadAndExtractJob, pm: *PackageManager) void {
         job.result = pm.downloadAndExtractPackage(job.working_dir, job.package);
     }
-};
-
-const DiagnosticError = error{
-    DiagnosticsDownloadFailed,
-    DiagnosticsInvalidHash,
 };
 
 test {

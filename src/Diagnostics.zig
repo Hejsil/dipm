@@ -21,6 +21,7 @@ failures: struct {
     hash_mismatches: std.ArrayListUnmanaged(HashMismatch),
     downloads: std.ArrayListUnmanaged(DownloadFailed),
     downloads_with_status: std.ArrayListUnmanaged(DownloadFailedWithStatus),
+    path_already_exists: std.ArrayListUnmanaged(PathAlreadyExists),
 },
 
 pub fn init(allocator: std.mem.Allocator) Diagnostics {
@@ -45,6 +46,7 @@ pub fn init(allocator: std.mem.Allocator) Diagnostics {
             .hash_mismatches = .{},
             .downloads = .{},
             .downloads_with_status = .{},
+            .path_already_exists = .{},
         },
     };
 }
@@ -239,6 +241,15 @@ pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !v
         });
         try writer.print("└── No version found: {s}\n", .{@errorName(no_version.err)});
     }
+    for (diagnostics.failures.path_already_exists.items) |err| {
+        try writer.print("{s} {s}{s}{s}\n", .{
+            failure,
+            esc.bold,
+            err.name,
+            esc.reset,
+        });
+        try writer.print("└── Path already exists: {s}\n", .{err.path});
+    }
     for (diagnostics.successes.donate.items) |package| {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             success,
@@ -432,6 +443,17 @@ pub fn downloadFailedWithStatus(
     });
 }
 
+pub fn pathAlreadyExists(diagnostics: *Diagnostics, failure: PathAlreadyExists) !void {
+    diagnostics.lock.lock();
+    defer diagnostics.lock.unlock();
+
+    const arena = diagnostics.arena.allocator();
+    return diagnostics.failures.path_already_exists.append(diagnostics.gpa(), .{
+        .name = try arena.dupe(u8, failure.name),
+        .path = try arena.dupe(u8, failure.path),
+    });
+}
+
 pub const Package = struct {
     name: []const u8,
 };
@@ -482,6 +504,15 @@ pub const DownloadFailedWithStatus = struct {
     version: []const u8,
     url: []const u8,
     status: std.http.Status,
+};
+
+pub const PathAlreadyExists = struct {
+    name: []const u8,
+    path: []const u8,
+};
+
+pub const Error = error{
+    DiagnosticsReported,
 };
 
 test {
