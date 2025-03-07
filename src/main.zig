@@ -7,7 +7,7 @@ pub fn main() !u8 {
     defer std.process.argsFree(gpa, args);
 
     mainFull(.{ .gpa = gpa, .args = args[1..] }) catch |err| switch (err) {
-        DiagnosticsError.DiagnosticFailure => return 1,
+        Diagnostics.Error.DiagnosticsReported => return 1,
         else => |e| {
             if (builtin.mode == .Debug)
                 return e;
@@ -19,10 +19,6 @@ pub fn main() !u8 {
 
     return 0;
 }
-
-pub const DiagnosticsError = error{
-    DiagnosticFailure,
-};
 
 pub const MainOptions = struct {
     gpa: std.mem.Allocator,
@@ -82,7 +78,7 @@ pub fn mainFull(options: MainOptions) !void {
     try diag.reportToFile(program.stderr);
 
     if (diag.hasFailed())
-        return DiagnosticsError.DiagnosticFailure;
+        return Diagnostics.Error.DiagnosticsReported;
 
     return res;
 }

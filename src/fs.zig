@@ -302,6 +302,15 @@ pub fn copyTree(from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
     };
 }
 
+pub fn exists(dir: std.fs.Dir, path: []const u8) bool {
+    _ = dir.statFile(path) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return true,
+    };
+
+    return true;
+}
+
 test {
     _ = Progress;
 

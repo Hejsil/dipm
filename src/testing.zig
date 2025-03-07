@@ -352,7 +352,7 @@ test "dipm install wrong-hash" {
     defer prefix.deinit();
 
     const res = runMain(.{ .prefix = prefix, .args = &.{ "install", "wrong-hash" } });
-    try std.testing.expectError(error.DiagnosticFailure, res);
+    try std.testing.expectError(Diagnostics.Error.DiagnosticsReported, res);
     try prefix.expectFile("stderr",
         \\✗ wrong-hash 0.1.0
         \\│   Hash mismatch
@@ -479,10 +479,38 @@ test "dipm install fails-download" {
     defer prefix.deinit();
 
     const res = runMain(.{ .prefix = prefix, .args = &.{ "install", "fails-download" } });
-    try std.testing.expectError(error.DiagnosticFailure, res);
+    try std.testing.expectError(Diagnostics.Error.DiagnosticsReported, res);
     try prefix.expectFileStartsWith("stderr",
         \\✗ fails-download 0.1.0
         \\│   Failed to download
+    );
+}
+
+test "dipm install packages with shared files in bin/" {
+    var prefix = try setupPrefix(.{ .version = "0.1.0" });
+    defer prefix.deinit();
+
+    try runMain(.{ .prefix = prefix, .args = &.{ "install", "dup-bin1" } });
+    const res = runMain(.{ .prefix = prefix, .args = &.{ "install", "dup-bin2" } });
+    try std.testing.expectError(Diagnostics.Error.DiagnosticsReported, res);
+    try prefix.expectFileStartsWith("stderr",
+        \\✗ dup-bin2
+        \\└── Path already exists: bin/test-file
+        \\
+    );
+}
+
+test "dipm install packages with shared files in lib/" {
+    var prefix = try setupPrefix(.{ .version = "0.1.0" });
+    defer prefix.deinit();
+
+    try runMain(.{ .prefix = prefix, .args = &.{ "install", "dup-lib1" } });
+    const res = runMain(.{ .prefix = prefix, .args = &.{ "install", "dup-lib2" } });
+    try std.testing.expectError(Diagnostics.Error.DiagnosticsReported, res);
+    try prefix.expectFileStartsWith("stderr",
+        \\✗ dup-lib2
+        \\└── Path already exists: lib/test-file
+        \\
     );
 }
 
@@ -500,7 +528,7 @@ fn fuzz(_: void, fuzz_input: []const u8) !void {
     defer prefix.deinit();
 
     runMain(.{ .prefix = prefix, .args = args.items }) catch |err| switch (err) {
-        error.DiagnosticFailure => {},
+        Diagnostics.Error.DiagnosticsReported => {},
         error.InvalidArgument => {},
         else => try std.testing.expect(false),
     };
@@ -548,6 +576,10 @@ pub fn setupPrefix(options: struct {
         simple_tree_tar_zst,
         wrong_hash,
         fails_download,
+        duplicate_bin_file1,
+        duplicate_bin_file2,
+        duplicate_lib_file1,
+        duplicate_lib_file2,
     };
 
     const prefix_path = if (options.prefix) |prefix|
@@ -812,7 +844,48 @@ pub const fails_download = TestPackage{
     .install_bin = &.{"fails-download"},
 };
 
+pub const duplicate_bin_file1 = TestPackage{
+    .name = "dup-bin1",
+    .file = .{
+        .name = "pkg",
+        .hash = "ee1c8277caf5fb9b9ac4168c73fc03d982e0859d58ab730b6e15a20c14059ff2",
+        .content = "Binary",
+    },
+    .install_bin = &.{"test-file:pkg"},
+};
+
+pub const duplicate_bin_file2 = TestPackage{
+    .name = "dup-bin2",
+    .file = .{
+        .name = "pkg",
+        .hash = "ee1c8277caf5fb9b9ac4168c73fc03d982e0859d58ab730b6e15a20c14059ff2",
+        .content = "Binary",
+    },
+    .install_bin = &.{"test-file:pkg"},
+};
+
+pub const duplicate_lib_file1 = TestPackage{
+    .name = "dup-lib1",
+    .file = .{
+        .name = "pkg",
+        .hash = "ee1c8277caf5fb9b9ac4168c73fc03d982e0859d58ab730b6e15a20c14059ff2",
+        .content = "Binary",
+    },
+    .install_lib = &.{"test-file:pkg"},
+};
+
+pub const duplicate_lib_file2 = TestPackage{
+    .name = "dup-lib2",
+    .file = .{
+        .name = "pkg",
+        .hash = "ee1c8277caf5fb9b9ac4168c73fc03d982e0859d58ab730b6e15a20c14059ff2",
+        .content = "Binary",
+    },
+    .install_lib = &.{"test-file:pkg"},
+};
+
 test {
+    _ = Diagnostics;
     _ = Package;
 
     _ = fs;
@@ -820,6 +893,7 @@ test {
     _ = paths;
 }
 
+const Diagnostics = @import("Diagnostics.zig");
 const Package = @import("Package.zig");
 
 const paths = @import("paths.zig");
