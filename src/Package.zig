@@ -1435,6 +1435,7 @@ fn findDownloadUrl(options: struct {
             ".b3",
             ".deb",
             ".json",
+            ".minisig",
             ".pem",
             ".proof",
             ".pub",
@@ -2495,6 +2496,14 @@ test findDownloadUrl {
         .urls = &.{
             "/elvish-v0.21.0-rc1.tar.gz",
             "/elvish-v0.21.0.tar.gz",
+        },
+    }));
+    try std.testing.expectEqualStrings("/zls-x86-linux.tar.xz", try findDownloadUrl(.{
+        .target = .{ .os = .linux, .arch = .x86_64 },
+        .extra_strings = &.{"zls"},
+        .urls = &.{
+            "/zls-x86-linux.tar.xz",
+            "/zls-x86-linux.tar.xz.minisig",
         },
     }));
 
