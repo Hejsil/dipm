@@ -1430,7 +1430,7 @@ fn findDownloadUrl(options: struct {
 
         // Certain extensions indicate means the link downloads a signature, deb package or other
         // none useful resources to `dipm`
-        const deprioritized_extensions = [_][]const u8{
+        const deprioritized_suffixs = [_][]const u8{
             ".asc",
             ".b3",
             ".deb",
@@ -1447,9 +1447,13 @@ fn findDownloadUrl(options: struct {
             ".sha512",
             ".sha512sum",
             ".sig",
+
+            // HACK: atuin has an "update" binary used for (I assume) updating atuin itself. This
+            //       is picked instead of the actual binary, so lets just deprioritized it
+            "-update",
         };
-        for (deprioritized_extensions) |ext|
-            this_score -|= @as(usize, @intFromBool(std.mem.endsWith(u8, url, ext))) * 1000;
+        for (deprioritized_suffixs) |suffix|
+            this_score -|= @as(usize, @intFromBool(std.mem.endsWith(u8, url, suffix))) * 1000;
 
         // Avoid debug builds of binaries
         this_score -|= std.mem.count(u8, url, "debug");
@@ -2504,6 +2508,14 @@ test findDownloadUrl {
         .urls = &.{
             "/zls-x86-linux.tar.xz",
             "/zls-x86-linux.tar.xz.minisig",
+        },
+    }));
+    try std.testing.expectEqualStrings("/atuin-x86_64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
+        .target = .{ .os = .linux, .arch = .x86_64 },
+        .extra_strings = &.{"atuin"},
+        .urls = &.{
+            "/atuin-x86_64-unknown-linux-musl-update",
+            "/atuin-x86_64-unknown-linux-musl.tar.gz",
         },
     }));
 
