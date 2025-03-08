@@ -505,16 +505,19 @@ const pkgs_update_usage =
 
 fn pkgsUpdateCommand(program: *Program) !void {
     var packages_to_update = std.StringArrayHashMap(void).init(program.arena);
+    var all: bool = false;
     var options = PackagesAddOptions{
-        .commit = false,
         .update_description = false,
-        .pkgs_ini_path = "./pkgs.ini",
         .add_packages = undefined,
     };
 
     while (program.args.next()) {
         if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
             options.pkgs_ini_path = file;
+        if (program.args.option(&.{"--delay"})) |delay|
+            options.delay = try program.parseDuration(delay);
+        if (program.args.flag(&.{ "-a", "--all" }))
+            all = true;
         if (program.args.flag(&.{ "-c", "--commit" }))
             options.commit = true;
         if (program.args.flag(&.{ "-d", "--update-description" }))
@@ -542,6 +545,13 @@ fn pkgsUpdateCommand(program: *Program) !void {
             .download = if (package.update.download.len == 0) null else package.update.download,
         });
     }
+    if (all) for (packages.packages.keys(), packages.packages.values()) |package_name, package| {
+        try add_packages.append(.{
+            .name = package_name,
+            .version = package.update.version,
+            .download = if (package.update.download.len == 0) null else package.update.download,
+        });
+    };
 
     options.add_packages = add_packages.items;
     return program.pkgsAdd(options);
@@ -562,9 +572,7 @@ fn pkgsAddCommand(program: *Program) !void {
     var down: ?[]const u8 = null;
     var name: ?[]const u8 = null;
     var options = PackagesAddOptions{
-        .commit = false,
         .update_description = true,
-        .pkgs_ini_path = "./pkgs.ini",
         .add_packages = undefined,
     };
 
@@ -592,9 +600,10 @@ fn pkgsAddCommand(program: *Program) !void {
 }
 
 const PackagesAddOptions = struct {
-    pkgs_ini_path: []const u8,
-    commit: bool,
+    pkgs_ini_path: []const u8 = "./pkgs.ini",
+    commit: bool = false,
     update_description: bool,
+    delay: u64 = 0,
     add_packages: []const AddPackage,
 };
 
@@ -620,7 +629,10 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     var packages = try Packages.parseFile(program.gpa, pkgs_ini_file);
     defer packages.deinit();
 
-    for (options.add_packages) |add_package| {
+    for (options.add_packages, 0..) |add_package, i| {
+        if (i != 0 and options.delay != 0)
+            std.Thread.sleep(options.delay);
+
         const progress = program.progress.start(add_package.name orelse add_package.version, 1);
         defer program.progress.end(progress);
 
@@ -657,6 +669,29 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
         packages.sort();
         try packages.writeToFileOverride(pkgs_ini_file);
     }
+}
+
+fn parseDuration(program: *Program, str: []const u8) !u64 {
+    _ = program;
+
+    const Suffix = struct {
+        str: []const u8,
+        mult: u64,
+    };
+
+    const suffixes = [_]Suffix{
+        .{ .str = "s", .mult = std.time.ns_per_s },
+        .{ .str = "m", .mult = std.time.ns_per_min },
+        .{ .str = "h", .mult = std.time.ns_per_hour },
+        .{ .str = "d", .mult = std.time.ns_per_day },
+    };
+    const trimmed, const mult = for (suffixes) |suffix| {
+        if (std.mem.endsWith(u8, str, suffix.str)) {
+            break .{ str[0 .. str.len - suffix.str.len], suffix.mult };
+        }
+    } else .{ str, std.time.ns_per_s };
+
+    return (try std.fmt.parseUnsigned(u8, trimmed, 10)) * mult;
 }
 
 test {
