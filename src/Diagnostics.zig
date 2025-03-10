@@ -22,6 +22,7 @@ failures: struct {
     downloads: std.ArrayListUnmanaged(DownloadFailed),
     downloads_with_status: std.ArrayListUnmanaged(DownloadFailedWithStatus),
     path_already_exists: std.ArrayListUnmanaged(PathAlreadyExists),
+    generic_error: std.ArrayListUnmanaged(GenericError),
 },
 
 pub fn init(allocator: std.mem.Allocator) Diagnostics {
@@ -47,6 +48,7 @@ pub fn init(allocator: std.mem.Allocator) Diagnostics {
             .downloads = .{},
             .downloads_with_status = .{},
             .path_already_exists = .{},
+            .generic_error = .{},
         },
     };
 }
@@ -249,6 +251,16 @@ pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !v
             esc.reset,
         });
         try writer.print("└── Path already exists: {s}\n", .{err.path});
+    }
+    for (diagnostics.failures.generic_error.items) |err| {
+        try writer.print("{s} {s}{s}{s}\n", .{
+            failure,
+            esc.bold,
+            err.id,
+            esc.reset,
+        });
+        try writer.print("│   {s}\n", .{err.msg});
+        try writer.print("└──   {s}\n", .{@errorName(err.err)});
     }
     for (diagnostics.successes.donate.items) |package| {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
@@ -454,6 +466,18 @@ pub fn pathAlreadyExists(diagnostics: *Diagnostics, failure: PathAlreadyExists) 
     });
 }
 
+pub fn genericError(diagnostics: *Diagnostics, failure: GenericError) !void {
+    diagnostics.lock.lock();
+    defer diagnostics.lock.unlock();
+
+    const arena = diagnostics.arena.allocator();
+    return diagnostics.failures.generic_error.append(diagnostics.gpa(), .{
+        .id = try arena.dupe(u8, failure.id),
+        .msg = try arena.dupe(u8, failure.msg),
+        .err = failure.err,
+    });
+}
+
 pub const Package = struct {
     name: []const u8,
 };
@@ -509,6 +533,12 @@ pub const DownloadFailedWithStatus = struct {
 pub const PathAlreadyExists = struct {
     name: []const u8,
     path: []const u8,
+};
+
+pub const GenericError = struct {
+    id: []const u8,
+    msg: []const u8,
+    err: anyerror,
 };
 
 pub const Error = error{

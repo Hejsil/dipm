@@ -535,7 +535,7 @@ fn pkgsUpdateCommand(program: *Program) !void {
     var add_packages = std.ArrayList(AddPackage).init(program.arena);
     for (packages_to_update.keys()) |package_name| {
         const package = packages.packages.get(package_name) orelse {
-            std.log.err("{s} not found", .{package_name});
+            try program.diagnostics.notFound(.{ .name = package_name });
             continue;
         };
 
@@ -645,7 +645,11 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
             .download_uri = add_package.download,
             .target = .{ .os = builtin.os.tag, .arch = builtin.target.cpu.arch },
         }) catch |err| {
-            std.log.err("{s} {s}", .{ @errorName(err), add_package.version });
+            try program.diagnostics.genericError(.{
+                .id = add_package.version,
+                .msg = "Failed to create package from url",
+                .err = err,
+            });
             continue;
         };
 
