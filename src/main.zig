@@ -46,11 +46,11 @@ pub fn mainFull(options: MainOptions) !void {
         .maximum_node_name_len = 15,
     });
 
-    var program = Program{
+    var prog = Program{
         .gpa = options.gpa,
         .arena = arena,
         .progress = &progress,
-        .diagnostics = &diag,
+        .diag = &diag,
         .stdout = options.stdout,
         .stderr = options.stderr,
 
@@ -63,19 +63,19 @@ pub fn mainFull(options: MainOptions) !void {
     };
 
     // We don't really care to store the thread. Just let the os clean it up
-    if (program.stderr.supportsAnsiEscapeCodes()) {
-        _ = std.Thread.spawn(.{}, renderThread, .{&program}) catch |err| blk: {
+    if (prog.stderr.supportsAnsiEscapeCodes()) {
+        _ = std.Thread.spawn(.{}, renderThread, .{&prog}) catch |err| blk: {
             std.log.warn("failed to spawn rendering thread: {}", .{err});
             break :blk null;
         };
     }
 
-    const res = program.mainCommand();
+    const res = prog.mainCommand();
 
-    // Stop `renderThread` from rendering by locking stderr for the rest of the programs execution.
-    program.io_lock.lock();
-    try progress.cleanupTty(program.stderr);
-    try diag.reportToFile(program.stderr);
+    // Stop `renderThread` from rendering by locking stderr for the rest of the progs execution.
+    prog.io_lock.lock();
+    try progress.cleanupTty(prog.stderr);
+    try diag.reportToFile(prog.stderr);
 
     if (diag.hasFailed())
         return Diagnostics.Error.DiagnosticsReported;
@@ -83,16 +83,16 @@ pub fn mainFull(options: MainOptions) !void {
     return res;
 }
 
-fn renderThread(program: *Program) void {
+fn renderThread(prog: *Program) void {
     const fps = 15;
     const delay = std.time.ns_per_s / fps;
     const initial_delay = std.time.ns_per_s / 4;
 
     std.time.sleep(initial_delay);
     while (true) {
-        program.io_lock.lock();
-        program.progress.renderToTty(program.stderr) catch {};
-        program.io_lock.unlock();
+        prog.io_lock.lock();
+        prog.progress.renderToTty(prog.stderr) catch {};
+        prog.io_lock.unlock();
         std.time.sleep(delay);
     }
 }
@@ -121,29 +121,29 @@ const main_usage =
     \\
 ;
 
-pub fn mainCommand(program: *Program) !void {
-    while (program.args.next()) {
-        if (program.args.option(&.{ "-p", "--prefix" })) |p|
-            program.options.prefix = p;
-        if (program.args.flag(&.{"donate"}))
-            return program.donateCommand();
-        if (program.args.flag(&.{"install"}))
-            return program.installCommand();
-        if (program.args.flag(&.{"uninstall"}))
-            return program.uninstallCommand();
-        if (program.args.flag(&.{"update"}))
-            return program.updateCommand();
-        if (program.args.flag(&.{"list"}))
-            return program.listCommand();
-        if (program.args.flag(&.{"pkgs"}))
-            return program.pkgsCommand();
-        if (program.args.flag(&.{ "-h", "--help", "help" }))
-            return program.stdout.writeAll(main_usage);
-        if (program.args.positional()) |_|
+pub fn mainCommand(prog: *Program) !void {
+    while (prog.args.next()) {
+        if (prog.args.option(&.{ "-p", "--prefix" })) |p|
+            prog.options.prefix = p;
+        if (prog.args.flag(&.{"donate"}))
+            return prog.donateCommand();
+        if (prog.args.flag(&.{"install"}))
+            return prog.installCommand();
+        if (prog.args.flag(&.{"uninstall"}))
+            return prog.uninstallCommand();
+        if (prog.args.flag(&.{"update"}))
+            return prog.updateCommand();
+        if (prog.args.flag(&.{"list"}))
+            return prog.listCommand();
+        if (prog.args.flag(&.{"pkgs"}))
+            return prog.pkgsCommand();
+        if (prog.args.flag(&.{ "-h", "--help", "help" }))
+            return prog.stdout.writeAll(main_usage);
+        if (prog.args.positional()) |_|
             break;
     }
 
-    try program.stderr.writeAll(main_usage);
+    try prog.stderr.writeAll(main_usage);
     return error.InvalidArgument;
 }
 
@@ -152,7 +152,7 @@ const Program = @This();
 gpa: std.mem.Allocator,
 arena: std.mem.Allocator,
 progress: *Progress,
-diagnostics: *Diagnostics,
+diag: *Diagnostics,
 
 io_lock: std.Thread.Mutex = .{},
 stdout: std.fs.File,
@@ -170,12 +170,12 @@ options: struct {
     pkgs_uri: []const u8 = "https://github.com/Hejsil/dipm-pkgs/raw/master/pkgs.ini",
 },
 
-fn prefix(program: Program) []const u8 {
-    return program.options.forced_prefix orelse program.options.prefix;
+fn prefix(prog: Program) []const u8 {
+    return prog.options.forced_prefix orelse prog.options.prefix;
 }
 
-fn pkgsUri(program: Program) []const u8 {
-    return program.options.forced_pkgs_uri orelse program.options.pkgs_uri;
+fn pkgsUri(prog: Program) []const u8 {
+    return prog.options.forced_pkgs_uri orelse prog.options.pkgs_uri;
 }
 
 const donate_usage =
@@ -186,33 +186,33 @@ const donate_usage =
     \\
 ;
 
-fn donateCommand(program: *Program) !void {
-    var packages_to_show_hm = std.StringArrayHashMap(void).init(program.arena);
-    try packages_to_show_hm.ensureTotalCapacity(program.args.args.len);
+fn donateCommand(prog: *Program) !void {
+    var packages_to_show_hm = std.StringArrayHashMap(void).init(prog.arena);
+    try packages_to_show_hm.ensureTotalCapacity(prog.args.args.len);
 
-    while (program.args.next()) {
-        if (program.args.flag(&.{ "-h", "--help" }))
-            return program.stdout.writeAll(install_usage);
-        if (program.args.positional()) |name|
+    while (prog.args.next()) {
+        if (prog.args.flag(&.{ "-h", "--help" }))
+            return prog.stdout.writeAll(install_usage);
+        if (prog.args.positional()) |name|
             packages_to_show_hm.putAssumeCapacity(name, {});
     }
 
-    var http_client = std.http.Client{ .allocator = program.gpa };
+    var http_client = std.http.Client{ .allocator = prog.gpa };
     defer http_client.deinit();
 
     var installed_packages = try InstalledPackages.open(.{
-        .gpa = program.gpa,
-        .prefix = program.prefix(),
+        .gpa = prog.gpa,
+        .prefix = prog.prefix(),
     });
     defer installed_packages.deinit();
 
     var packages = try Packages.download(.{
-        .gpa = program.gpa,
+        .gpa = prog.gpa,
         .http_client = &http_client,
-        .diagnostics = program.diagnostics,
-        .progress = program.progress,
-        .prefix = program.prefix(),
-        .pkgs_uri = program.pkgsUri(),
+        .diagnostics = prog.diag,
+        .progress = prog.progress,
+        .prefix = prog.prefix(),
+        .pkgs_uri = prog.pkgsUri(),
         .download = .only_if_required,
     });
     defer packages.deinit();
@@ -223,17 +223,16 @@ fn donateCommand(program: *Program) !void {
 
     for (packages_to_show) |package_name| {
         const package = packages.packages.get(package_name) orelse {
-            try program.diagnostics.notFound(.{ .name = package_name });
+            try prog.diag.notFound(.{ .name = try prog.diag.putstr(package_name) });
             continue;
         };
-        if (package.info.donate.len == 0)
-            continue;
-
-        try program.diagnostics.donate(.{
-            .name = package_name,
-            .version = package.info.version,
-            .donate = package.info.donate,
-        });
+        for (package.info.donate) |donate| {
+            try prog.diag.donate(.{
+                .name = try prog.diag.putstr(package_name),
+                .version = try prog.diag.putstr(package.info.version),
+                .donate = try prog.diag.putstr(donate),
+            });
+        }
     }
 }
 
@@ -245,23 +244,23 @@ const install_usage =
     \\
 ;
 
-fn installCommand(program: *Program) !void {
-    var packages_to_install = std.ArrayList([]const u8).init(program.arena);
-    try packages_to_install.ensureTotalCapacity(program.args.args.len);
+fn installCommand(prog: *Program) !void {
+    var packages_to_install = std.ArrayList([]const u8).init(prog.arena);
+    try packages_to_install.ensureTotalCapacity(prog.args.args.len);
 
-    while (program.args.next()) {
-        if (program.args.flag(&.{ "-h", "--help" }))
-            return program.stdout.writeAll(install_usage);
-        if (program.args.positional()) |name|
+    while (prog.args.next()) {
+        if (prog.args.flag(&.{ "-h", "--help" }))
+            return prog.stdout.writeAll(install_usage);
+        if (prog.args.positional()) |name|
             packages_to_install.appendAssumeCapacity(name);
     }
 
     var pm = try PackageManager.init(.{
-        .gpa = program.gpa,
-        .diagnostics = program.diagnostics,
-        .progress = program.progress,
-        .prefix = program.prefix(),
-        .pkgs_uri = program.pkgsUri(),
+        .gpa = prog.gpa,
+        .diag = prog.diag,
+        .progress = prog.progress,
+        .prefix = prog.prefix(),
+        .pkgs_uri = prog.pkgsUri(),
         .download = .only_if_required,
     });
     defer pm.deinit();
@@ -278,27 +277,27 @@ const uninstall_usage =
     \\
 ;
 
-fn uninstallCommand(program: *Program) !void {
-    var packages_to_uninstall = std.ArrayList([]const u8).init(program.arena);
-    try packages_to_uninstall.ensureTotalCapacity(program.args.args.len);
+fn uninstallCommand(prog: *Program) !void {
+    var packages_to_uninstall = std.ArrayList([]const u8).init(prog.arena);
+    try packages_to_uninstall.ensureTotalCapacity(prog.args.args.len);
 
-    while (program.args.next()) {
-        if (program.args.flag(&.{ "-h", "--help" }))
-            return program.stdout.writeAll(uninstall_usage);
-        if (program.args.positional()) |name|
+    while (prog.args.next()) {
+        if (prog.args.flag(&.{ "-h", "--help" }))
+            return prog.stdout.writeAll(uninstall_usage);
+        if (prog.args.positional()) |name|
             packages_to_uninstall.appendAssumeCapacity(name);
     }
 
     // Uninstall does not need to download packages
-    var packages = Packages.init(program.gpa);
+    var packages = Packages.init(prog.gpa);
     defer packages.deinit();
 
     var pm = try PackageManager.init(.{
-        .gpa = program.gpa,
-        .diagnostics = program.diagnostics,
-        .progress = program.progress,
-        .prefix = program.prefix(),
-        .pkgs_uri = program.pkgsUri(),
+        .gpa = prog.gpa,
+        .diag = prog.diag,
+        .progress = prog.progress,
+        .prefix = prog.prefix(),
+        .pkgs_uri = prog.pkgsUri(),
         .download = .only_if_required,
     });
     defer pm.deinit();
@@ -318,26 +317,26 @@ const update_usage =
     \\
 ;
 
-fn updateCommand(program: *Program) !void {
+fn updateCommand(prog: *Program) !void {
     var force_update = false;
-    var packages_to_update = std.ArrayList([]const u8).init(program.arena);
-    try packages_to_update.ensureTotalCapacity(program.args.args.len);
+    var packages_to_update = std.ArrayList([]const u8).init(prog.arena);
+    try packages_to_update.ensureTotalCapacity(prog.args.args.len);
 
-    while (program.args.next()) {
-        if (program.args.flag(&.{ "-f", "--force" }))
+    while (prog.args.next()) {
+        if (prog.args.flag(&.{ "-f", "--force" }))
             force_update = true;
-        if (program.args.flag(&.{ "-h", "--help" }))
-            return program.stdout.writeAll(update_usage);
-        if (program.args.positional()) |name|
+        if (prog.args.flag(&.{ "-h", "--help" }))
+            return prog.stdout.writeAll(update_usage);
+        if (prog.args.positional()) |name|
             packages_to_update.appendAssumeCapacity(name);
     }
 
     var pm = try PackageManager.init(.{
-        .gpa = program.gpa,
-        .diagnostics = program.diagnostics,
-        .progress = program.progress,
-        .prefix = program.prefix(),
-        .pkgs_uri = program.pkgsUri(),
+        .gpa = prog.gpa,
+        .diag = prog.diag,
+        .progress = prog.progress,
+        .prefix = prog.prefix(),
+        .pkgs_uri = prog.pkgsUri(),
         .download = .always,
     });
     defer pm.deinit();
@@ -363,19 +362,19 @@ const list_usage =
     \\
 ;
 
-fn listCommand(program: *Program) !void {
-    while (program.args.next()) {
-        if (program.args.flag(&.{"all"}))
-            return program.listAllCommand();
-        if (program.args.flag(&.{"installed"}))
-            return program.listInstalledCommand();
-        if (program.args.flag(&.{ "-h", "--help", "help" }))
-            return program.stdout.writeAll(list_usage);
-        if (program.args.positional()) |_|
+fn listCommand(prog: *Program) !void {
+    while (prog.args.next()) {
+        if (prog.args.flag(&.{"all"}))
+            return prog.listAllCommand();
+        if (prog.args.flag(&.{"installed"}))
+            return prog.listInstalledCommand();
+        if (prog.args.flag(&.{ "-h", "--help", "help" }))
+            return prog.stdout.writeAll(list_usage);
+        if (prog.args.positional()) |_|
             break;
     }
 
-    try program.stderr.writeAll(list_usage);
+    try prog.stderr.writeAll(list_usage);
     return error.InvalidArgument;
 }
 
@@ -387,23 +386,23 @@ const list_installed_usage =
     \\
 ;
 
-fn listInstalledCommand(program: *Program) !void {
-    while (program.args.next()) {
-        if (program.args.flag(&.{ "-h", "--help" }))
-            return program.stdout.writeAll(list_installed_usage);
-        if (program.args.positional()) |_| {
-            try program.stderr.writeAll(list_installed_usage);
+fn listInstalledCommand(prog: *Program) !void {
+    while (prog.args.next()) {
+        if (prog.args.flag(&.{ "-h", "--help" }))
+            return prog.stdout.writeAll(list_installed_usage);
+        if (prog.args.positional()) |_| {
+            try prog.stderr.writeAll(list_installed_usage);
             return error.InvalidArgument;
         }
     }
 
     var installed_packages = try InstalledPackages.open(.{
-        .gpa = program.gpa,
-        .prefix = program.prefix(),
+        .gpa = prog.gpa,
+        .prefix = prog.prefix(),
     });
     defer installed_packages.deinit();
 
-    var stdout_buffered = std.io.bufferedWriter(program.stdout.writer());
+    var stdout_buffered = std.io.bufferedWriter(prog.stdout.writer());
     const writer = stdout_buffered.writer();
 
     for (
@@ -424,31 +423,31 @@ const list_all_usage =
     \\
 ;
 
-fn listAllCommand(program: *Program) !void {
-    while (program.args.next()) {
-        if (program.args.flag(&.{ "-h", "--help" }))
-            return program.stdout.writeAll(list_all_usage);
-        if (program.args.positional()) |_| {
-            try program.stderr.writeAll(list_all_usage);
+fn listAllCommand(prog: *Program) !void {
+    while (prog.args.next()) {
+        if (prog.args.flag(&.{ "-h", "--help" }))
+            return prog.stdout.writeAll(list_all_usage);
+        if (prog.args.positional()) |_| {
+            try prog.stderr.writeAll(list_all_usage);
             return error.InvalidArgument;
         }
     }
 
-    var http_client = std.http.Client{ .allocator = program.gpa };
+    var http_client = std.http.Client{ .allocator = prog.gpa };
     defer http_client.deinit();
 
     var pkgs = try Packages.download(.{
-        .gpa = program.gpa,
+        .gpa = prog.gpa,
         .http_client = &http_client,
-        .diagnostics = program.diagnostics,
-        .progress = program.progress,
-        .prefix = program.prefix(),
-        .pkgs_uri = program.pkgsUri(),
+        .diagnostics = prog.diag,
+        .progress = prog.progress,
+        .prefix = prog.prefix(),
+        .pkgs_uri = prog.pkgsUri(),
         .download = .only_if_required,
     });
     defer pkgs.deinit();
 
-    var stdout_buffered = std.io.bufferedWriter(program.stdout.writer());
+    var stdout_buffered = std.io.bufferedWriter(prog.stdout.writer());
     const writer = stdout_buffered.writer();
 
     for (pkgs.packages.keys(), pkgs.packages.values()) |package_name, package|
@@ -469,26 +468,26 @@ const pkgs_usage =
     \\
 ;
 
-fn pkgsCommand(program: *Program) !void {
+fn pkgsCommand(prog: *Program) !void {
     if (builtin.is_test) {
         // `pkgs` subcommand is disabled in tests because there are no ways to avoid downloads
         // running these commands.
-        try program.stderr.writeAll(pkgs_usage);
+        try prog.stderr.writeAll(pkgs_usage);
         return error.InvalidArgument;
     }
 
-    while (program.args.next()) {
-        if (program.args.flag(&.{"update"}))
-            return program.pkgsUpdateCommand();
-        if (program.args.flag(&.{"add"}))
-            return program.pkgsAddCommand();
-        if (program.args.flag(&.{ "-h", "--help", "help" }))
-            return program.stdout.writeAll(pkgs_usage);
-        if (program.args.positional()) |_|
+    while (prog.args.next()) {
+        if (prog.args.flag(&.{"update"}))
+            return prog.pkgsUpdateCommand();
+        if (prog.args.flag(&.{"add"}))
+            return prog.pkgsAddCommand();
+        if (prog.args.flag(&.{ "-h", "--help", "help" }))
+            return prog.stdout.writeAll(pkgs_usage);
+        if (prog.args.positional()) |_|
             break;
     }
 
-    try program.stderr.writeAll(pkgs_usage);
+    try prog.stderr.writeAll(pkgs_usage);
     return error.InvalidArgument;
 }
 
@@ -503,39 +502,39 @@ const pkgs_update_usage =
     \\
 ;
 
-fn pkgsUpdateCommand(program: *Program) !void {
-    var packages_to_update = std.StringArrayHashMap(void).init(program.arena);
+fn pkgsUpdateCommand(prog: *Program) !void {
+    var packages_to_update = std.StringArrayHashMap(void).init(prog.arena);
     var all: bool = false;
     var options = PackagesAddOptions{
         .update_description = false,
         .add_packages = undefined,
     };
 
-    while (program.args.next()) {
-        if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
+    while (prog.args.next()) {
+        if (prog.args.option(&.{ "-f", "--pkgs-file" })) |file|
             options.pkgs_ini_path = file;
-        if (program.args.option(&.{"--delay"})) |delay|
-            options.delay = try program.parseDuration(delay);
-        if (program.args.flag(&.{ "-a", "--all" }))
+        if (prog.args.option(&.{"--delay"})) |delay|
+            options.delay = try prog.parseDuration(delay);
+        if (prog.args.flag(&.{ "-a", "--all" }))
             all = true;
-        if (program.args.flag(&.{ "-c", "--commit" }))
+        if (prog.args.flag(&.{ "-c", "--commit" }))
             options.commit = true;
-        if (program.args.flag(&.{ "-d", "--update-description" }))
+        if (prog.args.flag(&.{ "-d", "--update-description" }))
             options.update_description = true;
-        if (program.args.flag(&.{ "-h", "--help" }))
-            return program.stdout.writeAll(pkgs_update_usage);
-        if (program.args.positional()) |url|
+        if (prog.args.flag(&.{ "-h", "--help" }))
+            return prog.stdout.writeAll(pkgs_update_usage);
+        if (prog.args.positional()) |url|
             try packages_to_update.put(url, {});
     }
 
     const cwd = std.fs.cwd();
-    var packages = try Packages.parseFromPath(program.gpa, cwd, options.pkgs_ini_path);
+    var packages = try Packages.parseFromPath(prog.gpa, cwd, options.pkgs_ini_path);
     defer packages.deinit();
 
-    var add_packages = std.ArrayList(AddPackage).init(program.arena);
+    var add_packages = std.ArrayList(AddPackage).init(prog.arena);
     for (packages_to_update.keys()) |package_name| {
         const package = packages.packages.get(package_name) orelse {
-            try program.diagnostics.notFound(.{ .name = package_name });
+            try prog.diag.notFound(.{ .name = try prog.diag.putstr(package_name) });
             continue;
         };
 
@@ -554,7 +553,7 @@ fn pkgsUpdateCommand(program: *Program) !void {
     };
 
     options.add_packages = add_packages.items;
-    return program.pkgsAdd(options);
+    return prog.pkgsAdd(options);
 }
 
 const pkgs_add_usage =
@@ -567,7 +566,7 @@ const pkgs_add_usage =
     \\
 ;
 
-fn pkgsAddCommand(program: *Program) !void {
+fn pkgsAddCommand(prog: *Program) !void {
     var version: ?[]const u8 = null;
     var down: ?[]const u8 = null;
     var name: ?[]const u8 = null;
@@ -576,18 +575,18 @@ fn pkgsAddCommand(program: *Program) !void {
         .add_packages = undefined,
     };
 
-    while (program.args.next()) {
-        if (program.args.option(&.{ "-f", "--pkgs-file" })) |file|
+    while (prog.args.next()) {
+        if (prog.args.option(&.{ "-f", "--pkgs-file" })) |file|
             options.pkgs_ini_path = file;
-        if (program.args.option(&.{ "-n", "--name" })) |n|
+        if (prog.args.option(&.{ "-n", "--name" })) |n|
             name = n;
-        if (program.args.option(&.{ "-d", "--download" })) |i|
+        if (prog.args.option(&.{ "-d", "--download" })) |i|
             down = i;
-        if (program.args.flag(&.{ "-c", "--commit" }))
+        if (prog.args.flag(&.{ "-c", "--commit" }))
             options.commit = true;
-        if (program.args.flag(&.{ "-h", "--help" }))
-            return program.stdout.writeAll(pkgs_add_usage);
-        if (program.args.positional()) |url|
+        if (prog.args.flag(&.{ "-h", "--help" }))
+            return prog.stdout.writeAll(pkgs_add_usage);
+        if (prog.args.positional()) |url|
             version = url;
     }
 
@@ -596,7 +595,7 @@ fn pkgsAddCommand(program: *Program) !void {
         .download = down,
         .name = name,
     }};
-    return program.pkgsAdd(options);
+    return prog.pkgsAdd(options);
 }
 
 const PackagesAddOptions = struct {
@@ -613,8 +612,8 @@ const AddPackage = struct {
     name: ?[]const u8 = null,
 };
 
-fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
-    var http_client = std.http.Client{ .allocator = program.gpa };
+fn pkgsAdd(prog: *Program, options: PackagesAddOptions) !void {
+    var http_client = std.http.Client{ .allocator = prog.gpa };
     defer http_client.deinit();
 
     const cwd = std.fs.cwd();
@@ -626,28 +625,28 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     defer pkgs_ini_dir.close();
     defer pkgs_ini_file.close();
 
-    var packages = try Packages.parseFile(program.gpa, pkgs_ini_file);
+    var packages = try Packages.parseFile(prog.gpa, pkgs_ini_file);
     defer packages.deinit();
 
     for (options.add_packages, 0..) |add_package, i| {
         if (i != 0 and options.delay != 0)
             std.Thread.sleep(options.delay);
 
-        const progress = program.progress.start(add_package.name orelse add_package.version, 1);
-        defer program.progress.end(progress);
+        const progress = prog.progress.start(add_package.name orelse add_package.version, 1);
+        defer prog.progress.end(progress);
 
         const package = Package.fromUrl(.{
             .arena = packages.arena.allocator(),
-            .tmp_gpa = program.gpa,
+            .tmp_gpa = prog.gpa,
             .http_client = &http_client,
             .name = add_package.name,
             .version_uri = add_package.version,
             .download_uri = add_package.download,
             .target = .{ .os = builtin.os.tag, .arch = builtin.target.cpu.arch },
         }) catch |err| {
-            try program.diagnostics.genericError(.{
-                .id = add_package.version,
-                .msg = "Failed to create package from url",
+            try prog.diag.genericError(.{
+                .id = try prog.diag.putstr(add_package.version),
+                .msg = try prog.diag.putstr("Failed to create package from url"),
                 .err = err,
             });
             continue;
@@ -662,10 +661,10 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
             try packages.writeToFileOverride(pkgs_ini_file);
             try pkgs_ini_file.sync();
 
-            const msg = try git.createCommitMessage(program.arena, package, old_package, .{
+            const msg = try git.createCommitMessage(prog.arena, package, old_package, .{
                 .description = options.update_description,
             });
-            try git.commitFile(program.gpa, pkgs_ini_dir, pkgs_ini_base_name, msg);
+            try git.commitFile(prog.gpa, pkgs_ini_dir, pkgs_ini_base_name, msg);
         }
     }
 
@@ -675,8 +674,8 @@ fn pkgsAdd(program: *Program, options: PackagesAddOptions) !void {
     }
 }
 
-fn parseDuration(program: *Program, str: []const u8) !u64 {
-    _ = program;
+fn parseDuration(prog: *Program, str: []const u8) !u64 {
+    _ = prog;
 
     const Suffix = struct {
         str: []const u8,

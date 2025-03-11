@@ -1,4 +1,5 @@
-arena: std.heap.ArenaAllocator,
+gpa: std.mem.Allocator,
+strings: Strings,
 lock: std.Thread.Mutex,
 
 successes: struct {
@@ -25,9 +26,10 @@ failures: struct {
     generic_error: std.ArrayListUnmanaged(GenericError),
 },
 
-pub fn init(allocator: std.mem.Allocator) Diagnostics {
+pub fn init(gpa: std.mem.Allocator) Diagnostics {
     return .{
-        .arena = std.heap.ArenaAllocator.init(allocator),
+        .gpa = gpa,
+        .strings = .empty,
         .lock = .{},
         .successes = .{
             .donate = .{},
@@ -53,34 +55,24 @@ pub fn init(allocator: std.mem.Allocator) Diagnostics {
     };
 }
 
-pub fn reset(diagnostics: *Diagnostics) void {
-    const allocator = diagnostics.gpa();
-    diagnostics.deinit();
-    diagnostics.* = init(allocator);
+pub fn deinit(diag: *Diagnostics) void {
+    inline for (@typeInfo(@TypeOf(diag.successes)).@"struct".fields) |field|
+        @field(diag.successes, field.name).deinit(diag.gpa);
+    inline for (@typeInfo(@TypeOf(diag.warnings)).@"struct".fields) |field|
+        @field(diag.warnings, field.name).deinit(diag.gpa);
+    inline for (@typeInfo(@TypeOf(diag.failures)).@"struct".fields) |field|
+        @field(diag.failures, field.name).deinit(diag.gpa);
+
+    diag.strings.deinit(diag.gpa);
+    diag.* = undefined;
 }
 
-fn gpa(diagnostics: *Diagnostics) std.mem.Allocator {
-    return diagnostics.arena.child_allocator;
-}
-
-pub fn deinit(diagnostics: *Diagnostics) void {
-    inline for (@typeInfo(@TypeOf(diagnostics.successes)).@"struct".fields) |field|
-        @field(diagnostics.successes, field.name).deinit(diagnostics.gpa());
-    inline for (@typeInfo(@TypeOf(diagnostics.warnings)).@"struct".fields) |field|
-        @field(diagnostics.warnings, field.name).deinit(diagnostics.gpa());
-    inline for (@typeInfo(@TypeOf(diagnostics.failures)).@"struct".fields) |field|
-        @field(diagnostics.failures, field.name).deinit(diagnostics.gpa());
-
-    diagnostics.arena.deinit();
-    diagnostics.* = undefined;
-}
-
-pub fn reportToFile(diagnostics: *Diagnostics, file: std.fs.File) !void {
+pub fn reportToFile(diag: *Diagnostics, file: std.fs.File) !void {
     var buffered = std.io.bufferedWriter(file.writer());
 
     const is_tty = file.supportsAnsiEscapeCodes();
     const escapes = if (is_tty) Escapes.ansi else Escapes.none;
-    try diagnostics.report(buffered.writer(), .{
+    try diag.report(buffered.writer(), .{
         .is_tty = is_tty,
         .escapes = escapes,
     });
@@ -93,9 +85,9 @@ pub const ReportOptions = struct {
     escapes: Escapes = Escapes.none,
 };
 
-pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
+pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
 
     const esc = opt.escapes;
 
@@ -119,64 +111,64 @@ pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !v
         esc.reset,
     });
 
-    for (diagnostics.successes.installs.items) |installed|
+    for (diag.successes.installs.items) |installed|
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             success,
             esc.bold,
-            installed.name,
-            installed.version,
+            diag.strings.get(installed.name).?,
+            diag.strings.get(installed.version).?,
             esc.reset,
         });
-    for (diagnostics.successes.updates.items) |updated|
+    for (diag.successes.updates.items) |updated|
         try writer.print("{s} {s}{s} {s} -> {s}{s}\n", .{
             success,
             esc.bold,
-            updated.name,
-            updated.from_version,
-            updated.to_version,
+            diag.strings.get(updated.name).?,
+            diag.strings.get(updated.from_version).?,
+            diag.strings.get(updated.to_version).?,
             esc.reset,
         });
-    for (diagnostics.successes.uninstalls.items) |uninstall|
+    for (diag.successes.uninstalls.items) |uninstall|
         try writer.print("{s} {s}{s} {s} -> ✗{s}\n", .{
             success,
             esc.bold,
-            uninstall.name,
-            uninstall.version,
+            diag.strings.get(uninstall.name).?,
+            diag.strings.get(uninstall.version).?,
             esc.reset,
         });
 
-    for (diagnostics.warnings.already_installed.items) |already_installed| {
+    for (diag.warnings.already_installed.items) |already_installed| {
         try writer.print("{s} {s}{s}{s}\n", .{
             warning,
             esc.bold,
-            already_installed.name,
+            diag.strings.get(already_installed.name).?,
             esc.reset,
         });
         try writer.print("└── Package already installed\n", .{});
     }
-    for (diagnostics.warnings.not_installed.items) |not_installed| {
+    for (diag.warnings.not_installed.items) |not_installed| {
         try writer.print("{s} {s}{s}{s}\n", .{
             warning,
             esc.bold,
-            not_installed.name,
+            diag.strings.get(not_installed.name).?,
             esc.reset,
         });
         try writer.print("└── Package is not installed\n", .{});
     }
-    for (diagnostics.warnings.not_found.items) |not_found| {
+    for (diag.warnings.not_found.items) |not_found| {
         try writer.print("{s} {s}{s}{s}\n", .{
             warning,
             esc.bold,
-            not_found.name,
+            diag.strings.get(not_found.name).?,
             esc.reset,
         });
         try writer.print("└── Package not found\n", .{});
     }
-    for (diagnostics.warnings.not_found_for_target.items) |not_found| {
+    for (diag.warnings.not_found_for_target.items) |not_found| {
         try writer.print("{s} {s}{s}{s}\n", .{
             warning,
             esc.bold,
-            not_found.name,
+            diag.strings.get(not_found.name).?,
             esc.reset,
         });
         try writer.print("└── Package not found for {s}_{s}\n", .{
@@ -184,103 +176,97 @@ pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !v
             @tagName(not_found.target.arch),
         });
     }
-    for (diagnostics.warnings.up_to_date.items) |up_to_date| {
+    for (diag.warnings.up_to_date.items) |up_to_date| {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             warning,
             esc.bold,
-            up_to_date.name,
-            up_to_date.version,
+            diag.strings.get(up_to_date.name).?,
+            diag.strings.get(up_to_date.version).?,
             esc.reset,
         });
         try writer.print("└── Package is up to date\n", .{});
     }
 
-    for (diagnostics.failures.downloads.items) |download| {
+    for (diag.failures.downloads.items) |download| {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             failure,
             esc.bold,
-            download.name,
-            download.version,
+            diag.strings.get(download.name).?,
+            diag.strings.get(download.version).?,
             esc.reset,
         });
         try writer.print("│   Failed to download\n", .{});
-        try writer.print("│     url:   {s}\n", .{download.url});
+        try writer.print("│     url:   {s}\n", .{diag.strings.get(download.url).?});
         try writer.print("└──   error: {s}\n", .{@errorName(download.err)});
     }
-    for (diagnostics.failures.downloads_with_status.items) |download| {
+    for (diag.failures.downloads_with_status.items) |download| {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             failure,
             esc.bold,
-            download.name,
-            download.version,
+            diag.strings.get(download.name).?,
+            diag.strings.get(download.version).?,
             esc.reset,
         });
         try writer.print("│   Failed to download\n", .{});
-        try writer.print("│     url:   {s}\n", .{download.url});
+        try writer.print("│     url:   {s}\n", .{diag.strings.get(download.url).?});
         try writer.print("└──   status: {} {s}\n", .{
             @intFromEnum(download.status),
             download.status.phrase() orelse "",
         });
     }
-    for (diagnostics.failures.hash_mismatches.items) |hash_mismatch| {
+    for (diag.failures.hash_mismatches.items) |hash_mismatch| {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             failure,
             esc.bold,
-            hash_mismatch.name,
-            hash_mismatch.version,
+            diag.strings.get(hash_mismatch.name).?,
+            diag.strings.get(hash_mismatch.version).?,
             esc.reset,
         });
         try writer.print("│   Hash mismatch\n", .{});
-        try writer.print("│     expected: {s}\n", .{hash_mismatch.expected_hash});
-        try writer.print("└──   actual:   {s}\n", .{hash_mismatch.actual_hash});
+        try writer.print("│     expected: {s}\n", .{diag.strings.get(hash_mismatch.expected_hash).?});
+        try writer.print("└──   actual:   {s}\n", .{diag.strings.get(hash_mismatch.actual_hash).?});
     }
-    for (diagnostics.failures.no_version_found.items) |no_version| {
+    for (diag.failures.no_version_found.items) |no_version| {
         try writer.print("{s} {s}{s}{s}\n", .{
             failure,
             esc.bold,
-            no_version.name,
+            diag.strings.get(no_version.name).?,
             esc.reset,
         });
         try writer.print("└── No version found: {s}\n", .{@errorName(no_version.err)});
     }
-    for (diagnostics.failures.path_already_exists.items) |err| {
+    for (diag.failures.path_already_exists.items) |err| {
         try writer.print("{s} {s}{s}{s}\n", .{
             failure,
             esc.bold,
-            err.name,
+            diag.strings.get(err.name).?,
             esc.reset,
         });
-        try writer.print("└── Path already exists: {s}\n", .{err.path});
+        try writer.print("└── Path already exists: {s}\n", .{diag.strings.get(err.path).?});
     }
-    for (diagnostics.failures.generic_error.items) |err| {
+    for (diag.failures.generic_error.items) |err| {
         try writer.print("{s} {s}{s}{s}\n", .{
             failure,
             esc.bold,
-            err.id,
+            diag.strings.get(err.id).?,
             esc.reset,
         });
-        try writer.print("│   {s}\n", .{err.msg});
+        try writer.print("│   {s}\n", .{diag.strings.get(err.msg).?});
         try writer.print("└──   {s}\n", .{@errorName(err.err)});
     }
-    for (diagnostics.successes.donate.items) |package| {
+    for (diag.successes.donate.items) |package| {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             success,
             esc.bold,
-            package.name,
-            package.version,
+            diag.strings.get(package.name).?,
+            diag.strings.get(package.version).?,
             esc.reset,
         });
-        for (package.donate, 0..) |d, i| {
-            const prefix = if (i == package.donate.len - 1)
-                "└──"
-            else
-                "│  ";
-            try writer.print("{s} {s}\n", .{ prefix, d });
-        }
+        try writer.print("└── {s}\n", .{diag.strings.get(package.donate).?});
     }
 
-    const show_donate_reminder = opt.is_tty and !diagnostics.hasFailed() and
-        (diagnostics.successes.installs.items.len != 0 or diagnostics.successes.updates.items.len != 0);
+    const show_donate_reminder = opt.is_tty and !diag.hasFailed() and
+        (diag.successes.installs.items.len != 0 or diag.successes.updates.items.len != 0);
 
     if (show_donate_reminder) {
         try writer.writeAll("\n");
@@ -294,250 +280,171 @@ pub fn report(diagnostics: *Diagnostics, writer: anytype, opt: ReportOptions) !v
     }
 }
 
-pub fn hasFailed(diagnostics: Diagnostics) bool {
-    inline for (@typeInfo(@TypeOf(diagnostics.failures)).@"struct".fields) |field| {
-        if (@field(diagnostics.failures, field.name).items.len != 0)
+pub fn hasFailed(diag: Diagnostics) bool {
+    inline for (@typeInfo(@TypeOf(diag.failures)).@"struct".fields) |field| {
+        if (@field(diag.failures, field.name).items.len != 0)
             return true;
     }
 
     return false;
 }
 
-pub fn donate(diagnostics: *Diagnostics, package: PackageDonate) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    const donate_duped = try arena.dupe([]const u8, package.donate);
-    for (donate_duped, package.donate) |*res, d|
-        res.* = try arena.dupe(u8, d);
-
-    return diagnostics.successes.donate.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, package.name),
-        .version = try arena.dupe(u8, package.version),
-        .donate = donate_duped,
-    });
+pub fn putstr(diag: *Diagnostics, string: []const u8) !Strings.Index {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.strings.put(diag.gpa, string);
 }
 
-pub fn installSucceeded(diagnostics: *Diagnostics, package: PackageVersion) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.successes.installs.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, package.name),
-        .version = try arena.dupe(u8, package.version),
-    });
+pub fn donate(diag: *Diagnostics, package: PackageDonate) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.successes.donate.append(diag.gpa, package);
 }
 
-pub fn updateSucceeded(diagnostics: *Diagnostics, package: PackageFromTo) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.successes.updates.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, package.name),
-        .from_version = try arena.dupe(u8, package.from_version),
-        .to_version = try arena.dupe(u8, package.to_version),
-    });
+pub fn installSucceeded(diag: *Diagnostics, package: PackageVersion) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.successes.installs.append(diag.gpa, package);
 }
 
-pub fn uninstallSucceeded(diagnostics: *Diagnostics, package: PackageVersion) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.successes.uninstalls.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, package.name),
-        .version = try arena.dupe(u8, package.version),
-    });
+pub fn updateSucceeded(diag: *Diagnostics, package: PackageFromTo) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.successes.updates.append(diag.gpa, package);
 }
 
-pub fn alreadyInstalled(diagnostics: *Diagnostics, package: Package) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.warnings.already_installed.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, package.name),
-    });
+pub fn uninstallSucceeded(diag: *Diagnostics, package: PackageVersion) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.successes.uninstalls.append(diag.gpa, package);
 }
 
-pub fn notInstalled(diagnostics: *Diagnostics, package: Package) !void {
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.warnings.not_installed.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, package.name),
-    });
+pub fn alreadyInstalled(diag: *Diagnostics, package: Package) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.warnings.already_installed.append(diag.gpa, package);
 }
 
-pub fn notFound(diagnostics: *Diagnostics, package: Package) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.warnings.not_found.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, package.name),
-    });
+pub fn notInstalled(diag: *Diagnostics, package: Package) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.warnings.not_installed.append(diag.gpa, package);
 }
 
-pub fn notFoundForTarget(diagnostics: *Diagnostics, not_found: PackageTarget) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.warnings.not_found_for_target.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, not_found.name),
-        .target = not_found.target,
-    });
+pub fn notFound(diag: *Diagnostics, package: Package) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.warnings.not_found.append(diag.gpa, package);
 }
 
-pub fn upToDate(diagnostics: *Diagnostics, package: PackageVersion) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.warnings.up_to_date.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, package.name),
-        .version = try arena.dupe(u8, package.version),
-    });
+pub fn notFoundForTarget(diag: *Diagnostics, not_found: PackageTarget) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.warnings.not_found_for_target.append(diag.gpa, not_found);
 }
 
-pub fn noVersionFound(diagnostics: *Diagnostics, package: PackageError) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.failures.no_version_found.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, package.name),
-        .err = package.err,
-    });
+pub fn upToDate(diag: *Diagnostics, package: PackageVersion) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.warnings.up_to_date.append(diag.gpa, package);
 }
 
-pub fn hashMismatch(diagnostics: *Diagnostics, mismatch: HashMismatch) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.failures.hash_mismatches.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, mismatch.name),
-        .version = try arena.dupe(u8, mismatch.version),
-        .expected_hash = try arena.dupe(u8, mismatch.expected_hash),
-        .actual_hash = try arena.dupe(u8, mismatch.actual_hash),
-    });
+pub fn noVersionFound(diag: *Diagnostics, package: PackageError) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.failures.no_version_found.append(diag.gpa, package);
 }
 
-pub fn downloadFailed(diagnostics: *Diagnostics, failure: DownloadFailed) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.failures.downloads.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, failure.name),
-        .version = try arena.dupe(u8, failure.version),
-        .url = try arena.dupe(u8, failure.url),
-        .err = failure.err,
-    });
+pub fn hashMismatch(diag: *Diagnostics, mismatch: HashMismatch) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.failures.hash_mismatches.append(diag.gpa, mismatch);
 }
 
-pub fn downloadFailedWithStatus(
-    diagnostics: *Diagnostics,
-    failure: DownloadFailedWithStatus,
-) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.failures.downloads_with_status.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, failure.name),
-        .version = try arena.dupe(u8, failure.version),
-        .url = try arena.dupe(u8, failure.url),
-        .status = failure.status,
-    });
+pub fn downloadFailed(diag: *Diagnostics, failure: DownloadFailed) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.failures.downloads.append(diag.gpa, failure);
 }
 
-pub fn pathAlreadyExists(diagnostics: *Diagnostics, failure: PathAlreadyExists) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
-
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.failures.path_already_exists.append(diagnostics.gpa(), .{
-        .name = try arena.dupe(u8, failure.name),
-        .path = try arena.dupe(u8, failure.path),
-    });
+pub fn downloadFailedWithStatus(diag: *Diagnostics, failure: DownloadFailedWithStatus) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.failures.downloads_with_status.append(diag.gpa, failure);
 }
 
-pub fn genericError(diagnostics: *Diagnostics, failure: GenericError) !void {
-    diagnostics.lock.lock();
-    defer diagnostics.lock.unlock();
+pub fn pathAlreadyExists(diag: *Diagnostics, failure: PathAlreadyExists) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.failures.path_already_exists.append(diag.gpa, failure);
+}
 
-    const arena = diagnostics.arena.allocator();
-    return diagnostics.failures.generic_error.append(diagnostics.gpa(), .{
-        .id = try arena.dupe(u8, failure.id),
-        .msg = try arena.dupe(u8, failure.msg),
-        .err = failure.err,
-    });
+pub fn genericError(diag: *Diagnostics, failure: GenericError) !void {
+    diag.lock.lock();
+    defer diag.lock.unlock();
+    return diag.failures.generic_error.append(diag.gpa, failure);
 }
 
 pub const Package = struct {
-    name: []const u8,
+    name: Strings.Index,
 };
 
 pub const PackageDonate = struct {
-    name: []const u8,
-    version: []const u8,
-    donate: []const []const u8,
+    name: Strings.Index,
+    version: Strings.Index,
+    donate: Strings.Index,
 };
 
 pub const PackageVersion = struct {
-    name: []const u8,
-    version: []const u8,
+    name: Strings.Index,
+    version: Strings.Index,
 };
 
 pub const PackageFromTo = struct {
-    name: []const u8,
-    from_version: []const u8,
-    to_version: []const u8,
+    name: Strings.Index,
+    from_version: Strings.Index,
+    to_version: Strings.Index,
 };
 
 pub const PackageError = struct {
-    name: []const u8,
+    name: Strings.Index,
     err: anyerror,
 };
 
 pub const PackageTarget = struct {
-    name: []const u8,
+    name: Strings.Index,
     target: Target,
 };
 
 pub const HashMismatch = struct {
-    name: []const u8,
-    version: []const u8,
-    expected_hash: []const u8,
-    actual_hash: []const u8,
+    name: Strings.Index,
+    version: Strings.Index,
+    expected_hash: Strings.Index,
+    actual_hash: Strings.Index,
 };
 
 pub const DownloadFailed = struct {
-    name: []const u8,
-    version: []const u8,
-    url: []const u8,
+    name: Strings.Index,
+    version: Strings.Index,
+    url: Strings.Index,
     err: anyerror,
 };
 
 pub const DownloadFailedWithStatus = struct {
-    name: []const u8,
-    version: []const u8,
-    url: []const u8,
+    name: Strings.Index,
+    version: Strings.Index,
+    url: Strings.Index,
     status: std.http.Status,
 };
 
 pub const PathAlreadyExists = struct {
-    name: []const u8,
-    path: []const u8,
+    name: Strings.Index,
+    path: Strings.Index,
 };
 
 pub const GenericError = struct {
-    id: []const u8,
-    msg: []const u8,
+    id: Strings.Index,
+    msg: Strings.Index,
     err: anyerror,
 };
 
@@ -553,6 +460,7 @@ test {
 const Diagnostics = @This();
 
 const Escapes = @import("Escapes.zig");
+const Strings = @import("Strings.zig");
 const Target = @import("Target.zig");
 
 const std = @import("std");
