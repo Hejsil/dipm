@@ -1,5 +1,6 @@
 arena: std.heap.ArenaAllocator,
-packages: std.StringArrayHashMapUnmanaged(InstalledPackage),
+strings: Strings,
+packages: std.ArrayHashMapUnmanaged(Strings.Index, InstalledPackage, void, true),
 
 file: ?std.fs.File,
 
@@ -29,6 +30,7 @@ pub fn deinit(packages: *InstalledPackages) void {
     if (packages.file) |f|
         f.close();
 
+    packages.strings.deinit(packages.arena.child_allocator);
     packages.packages.deinit(packages.arena.child_allocator);
     packages.arena.deinit();
     packages.* = undefined;
@@ -53,7 +55,8 @@ pub fn parseFromFile(options: struct {
 pub fn parse(gpa: std.mem.Allocator, string: []const u8) !InstalledPackages {
     var packages = InstalledPackages{
         .arena = std.heap.ArenaAllocator.init(gpa),
-        .packages = std.StringArrayHashMapUnmanaged(InstalledPackage){},
+        .strings = .empty,
+        .packages = .{},
         .file = null,
     };
     errdefer packages.deinit();
@@ -81,11 +84,12 @@ pub fn parseInto(packages: *InstalledPackages, string: []const u8) !void {
 
     // Keep lists for all fields that can have multiple entries. When switching to parsing a new
     // package, put all the lists into the package and then switch.
-    var location = std.ArrayList([]const u8).init(arena);
+    var location = std.ArrayList(Strings.Index).init(arena);
 
     // The first `parsed` will be a `section`, so `package` will be initialized in the first
     // iteration of this loop.
-    var tmp_package: InstalledPackage = .{};
+    const empty_index = try packages.putstr("");
+    var tmp_package: InstalledPackage = .{ .version = empty_index };
     var package: *InstalledPackage = &tmp_package;
     while (true) : (parsed = parser.next()) switch (parsed.kind) {
         .comment => {},
@@ -94,16 +98,19 @@ pub fn parseInto(packages: *InstalledPackages, string: []const u8) !void {
             package.location = try location.toOwnedSlice();
 
             const section = parsed.section(string).?;
-            const entry = try packages.packages.getOrPutValue(gpa, section.name, .{});
-            if (!entry.found_existing)
-                entry.key_ptr.* = try arena.dupe(u8, section.name);
+            const adapter = Strings.ArrayHashMapAdapter{ .strings = &packages.strings };
+            const entry = try packages.packages.getOrPutAdapted(gpa, section.name, adapter);
+            if (!entry.found_existing) {
+                entry.key_ptr.* = try packages.putstr(section.name);
+                entry.value_ptr.* = .{ .version = empty_index };
+            }
 
             package = entry.value_ptr;
             try location.appendSlice(package.location);
         },
         .property => {
             const prop = parsed.property(string).?;
-            const value = try arena.dupe(u8, prop.value);
+            const value = try packages.putstr(prop.value);
             switch (std.meta.stringToEnum(PackageField, prop.name) orelse continue) {
                 .version => package.version = value,
                 .location => try location.append(value),
@@ -114,6 +121,22 @@ pub fn parseInto(packages: *InstalledPackages, string: []const u8) !void {
             return;
         },
     };
+}
+
+pub fn putstr(packages: *InstalledPackages, string: []const u8) !Strings.Index {
+    return packages.strings.put(packages.arena.child_allocator, string);
+}
+
+pub fn print(
+    packages: *InstalledPackages,
+    comptime format: []const u8,
+    args: anytype,
+) !Strings.Index {
+    return packages.strings.print(packages.arena.child_allocator, format, args);
+}
+
+pub fn getstr(packages: InstalledPackages, string: Strings.Index) [:0]const u8 {
+    return packages.strings.get(string);
 }
 
 pub fn flush(packages: InstalledPackages) !void {
@@ -133,7 +156,7 @@ pub fn writeTo(packages: InstalledPackages, writer: anytype) !void {
         if (i != 0)
             try writer.writeAll("\n");
 
-        try package.write(package_name, writer);
+        try package.write(packages.strings, packages.getstr(package_name), writer);
     }
 }
 
@@ -189,6 +212,7 @@ test {
 const InstalledPackages = @This();
 
 const InstalledPackage = @import("InstalledPackage.zig");
+const Strings = @import("Strings.zig");
 
 const ini = @import("ini.zig");
 const paths = @import("paths.zig");

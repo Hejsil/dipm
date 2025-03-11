@@ -200,12 +200,6 @@ fn donateCommand(prog: *Program) !void {
     var http_client = std.http.Client{ .allocator = prog.gpa };
     defer http_client.deinit();
 
-    var installed_packages = try InstalledPackages.open(.{
-        .gpa = prog.gpa,
-        .prefix = prog.prefix(),
-    });
-    defer installed_packages.deinit();
-
     var packages = try Packages.download(.{
         .gpa = prog.gpa,
         .http_client = &http_client,
@@ -217,11 +211,31 @@ fn donateCommand(prog: *Program) !void {
     });
     defer packages.deinit();
 
-    var packages_to_show = packages_to_show_hm.keys();
-    if (packages_to_show.len == 0)
-        packages_to_show = installed_packages.packages.keys();
-
+    const packages_to_show = packages_to_show_hm.keys();
     for (packages_to_show) |package_name| {
+        const package = packages.packages.get(package_name) orelse {
+            try prog.diag.notFound(.{ .name = try prog.diag.putstr(package_name) });
+            continue;
+        };
+        for (package.info.donate) |donate| {
+            try prog.diag.donate(.{
+                .name = try prog.diag.putstr(package_name),
+                .version = try prog.diag.putstr(package.info.version),
+                .donate = try prog.diag.putstr(donate),
+            });
+        }
+    }
+    if (packages_to_show.len != 0)
+        return;
+
+    var installed_packages = try InstalledPackages.open(.{
+        .gpa = prog.gpa,
+        .prefix = prog.prefix(),
+    });
+    defer installed_packages.deinit();
+
+    for (installed_packages.packages.keys()) |package_name_index| {
+        const package_name = installed_packages.getstr(package_name_index);
         const package = packages.packages.get(package_name) orelse {
             try prog.diag.notFound(.{ .name = try prog.diag.putstr(package_name) });
             continue;
@@ -396,22 +410,20 @@ fn listInstalledCommand(prog: *Program) !void {
         }
     }
 
-    var installed_packages = try InstalledPackages.open(.{
+    var installed = try InstalledPackages.open(.{
         .gpa = prog.gpa,
         .prefix = prog.prefix(),
     });
-    defer installed_packages.deinit();
+    defer installed.deinit();
 
     var stdout_buffered = std.io.bufferedWriter(prog.stdout.writer());
     const writer = stdout_buffered.writer();
 
-    for (
-        installed_packages.packages.keys(),
-        installed_packages.packages.values(),
-    ) |package_name, package| {
-        try writer.print("{s}\t{s}\n", .{ package_name, package.version });
-    }
-
+    for (installed.packages.keys(), installed.packages.values()) |name, package|
+        try writer.print("{s}\t{s}\n", .{
+            installed.getstr(name),
+            installed.getstr(package.version),
+        });
     try stdout_buffered.flush();
 }
 
