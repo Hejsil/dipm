@@ -78,9 +78,18 @@ pub fn parseInto(pkgs: *InstalledPackages, string: []const u8) !void {
 
     const PackageField = std.meta.FieldEnum(InstalledPackage);
 
-    // The original strings length is a good indicator for the maximum number of bytes we're gonna
-    // store in strings
+    // Use original string lengths as a heuristic for how much data to preallocate
     try pkgs.strings.data.ensureUnusedCapacity(pkgs.gpa, string.len);
+    try pkgs.strings.indices.ensureUnusedCapacity(pkgs.gpa, string.len / 32);
+    try pkgs.by_name.ensureUnusedCapacity(pkgs.gpa, string.len / 256);
+
+    // Use a debug build of `dipm list installed` to find the limits above using the code below
+    // const indices_cap = pkgs.strings.indices.capacity;
+    // const data_cap = pkgs.strings.data.capacity;
+    // const by_name_cap = pkgs.by_name.entries.capacity;
+    // defer std.debug.assert(pkgs.strings.data.capacity == data_cap);
+    // defer std.debug.assert(pkgs.strings.indices.capacity == indices_cap);
+    // defer std.debug.assert(pkgs.by_name.entries.capacity == by_name_cap);
 
     // The first `parsed` will be a `section`, so `package` will be initialized in the first
     // iteration of this loop.
