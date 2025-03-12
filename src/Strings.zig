@@ -1,14 +1,7 @@
 data: std.ArrayListUnmanaged(u8),
 pointer_stability: std.debug.SafetyLock = .{},
 
-pub const Index = enum(u32) {
-    _,
-
-    pub const Optional = enum(u32) {
-        null = std.math.maxInt(u32),
-        _,
-    };
-};
+pub const Index = enum(u32) { _ };
 
 pub const empty = Strings{ .data = .empty };
 
