@@ -115,25 +115,25 @@ pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             success,
             esc.bold,
-            diag.strings.get(installed.name),
-            diag.strings.get(installed.version),
+            diag.strings.getStr(installed.name),
+            diag.strings.getStr(installed.version),
             esc.reset,
         });
     for (diag.successes.updates.items) |updated|
         try writer.print("{s} {s}{s} {s} -> {s}{s}\n", .{
             success,
             esc.bold,
-            diag.strings.get(updated.name),
-            diag.strings.get(updated.from_version),
-            diag.strings.get(updated.to_version),
+            diag.strings.getStr(updated.name),
+            diag.strings.getStr(updated.from_version),
+            diag.strings.getStr(updated.to_version),
             esc.reset,
         });
     for (diag.successes.uninstalls.items) |uninstall|
         try writer.print("{s} {s}{s} {s} -> ✗{s}\n", .{
             success,
             esc.bold,
-            diag.strings.get(uninstall.name),
-            diag.strings.get(uninstall.version),
+            diag.strings.getStr(uninstall.name),
+            diag.strings.getStr(uninstall.version),
             esc.reset,
         });
 
@@ -141,7 +141,7 @@ pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
         try writer.print("{s} {s}{s}{s}\n", .{
             warning,
             esc.bold,
-            diag.strings.get(already_installed.name),
+            diag.strings.getStr(already_installed.name),
             esc.reset,
         });
         try writer.print("└── Package already installed\n", .{});
@@ -150,7 +150,7 @@ pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
         try writer.print("{s} {s}{s}{s}\n", .{
             warning,
             esc.bold,
-            diag.strings.get(not_installed.name),
+            diag.strings.getStr(not_installed.name),
             esc.reset,
         });
         try writer.print("└── Package is not installed\n", .{});
@@ -159,7 +159,7 @@ pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
         try writer.print("{s} {s}{s}{s}\n", .{
             warning,
             esc.bold,
-            diag.strings.get(not_found.name),
+            diag.strings.getStr(not_found.name),
             esc.reset,
         });
         try writer.print("└── Package not found\n", .{});
@@ -168,7 +168,7 @@ pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
         try writer.print("{s} {s}{s}{s}\n", .{
             warning,
             esc.bold,
-            diag.strings.get(not_found.name),
+            diag.strings.getStr(not_found.name),
             esc.reset,
         });
         try writer.print("└── Package not found for {s}_{s}\n", .{
@@ -180,8 +180,8 @@ pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             warning,
             esc.bold,
-            diag.strings.get(up_to_date.name),
-            diag.strings.get(up_to_date.version),
+            diag.strings.getStr(up_to_date.name),
+            diag.strings.getStr(up_to_date.version),
             esc.reset,
         });
         try writer.print("└── Package is up to date\n", .{});
@@ -191,24 +191,24 @@ pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             failure,
             esc.bold,
-            diag.strings.get(download.name),
-            diag.strings.get(download.version),
+            diag.strings.getStr(download.name),
+            diag.strings.getStr(download.version),
             esc.reset,
         });
         try writer.print("│   Failed to download\n", .{});
-        try writer.print("│     url:   {s}\n", .{diag.strings.get(download.url)});
+        try writer.print("│     url:   {s}\n", .{diag.strings.getStr(download.url)});
         try writer.print("└──   error: {s}\n", .{@errorName(download.err)});
     }
     for (diag.failures.downloads_with_status.items) |download| {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             failure,
             esc.bold,
-            diag.strings.get(download.name),
-            diag.strings.get(download.version),
+            diag.strings.getStr(download.name),
+            diag.strings.getStr(download.version),
             esc.reset,
         });
         try writer.print("│   Failed to download\n", .{});
-        try writer.print("│     url:   {s}\n", .{diag.strings.get(download.url)});
+        try writer.print("│     url:   {s}\n", .{diag.strings.getStr(download.url)});
         try writer.print("└──   status: {} {s}\n", .{
             @intFromEnum(download.status),
             download.status.phrase() orelse "",
@@ -218,19 +218,19 @@ pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             failure,
             esc.bold,
-            diag.strings.get(hash_mismatch.name),
-            diag.strings.get(hash_mismatch.version),
+            diag.strings.getStr(hash_mismatch.name),
+            diag.strings.getStr(hash_mismatch.version),
             esc.reset,
         });
         try writer.print("│   Hash mismatch\n", .{});
-        try writer.print("│     expected: {s}\n", .{diag.strings.get(hash_mismatch.expected_hash)});
-        try writer.print("└──   actual:   {s}\n", .{diag.strings.get(hash_mismatch.actual_hash)});
+        try writer.print("│     expected: {s}\n", .{diag.strings.getStr(hash_mismatch.expected_hash)});
+        try writer.print("└──   actual:   {s}\n", .{diag.strings.getStr(hash_mismatch.actual_hash)});
     }
     for (diag.failures.no_version_found.items) |no_version| {
         try writer.print("{s} {s}{s}{s}\n", .{
             failure,
             esc.bold,
-            diag.strings.get(no_version.name),
+            diag.strings.getStr(no_version.name),
             esc.reset,
         });
         try writer.print("└── No version found: {s}\n", .{@errorName(no_version.err)});
@@ -239,30 +239,30 @@ pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
         try writer.print("{s} {s}{s}{s}\n", .{
             failure,
             esc.bold,
-            diag.strings.get(err.name),
+            diag.strings.getStr(err.name),
             esc.reset,
         });
-        try writer.print("└── Path already exists: {s}\n", .{diag.strings.get(err.path)});
+        try writer.print("└── Path already exists: {s}\n", .{diag.strings.getStr(err.path)});
     }
     for (diag.failures.generic_error.items) |err| {
         try writer.print("{s} {s}{s}{s}\n", .{
             failure,
             esc.bold,
-            diag.strings.get(err.id),
+            diag.strings.getStr(err.id),
             esc.reset,
         });
-        try writer.print("│   {s}\n", .{diag.strings.get(err.msg)});
+        try writer.print("│   {s}\n", .{diag.strings.getStr(err.msg)});
         try writer.print("└──   {s}\n", .{@errorName(err.err)});
     }
     for (diag.successes.donate.items) |package| {
         try writer.print("{s} {s}{s} {s}{s}\n", .{
             success,
             esc.bold,
-            diag.strings.get(package.name),
-            diag.strings.get(package.version),
+            diag.strings.getStr(package.name),
+            diag.strings.getStr(package.version),
             esc.reset,
         });
-        try writer.print("└── {s}\n", .{diag.strings.get(package.donate)});
+        try writer.print("└── {s}\n", .{diag.strings.getStr(package.donate)});
     }
 
     const show_donate_reminder = opt.is_tty and !diag.hasFailed() and
@@ -289,10 +289,10 @@ pub fn hasFailed(diag: Diagnostics) bool {
     return false;
 }
 
-pub fn putstr(diag: *Diagnostics, string: []const u8) !Strings.Index {
+pub fn putStr(diag: *Diagnostics, string: []const u8) !Strings.Index {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.strings.put(diag.gpa, string);
+    return diag.strings.putStr(diag.gpa, string);
 }
 
 pub fn donate(diag: *Diagnostics, package: PackageDonate) !void {

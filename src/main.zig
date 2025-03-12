@@ -214,14 +214,14 @@ fn donateCommand(prog: *Program) !void {
     const packages_to_show = packages_to_show_hm.keys();
     for (packages_to_show) |package_name| {
         const package = packages.packages.get(package_name) orelse {
-            try prog.diag.notFound(.{ .name = try prog.diag.putstr(package_name) });
+            try prog.diag.notFound(.{ .name = try prog.diag.putStr(package_name) });
             continue;
         };
         for (package.info.donate) |donate| {
             try prog.diag.donate(.{
-                .name = try prog.diag.putstr(package_name),
-                .version = try prog.diag.putstr(package.info.version),
-                .donate = try prog.diag.putstr(donate),
+                .name = try prog.diag.putStr(package_name),
+                .version = try prog.diag.putStr(package.info.version),
+                .donate = try prog.diag.putStr(donate),
             });
         }
     }
@@ -234,17 +234,17 @@ fn donateCommand(prog: *Program) !void {
     });
     defer installed_packages.deinit();
 
-    for (installed_packages.packages.keys()) |package_name_index| {
-        const package_name = installed_packages.getstr(package_name_index);
+    for (installed_packages.by_name.keys()) |package_name_index| {
+        const package_name = installed_packages.getStr(package_name_index);
         const package = packages.packages.get(package_name) orelse {
-            try prog.diag.notFound(.{ .name = try prog.diag.putstr(package_name) });
+            try prog.diag.notFound(.{ .name = try prog.diag.putStr(package_name) });
             continue;
         };
         for (package.info.donate) |donate| {
             try prog.diag.donate(.{
-                .name = try prog.diag.putstr(package_name),
-                .version = try prog.diag.putstr(package.info.version),
-                .donate = try prog.diag.putstr(donate),
+                .name = try prog.diag.putStr(package_name),
+                .version = try prog.diag.putStr(package.info.version),
+                .donate = try prog.diag.putStr(donate),
             });
         }
     }
@@ -419,10 +419,10 @@ fn listInstalledCommand(prog: *Program) !void {
     var stdout_buffered = std.io.bufferedWriter(prog.stdout.writer());
     const writer = stdout_buffered.writer();
 
-    for (installed.packages.keys(), installed.packages.values()) |name, package|
+    for (installed.by_name.keys(), installed.by_name.values()) |name, package|
         try writer.print("{s}\t{s}\n", .{
-            installed.getstr(name),
-            installed.getstr(package.version),
+            installed.getStr(name),
+            installed.getStr(package.version),
         });
     try stdout_buffered.flush();
 }
@@ -546,7 +546,7 @@ fn pkgsUpdateCommand(prog: *Program) !void {
     var add_packages = std.ArrayList(AddPackage).init(prog.arena);
     for (packages_to_update.keys()) |package_name| {
         const package = packages.packages.get(package_name) orelse {
-            try prog.diag.notFound(.{ .name = try prog.diag.putstr(package_name) });
+            try prog.diag.notFound(.{ .name = try prog.diag.putStr(package_name) });
             continue;
         };
 
@@ -657,8 +657,8 @@ fn pkgsAdd(prog: *Program, options: PackagesAddOptions) !void {
             .target = .{ .os = builtin.os.tag, .arch = builtin.target.cpu.arch },
         }) catch |err| {
             try prog.diag.genericError(.{
-                .id = try prog.diag.putstr(add_package.version),
-                .msg = try prog.diag.putstr("Failed to create package from url"),
+                .id = try prog.diag.putStr(add_package.version),
+                .msg = try prog.diag.putStr("Failed to create package from url"),
                 .err = err,
             });
             continue;

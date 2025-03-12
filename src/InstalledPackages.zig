@@ -1,6 +1,6 @@
-arena: std.heap.ArenaAllocator,
+gpa: std.mem.Allocator,
 strings: Strings,
-packages: std.ArrayHashMapUnmanaged(Strings.Index, InstalledPackage, void, true),
+by_name: std.ArrayHashMapUnmanaged(Strings.Index, InstalledPackage, void, true),
 
 file: ?std.fs.File,
 
@@ -26,14 +26,13 @@ pub fn open(options: struct {
     });
 }
 
-pub fn deinit(packages: *InstalledPackages) void {
-    if (packages.file) |f|
+pub fn deinit(pkgs: *InstalledPackages) void {
+    if (pkgs.file) |f|
         f.close();
 
-    packages.strings.deinit(packages.arena.child_allocator);
-    packages.packages.deinit(packages.arena.child_allocator);
-    packages.arena.deinit();
-    packages.* = undefined;
+    pkgs.strings.deinit(pkgs.gpa);
+    pkgs.by_name.deinit(pkgs.gpa);
+    pkgs.* = undefined;
 }
 
 pub fn parseFromFile(options: struct {
@@ -53,22 +52,19 @@ pub fn parseFromFile(options: struct {
 }
 
 pub fn parse(gpa: std.mem.Allocator, string: []const u8) !InstalledPackages {
-    var packages = InstalledPackages{
-        .arena = std.heap.ArenaAllocator.init(gpa),
+    var pkgs = InstalledPackages{
+        .gpa = gpa,
         .strings = .empty,
-        .packages = .{},
+        .by_name = .{},
         .file = null,
     };
-    errdefer packages.deinit();
+    errdefer pkgs.deinit();
 
-    try packages.parseInto(string);
-    return packages;
+    try pkgs.parseInto(string);
+    return pkgs;
 }
 
-pub fn parseInto(packages: *InstalledPackages, string: []const u8) !void {
-    const gpa = packages.arena.child_allocator;
-    const arena = packages.arena.allocator();
-
+pub fn parseInto(pkgs: *InstalledPackages, string: []const u8) !void {
     var parser = ini.Parser.init(string);
     var parsed = parser.next();
 
@@ -82,92 +78,110 @@ pub fn parseInto(packages: *InstalledPackages, string: []const u8) !void {
 
     const PackageField = std.meta.FieldEnum(InstalledPackage);
 
-    // Keep lists for all fields that can have multiple entries. When switching to parsing a new
-    // package, put all the lists into the package and then switch.
-    var location = std.ArrayList(Strings.Index).init(arena);
+    // The original strings length is a good indicator for the maximum number of bytes we're gonna
+    // store in strings
+    try pkgs.strings.data.ensureUnusedCapacity(pkgs.gpa, string.len);
 
     // The first `parsed` will be a `section`, so `package` will be initialized in the first
     // iteration of this loop.
-    const empty_index = try packages.putstr("");
-    var tmp_package: InstalledPackage = .{ .version = empty_index };
+    const empty_index = try pkgs.putStr("");
+    var location_off = pkgs.strings.putIndicesBegin();
+    var tmp_package: InstalledPackage = .{
+        .version = empty_index,
+        .location = .empty,
+    };
     var package: *InstalledPackage = &tmp_package;
     while (true) : (parsed = parser.next()) switch (parsed.kind) {
         .comment => {},
         .invalid => return error.InvalidPackagesIni,
         .section => {
-            package.location = try location.toOwnedSlice();
+            package.location = pkgs.strings.putIndicesEnd(location_off);
 
             const section = parsed.section(string).?;
-            const adapter = Strings.ArrayHashMapAdapter{ .strings = &packages.strings };
-            const entry = try packages.packages.getOrPutAdapted(gpa, section.name, adapter);
-            if (!entry.found_existing) {
-                entry.key_ptr.* = try packages.putstr(section.name);
-                entry.value_ptr.* = .{ .version = empty_index };
-            }
-
+            const adapter = Strings.ArrayHashMapAdapter{ .strings = &pkgs.strings };
+            const entry = try pkgs.by_name.getOrPutAdapted(pkgs.gpa, section.name, adapter);
             package = entry.value_ptr;
-            try location.appendSlice(package.location);
+
+            if (!entry.found_existing) {
+                entry.key_ptr.* = try pkgs.putStr(section.name);
+                entry.value_ptr.* = .{
+                    .version = empty_index,
+                    .location = .empty,
+                };
+                location_off = pkgs.strings.putIndicesBegin();
+            } else {
+                location_off = pkgs.strings.putIndicesBegin();
+                try pkgs.strings.indices.appendSlice(pkgs.gpa, pkgs.getIndices(package.location));
+            }
         },
         .property => {
             const prop = parsed.property(string).?;
-            const value = try packages.putstr(prop.value);
+            const value = try pkgs.putStr(prop.value);
             switch (std.meta.stringToEnum(PackageField, prop.name) orelse continue) {
                 .version => package.version = value,
-                .location => try location.append(value),
+                .location => try pkgs.strings.indices.append(pkgs.gpa, value),
             }
         },
         .end => {
-            package.location = try location.toOwnedSlice();
+            package.location = pkgs.strings.putIndicesEnd(location_off);
             return;
         },
     };
 }
 
-pub fn putstr(packages: *InstalledPackages, string: []const u8) !Strings.Index {
-    return packages.strings.put(packages.arena.child_allocator, string);
+pub fn putStr(pkgs: *InstalledPackages, string: []const u8) !Strings.Index {
+    return pkgs.strings.putStr(pkgs.gpa, string);
+}
+
+pub fn putIndices(pkgs: *InstalledPackages, indices: []const Strings.Index) !Strings.Indices {
+    return pkgs.strings.putIndices(pkgs.gpa, indices);
 }
 
 pub fn print(
-    packages: *InstalledPackages,
+    pkgs: *InstalledPackages,
     comptime format: []const u8,
     args: anytype,
 ) !Strings.Index {
-    return packages.strings.print(packages.arena.child_allocator, format, args);
+    return pkgs.strings.print(pkgs.gpa, format, args);
 }
 
-pub fn getstr(packages: InstalledPackages, string: Strings.Index) [:0]const u8 {
-    return packages.strings.get(string);
+pub fn getStr(pkgs: InstalledPackages, string: Strings.Index) [:0]const u8 {
+    return pkgs.strings.getStr(string);
 }
 
-pub fn flush(packages: InstalledPackages) !void {
-    const file = packages.file orelse return;
+pub fn getIndices(pkgs: InstalledPackages, indices: Strings.Indices) []const Strings.Index {
+    return pkgs.strings.getIndices(indices);
+}
+
+pub fn flush(pkgs: InstalledPackages) !void {
+    const file = pkgs.file orelse return;
 
     try file.seekTo(0);
 
     var buffered_writer = std.io.bufferedWriter(file.writer());
-    try packages.writeTo(buffered_writer.writer());
+    try pkgs.writeTo(buffered_writer.writer());
     try buffered_writer.flush();
 
     try file.setEndPos(try file.getPos());
 }
 
-pub fn writeTo(packages: InstalledPackages, writer: anytype) !void {
-    for (packages.packages.keys(), packages.packages.values(), 0..) |package_name, package, i| {
+pub fn writeTo(pkgs: InstalledPackages, writer: anytype) !void {
+    for (pkgs.by_name.keys(), pkgs.by_name.values(), 0..) |package_name, package, i| {
         if (i != 0)
             try writer.writeAll("\n");
 
-        try package.write(packages.strings, packages.getstr(package_name), writer);
+        try package.write(pkgs.strings, pkgs.getStr(package_name), writer);
     }
 }
 
 fn expectTransform(from: []const u8, to: []const u8) !void {
-    var packages = try parse(std.testing.allocator, from);
-    defer packages.deinit();
+    var pkgs = try parse(std.testing.allocator, from);
+    defer pkgs.deinit();
 
     var rendered = std.ArrayList(u8).init(std.testing.allocator);
     defer rendered.deinit();
 
-    try packages.writeTo(rendered.writer());
+    try pkgs.writeTo(rendered.writer());
     try std.testing.expectEqualStrings(to, rendered.items);
 }
 
@@ -197,6 +211,22 @@ test "parse" {
     ,
         \\[test]
         \\version = 0.0.0
+        \\location = path
+        \\
+    );
+    try expectTransform(
+        \\[test]
+        \\version = 0.0.0
+        \\location = path
+        \\
+        \\[test]
+        \\version = 0.0.0
+        \\location = path
+        \\
+    ,
+        \\[test]
+        \\version = 0.0.0
+        \\location = path
         \\location = path
         \\
     );
