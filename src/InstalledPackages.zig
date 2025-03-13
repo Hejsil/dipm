@@ -91,51 +91,44 @@ pub fn parseInto(pkgs: *InstalledPackages, string: []const u8) !void {
     // defer std.debug.assert(pkgs.strings.indices.capacity == indices_cap);
     // defer std.debug.assert(pkgs.by_name.entries.capacity == by_name_cap);
 
-    // The first `parsed` will be a `section`, so `package` will be initialized in the first
-    // iteration of this loop.
-    const empty_index = try pkgs.putStr("");
-    var location_off = pkgs.strings.putIndicesBegin();
-    var tmp_package: InstalledPackage = .{
-        .version = empty_index,
-        .location = .empty,
-    };
-    var package: *InstalledPackage = &tmp_package;
-    while (true) : (parsed = parser.next()) switch (parsed.kind) {
-        .comment => {},
-        .invalid => return error.InvalidPackagesIni,
-        .section => {
-            package.location = pkgs.strings.putIndicesEnd(location_off);
+    while (parsed.kind != .end) {
+        std.debug.assert(parsed.kind == .section);
 
-            const section = parsed.section(string).?;
-            const adapter = Strings.ArrayHashMapAdapter{ .strings = &pkgs.strings };
-            const entry = try pkgs.by_name.getOrPutAdapted(pkgs.gpa, section.name, adapter);
-            package = entry.value_ptr;
+        const section = parsed.section(string).?;
+        const adapter = Strings.ArrayHashMapAdapter{ .strings = &pkgs.strings };
+        const entry = try pkgs.by_name.getOrPutAdapted(pkgs.gpa, section.name, adapter);
+        if (entry.found_existing)
+            return error.InvalidPackagesIni;
 
-            if (!entry.found_existing) {
-                entry.key_ptr.* = try pkgs.putStr(section.name);
-                entry.value_ptr.* = .{
-                    .version = empty_index,
-                    .location = .empty,
-                };
-                location_off = pkgs.strings.putIndicesBegin();
-            } else {
-                location_off = pkgs.strings.putIndicesBegin();
-                try pkgs.strings.indices.appendSlice(pkgs.gpa, pkgs.getIndices(package.location));
-            }
-        },
-        .property => {
-            const prop = parsed.property(string).?;
-            const value = try pkgs.putStr(prop.value);
-            switch (std.meta.stringToEnum(PackageField, prop.name) orelse continue) {
-                .version => package.version = value,
-                .location => try pkgs.strings.indices.append(pkgs.gpa, value),
-            }
-        },
-        .end => {
-            package.location = pkgs.strings.putIndicesEnd(location_off);
-            return;
-        },
-    };
+        var opt_version: ?[]const u8 = null;
+        const off = pkgs.strings.putIndicesBegin();
+
+        parsed = parser.next();
+        while (true) : (parsed = parser.next()) switch (parsed.kind) {
+            .comment => {},
+            .end, .section => break,
+            .invalid => return error.InvalidPackagesIni,
+            .property => {
+                const prop = parsed.property(string).?;
+                switch (std.meta.stringToEnum(PackageField, prop.name) orelse continue) {
+                    .version => opt_version = prop.value,
+                    .location => {
+                        const location = try pkgs.putStr(prop.value);
+                        try pkgs.strings.indices.append(pkgs.gpa, location);
+                    },
+                }
+            },
+        };
+
+        const version = opt_version orelse return error.InvalidPackagesIni;
+        const location = pkgs.strings.putIndicesEnd(off);
+
+        entry.key_ptr.* = try pkgs.putStr(section.name);
+        entry.value_ptr.* = .{
+            .version = try pkgs.putStr(version),
+            .location = location,
+        };
+    }
 }
 
 pub fn putStr(pkgs: *InstalledPackages, string: []const u8) !Strings.Index {
@@ -198,7 +191,7 @@ fn expectCanonical(string: []const u8) !void {
     return expectTransform(string, string);
 }
 
-test "parse" {
+test parse {
     try expectCanonical(
         \\[test]
         \\version = 0.0.0
@@ -220,22 +213,6 @@ test "parse" {
     ,
         \\[test]
         \\version = 0.0.0
-        \\location = path
-        \\
-    );
-    try expectTransform(
-        \\[test]
-        \\version = 0.0.0
-        \\location = path
-        \\
-        \\[test]
-        \\version = 0.0.0
-        \\location = path
-        \\
-    ,
-        \\[test]
-        \\version = 0.0.0
-        \\location = path
         \\location = path
         \\
     );
