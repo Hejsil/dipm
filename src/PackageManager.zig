@@ -169,7 +169,10 @@ pub fn installMany(pm: *PackageManager, package_names: []const []const u8) !void
 
         const package = downloaded.package;
         const working_dir = downloaded.working_dir;
-        try pm.installExtractedPackage(working_dir, package);
+        pm.installExtractedPackage(working_dir, package) catch |err| switch (err) {
+            Diagnostics.Error.DiagnosticsReported => continue,
+            else => |e| return e,
+        };
 
         try pm.diag.installSucceeded(.{
             .name = try pm.diag.putStr(package.name),
@@ -612,7 +615,10 @@ fn updatePackages(pm: *PackageManager, package_names: []const []const u8, option
 
         const package = downloaded.package;
         const working_dir = downloaded.working_dir;
-        try pm.installExtractedPackage(working_dir, package);
+        pm.installExtractedPackage(working_dir, package) catch |err| switch (err) {
+            Diagnostics.Error.DiagnosticsReported => continue,
+            else => |e| return e,
+        };
 
         const installed_package = packages_to_uninstall.get(package.name).?;
         try pm.diag.updateSucceeded(.{

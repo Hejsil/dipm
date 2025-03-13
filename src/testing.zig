@@ -484,12 +484,20 @@ test "dipm install packages with shared files in bin/" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try prefix.run(&.{ "install", "dup-bin1" });
-    const res = prefix.run(&.{ "install", "dup-bin2" });
+    const res = prefix.run(&.{ "install", "dup-bin1", "dup-bin2", "dup-bin3" });
     try std.testing.expectError(Diagnostics.Error.DiagnosticsReported, res);
-    try prefix.expectFileStartsWith("stderr",
+    try prefix.expectFile("stderr",
+        \\✓ dup-bin1 0.1.0
         \\✗ dup-bin2
         \\└── Path already exists: bin/test-file
+        \\✗ dup-bin3
+        \\└── Path already exists: bin/test-file
+        \\
+    );
+    try prefix.expectFile("share/dipm/installed.ini",
+        \\[dup-bin1]
+        \\version = 0.1.0
+        \\location = bin/test-file
         \\
     );
 }
@@ -498,12 +506,20 @@ test "dipm install packages with shared files in lib/" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
 
-    try prefix.run(&.{ "install", "dup-lib1" });
-    const res = prefix.run(&.{ "install", "dup-lib2" });
+    const res = prefix.run(&.{ "install", "dup-lib1", "dup-lib2", "dup-lib3" });
     try std.testing.expectError(Diagnostics.Error.DiagnosticsReported, res);
-    try prefix.expectFileStartsWith("stderr",
+    try prefix.expectFile("stderr",
+        \\✓ dup-lib1 0.1.0
         \\✗ dup-lib2
         \\└── Path already exists: lib/test-file
+        \\✗ dup-lib3
+        \\└── Path already exists: lib/test-file
+        \\
+    );
+    try prefix.expectFile("share/dipm/installed.ini",
+        \\[dup-lib1]
+        \\version = 0.1.0
+        \\location = lib/test-file
         \\
     );
 }
@@ -548,8 +564,10 @@ pub fn setupPrefix(options: struct {
         fails_download,
         duplicate_bin_file1,
         duplicate_bin_file2,
+        duplicate_bin_file3,
         duplicate_lib_file1,
         duplicate_lib_file2,
+        duplicate_lib_file3,
     };
 
     const prefix_path = if (options.prefix) |prefix|
@@ -854,6 +872,16 @@ pub const duplicate_bin_file2 = TestPackage{
     .install_bin = &.{"test-file:pkg"},
 };
 
+pub const duplicate_bin_file3 = TestPackage{
+    .name = "dup-bin3",
+    .file = .{
+        .name = "pkg",
+        .hash = "ee1c8277caf5fb9b9ac4168c73fc03d982e0859d58ab730b6e15a20c14059ff2",
+        .content = "Binary",
+    },
+    .install_bin = &.{"test-file:pkg"},
+};
+
 pub const duplicate_lib_file1 = TestPackage{
     .name = "dup-lib1",
     .file = .{
@@ -866,6 +894,16 @@ pub const duplicate_lib_file1 = TestPackage{
 
 pub const duplicate_lib_file2 = TestPackage{
     .name = "dup-lib2",
+    .file = .{
+        .name = "pkg",
+        .hash = "ee1c8277caf5fb9b9ac4168c73fc03d982e0859d58ab730b6e15a20c14059ff2",
+        .content = "Binary",
+    },
+    .install_lib = &.{"test-file:pkg"},
+};
+
+pub const duplicate_lib_file3 = TestPackage{
+    .name = "dup-lib3",
     .file = .{
         .name = "pkg",
         .hash = "ee1c8277caf5fb9b9ac4168c73fc03d982e0859d58ab730b6e15a20c14059ff2",
