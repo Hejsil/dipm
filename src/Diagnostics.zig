@@ -4,17 +4,17 @@ lock: std.Thread.Mutex,
 
 successes: struct {
     donate: std.ArrayListUnmanaged(PackageDonate),
-    installs: std.ArrayListUnmanaged(PackageVersion),
+    installs: std.ArrayListUnmanaged(PackageInstall),
     updates: std.ArrayListUnmanaged(PackageFromTo),
-    uninstalls: std.ArrayListUnmanaged(PackageVersion),
+    uninstalls: std.ArrayListUnmanaged(PackageUninstall),
 },
 
 warnings: struct {
-    already_installed: std.ArrayListUnmanaged(Package),
-    not_installed: std.ArrayListUnmanaged(Package),
-    not_found: std.ArrayListUnmanaged(Package),
+    already_installed: std.ArrayListUnmanaged(PackageAlreadyInstalled),
+    not_installed: std.ArrayListUnmanaged(PackageNotInstalled),
+    not_found: std.ArrayListUnmanaged(PackageNotFound),
     not_found_for_target: std.ArrayListUnmanaged(PackageTarget),
-    up_to_date: std.ArrayListUnmanaged(PackageVersion),
+    up_to_date: std.ArrayListUnmanaged(PackageUpToDate),
 },
 
 failures: struct {
@@ -91,178 +91,23 @@ pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
 
     const esc = opt.escapes;
 
-    var buf: [1024]u8 = undefined;
-    var fba_state = std.heap.FixedBufferAllocator.init(&buf);
-    const fba = fba_state.allocator();
-
-    const success = try std.fmt.allocPrint(fba, "{s}{s}✓{s}", .{
-        esc.bold,
-        esc.green,
-        esc.reset,
-    });
-    const warning = try std.fmt.allocPrint(fba, "{s}{s}⚠{s}", .{
-        esc.bold,
-        esc.yellow,
-        esc.reset,
-    });
-    const failure = try std.fmt.allocPrint(fba, "{s}{s}✗{s}", .{
-        esc.bold,
-        esc.red,
-        esc.reset,
-    });
-
-    for (diag.successes.installs.items) |installed|
-        try writer.print("{s} {s}{s} {s}{s}\n", .{
-            success,
-            esc.bold,
-            diag.strings.getStr(installed.name),
-            diag.strings.getStr(installed.version),
-            esc.reset,
-        });
-    for (diag.successes.updates.items) |updated|
-        try writer.print("{s} {s}{s} {s} -> {s}{s}\n", .{
-            success,
-            esc.bold,
-            diag.strings.getStr(updated.name),
-            diag.strings.getStr(updated.from_version),
-            diag.strings.getStr(updated.to_version),
-            esc.reset,
-        });
-    for (diag.successes.uninstalls.items) |uninstall|
-        try writer.print("{s} {s}{s} {s} -> ✗{s}\n", .{
-            success,
-            esc.bold,
-            diag.strings.getStr(uninstall.name),
-            diag.strings.getStr(uninstall.version),
-            esc.reset,
-        });
-
-    for (diag.warnings.already_installed.items) |already_installed| {
-        try writer.print("{s} {s}{s}{s}\n", .{
-            warning,
-            esc.bold,
-            diag.strings.getStr(already_installed.name),
-            esc.reset,
-        });
-        try writer.print("└── Package already installed\n", .{});
+    inline for (@typeInfo(@TypeOf(diag.successes)).@"struct".fields) |field| {
+        for (@field(diag.successes, field.name).items) |item| {
+            try writer.print("{s}{s}✓{s} ", .{ esc.bold, esc.green, esc.reset });
+            try item.print(diag.strings, esc, writer);
+        }
     }
-    for (diag.warnings.not_installed.items) |not_installed| {
-        try writer.print("{s} {s}{s}{s}\n", .{
-            warning,
-            esc.bold,
-            diag.strings.getStr(not_installed.name),
-            esc.reset,
-        });
-        try writer.print("└── Package is not installed\n", .{});
+    inline for (@typeInfo(@TypeOf(diag.warnings)).@"struct".fields) |field| {
+        for (@field(diag.warnings, field.name).items) |item| {
+            try writer.print("{s}{s}⚠{s} ", .{ esc.bold, esc.yellow, esc.reset });
+            try item.print(diag.strings, esc, writer);
+        }
     }
-    for (diag.warnings.not_found.items) |not_found| {
-        try writer.print("{s} {s}{s}{s}\n", .{
-            warning,
-            esc.bold,
-            diag.strings.getStr(not_found.name),
-            esc.reset,
-        });
-        try writer.print("└── Package not found\n", .{});
-    }
-    for (diag.warnings.not_found_for_target.items) |not_found| {
-        try writer.print("{s} {s}{s}{s}\n", .{
-            warning,
-            esc.bold,
-            diag.strings.getStr(not_found.name),
-            esc.reset,
-        });
-        try writer.print("└── Package not found for {s}_{s}\n", .{
-            @tagName(not_found.target.os),
-            @tagName(not_found.target.arch),
-        });
-    }
-    for (diag.warnings.up_to_date.items) |up_to_date| {
-        try writer.print("{s} {s}{s} {s}{s}\n", .{
-            warning,
-            esc.bold,
-            diag.strings.getStr(up_to_date.name),
-            diag.strings.getStr(up_to_date.version),
-            esc.reset,
-        });
-        try writer.print("└── Package is up to date\n", .{});
-    }
-
-    for (diag.failures.downloads.items) |download| {
-        try writer.print("{s} {s}{s} {s}{s}\n", .{
-            failure,
-            esc.bold,
-            diag.strings.getStr(download.name),
-            diag.strings.getStr(download.version),
-            esc.reset,
-        });
-        try writer.print("│   Failed to download\n", .{});
-        try writer.print("│     url:   {s}\n", .{diag.strings.getStr(download.url)});
-        try writer.print("└──   error: {s}\n", .{@errorName(download.err)});
-    }
-    for (diag.failures.downloads_with_status.items) |download| {
-        try writer.print("{s} {s}{s} {s}{s}\n", .{
-            failure,
-            esc.bold,
-            diag.strings.getStr(download.name),
-            diag.strings.getStr(download.version),
-            esc.reset,
-        });
-        try writer.print("│   Failed to download\n", .{});
-        try writer.print("│     url:   {s}\n", .{diag.strings.getStr(download.url)});
-        try writer.print("└──   status: {} {s}\n", .{
-            @intFromEnum(download.status),
-            download.status.phrase() orelse "",
-        });
-    }
-    for (diag.failures.hash_mismatches.items) |hash_mismatch| {
-        try writer.print("{s} {s}{s} {s}{s}\n", .{
-            failure,
-            esc.bold,
-            diag.strings.getStr(hash_mismatch.name),
-            diag.strings.getStr(hash_mismatch.version),
-            esc.reset,
-        });
-        try writer.print("│   Hash mismatch\n", .{});
-        try writer.print("│     expected: {s}\n", .{diag.strings.getStr(hash_mismatch.expected_hash)});
-        try writer.print("└──   actual:   {s}\n", .{diag.strings.getStr(hash_mismatch.actual_hash)});
-    }
-    for (diag.failures.no_version_found.items) |no_version| {
-        try writer.print("{s} {s}{s}{s}\n", .{
-            failure,
-            esc.bold,
-            diag.strings.getStr(no_version.name),
-            esc.reset,
-        });
-        try writer.print("└── No version found: {s}\n", .{@errorName(no_version.err)});
-    }
-    for (diag.failures.path_already_exists.items) |err| {
-        try writer.print("{s} {s}{s}{s}\n", .{
-            failure,
-            esc.bold,
-            diag.strings.getStr(err.name),
-            esc.reset,
-        });
-        try writer.print("└── Path already exists: {s}\n", .{diag.strings.getStr(err.path)});
-    }
-    for (diag.failures.generic_error.items) |err| {
-        try writer.print("{s} {s}{s}{s}\n", .{
-            failure,
-            esc.bold,
-            diag.strings.getStr(err.id),
-            esc.reset,
-        });
-        try writer.print("│   {s}\n", .{diag.strings.getStr(err.msg)});
-        try writer.print("└──   {s}\n", .{@errorName(err.err)});
-    }
-    for (diag.successes.donate.items) |package| {
-        try writer.print("{s} {s}{s} {s}{s}\n", .{
-            success,
-            esc.bold,
-            diag.strings.getStr(package.name),
-            diag.strings.getStr(package.version),
-            esc.reset,
-        });
-        try writer.print("└── {s}\n", .{diag.strings.getStr(package.donate)});
+    inline for (@typeInfo(@TypeOf(diag.failures)).@"struct".fields) |field| {
+        for (@field(diag.failures, field.name).items) |item| {
+            try writer.print("{s}{s}✗{s} ", .{ esc.bold, esc.red, esc.reset });
+            try item.print(diag.strings, esc, writer);
+        }
     }
 
     const show_donate_reminder = opt.is_tty and !diag.hasFailed() and
@@ -301,7 +146,7 @@ pub fn donate(diag: *Diagnostics, package: PackageDonate) !void {
     return diag.successes.donate.append(diag.gpa, package);
 }
 
-pub fn installSucceeded(diag: *Diagnostics, package: PackageVersion) !void {
+pub fn installSucceeded(diag: *Diagnostics, package: PackageInstall) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
     return diag.successes.installs.append(diag.gpa, package);
@@ -313,25 +158,25 @@ pub fn updateSucceeded(diag: *Diagnostics, package: PackageFromTo) !void {
     return diag.successes.updates.append(diag.gpa, package);
 }
 
-pub fn uninstallSucceeded(diag: *Diagnostics, package: PackageVersion) !void {
+pub fn uninstallSucceeded(diag: *Diagnostics, package: PackageUninstall) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
     return diag.successes.uninstalls.append(diag.gpa, package);
 }
 
-pub fn alreadyInstalled(diag: *Diagnostics, package: Package) !void {
+pub fn alreadyInstalled(diag: *Diagnostics, package: PackageAlreadyInstalled) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
     return diag.warnings.already_installed.append(diag.gpa, package);
 }
 
-pub fn notInstalled(diag: *Diagnostics, package: Package) !void {
+pub fn notInstalled(diag: *Diagnostics, package: PackageNotInstalled) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
     return diag.warnings.not_installed.append(diag.gpa, package);
 }
 
-pub fn notFound(diag: *Diagnostics, package: Package) !void {
+pub fn notFound(diag: *Diagnostics, package: PackageNotFound) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
     return diag.warnings.not_found.append(diag.gpa, package);
@@ -343,7 +188,7 @@ pub fn notFoundForTarget(diag: *Diagnostics, not_found: PackageTarget) !void {
     return diag.warnings.not_found_for_target.append(diag.gpa, not_found);
 }
 
-pub fn upToDate(diag: *Diagnostics, package: PackageVersion) !void {
+pub fn upToDate(diag: *Diagnostics, package: PackageUpToDate) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
     return diag.warnings.up_to_date.append(diag.gpa, package);
@@ -385,35 +230,149 @@ pub fn genericError(diag: *Diagnostics, failure: GenericError) !void {
     return diag.failures.generic_error.append(diag.gpa, failure);
 }
 
-pub const Package = struct {
+pub const PackageAlreadyInstalled = struct {
     name: Strings.Index,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            esc.reset,
+        });
+        try writer.print("└── Package already installed\n", .{});
+    }
+};
+
+pub const PackageNotInstalled = struct {
+    name: Strings.Index,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            esc.reset,
+        });
+        try writer.print("└── Package is not installed\n", .{});
+    }
+};
+
+pub const PackageNotFound = struct {
+    name: Strings.Index,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            esc.reset,
+        });
+        try writer.print("└── Package not found\n", .{});
+    }
 };
 
 pub const PackageDonate = struct {
     name: Strings.Index,
     version: Strings.Index,
     donate: Strings.Index,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s} {s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            strings.getStr(this.version),
+            esc.reset,
+        });
+        try writer.print("└── {s}\n", .{strings.getStr(this.donate)});
+    }
 };
 
-pub const PackageVersion = struct {
+pub const PackageInstall = struct {
     name: Strings.Index,
     version: Strings.Index,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s} {s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            strings.getStr(this.version),
+            esc.reset,
+        });
+    }
+};
+
+pub const PackageUninstall = struct {
+    name: Strings.Index,
+    version: Strings.Index,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s} {s} -> ✗{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            strings.getStr(this.version),
+            esc.reset,
+        });
+    }
+};
+
+pub const PackageUpToDate = struct {
+    name: Strings.Index,
+    version: Strings.Index,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s} {s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            strings.getStr(this.version),
+            esc.reset,
+        });
+        try writer.print("└── Package is up to date\n", .{});
+    }
 };
 
 pub const PackageFromTo = struct {
     name: Strings.Index,
     from_version: Strings.Index,
     to_version: Strings.Index,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s} {s} -> {s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            strings.getStr(this.from_version),
+            strings.getStr(this.to_version),
+            esc.reset,
+        });
+    }
 };
 
 pub const PackageError = struct {
     name: Strings.Index,
     err: anyerror,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            esc.reset,
+        });
+        try writer.print("└── No version found: {s}\n", .{@errorName(this.err)});
+    }
 };
 
 pub const PackageTarget = struct {
     name: Strings.Index,
     target: Target,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            esc.reset,
+        });
+        try writer.print("└── Package not found for {s}_{s}\n", .{
+            @tagName(this.target.os),
+            @tagName(this.target.arch),
+        });
+    }
 };
 
 pub const HashMismatch = struct {
@@ -421,6 +380,18 @@ pub const HashMismatch = struct {
     version: Strings.Index,
     expected_hash: Strings.Index,
     actual_hash: Strings.Index,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s} {s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            strings.getStr(this.version),
+            esc.reset,
+        });
+        try writer.print("│   Hash mismatch\n", .{});
+        try writer.print("│     expected: {s}\n", .{strings.getStr(this.expected_hash)});
+        try writer.print("└──   actual:   {s}\n", .{strings.getStr(this.actual_hash)});
+    }
 };
 
 pub const DownloadFailed = struct {
@@ -428,6 +399,18 @@ pub const DownloadFailed = struct {
     version: Strings.Index,
     url: Strings.Index,
     err: anyerror,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s} {s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            strings.getStr(this.version),
+            esc.reset,
+        });
+        try writer.print("│   Failed to download\n", .{});
+        try writer.print("│     url:   {s}\n", .{strings.getStr(this.url)});
+        try writer.print("└──   error: {s}\n", .{@errorName(this.err)});
+    }
 };
 
 pub const DownloadFailedWithStatus = struct {
@@ -435,17 +418,51 @@ pub const DownloadFailedWithStatus = struct {
     version: Strings.Index,
     url: Strings.Index,
     status: std.http.Status,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s} {s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            strings.getStr(this.version),
+            esc.reset,
+        });
+        try writer.print("│   Failed to download\n", .{});
+        try writer.print("│     url:   {s}\n", .{strings.getStr(this.url)});
+        try writer.print("└──   status: {} {s}\n", .{
+            @intFromEnum(this.status),
+            this.status.phrase() orelse "",
+        });
+    }
 };
 
 pub const PathAlreadyExists = struct {
     name: Strings.Index,
     path: Strings.Index,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.name),
+            esc.reset,
+        });
+        try writer.print("└── Path already exists: {s}\n", .{strings.getStr(this.path)});
+    }
 };
 
 pub const GenericError = struct {
     id: Strings.Index,
     msg: Strings.Index,
     err: anyerror,
+
+    fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
+        try writer.print("{s}{s}{s}\n", .{
+            esc.bold,
+            strings.getStr(this.id),
+            esc.reset,
+        });
+        try writer.print("│   {s}\n", .{strings.getStr(this.msg)});
+        try writer.print("└──   {s}\n", .{@errorName(this.err)});
+    }
 };
 
 pub const Error = error{
