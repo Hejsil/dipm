@@ -640,7 +640,15 @@ fn pkgsAdd(prog: *Program, options: PackagesAddOptions) !void {
     var packages = try Packages.parseFile(prog.gpa, pkgs_ini_file);
     defer packages.deinit();
 
+    const global_progress = switch (options.add_packages.len) {
+        0, 1 => .none,
+        else => prog.progress.start("progress", @intCast(options.add_packages.len)),
+    };
+    defer prog.progress.end(global_progress);
+
     for (options.add_packages, 0..) |add_package, i| {
+        defer global_progress.advance(1);
+
         if (i != 0 and options.delay != 0)
             std.Thread.sleep(options.delay);
 

@@ -142,9 +142,16 @@ pub fn installMany(pm: *PackageManager, package_names: []const []const u8) !void
         }
     }
 
+    const global_progress = switch (packages_to_install.count()) {
+        0, 1 => .none,
+        else => pm.progress.start("progress", @intCast(packages_to_install.count())),
+    };
+    defer pm.progress.end(global_progress);
+
     var downloads = try DownloadAndExtractJobs.init(.{
         .gpa = pm.gpa,
         .dir = pm.own_tmp_dir,
+        .progress = global_progress,
         .packages = packages_to_install.values(),
     });
     defer downloads.deinit();
@@ -568,9 +575,16 @@ fn updatePackages(pm: *PackageManager, package_names: []const []const u8, option
         }
     }
 
+    const global_progress = switch (packages_to_install.count()) {
+        0, 1 => .none,
+        else => pm.progress.start("progress", @intCast(packages_to_install.count())),
+    };
+    defer pm.progress.end(global_progress);
+
     var downloads = try DownloadAndExtractJobs.init(.{
         .gpa = pm.gpa,
         .dir = pm.own_tmp_dir,
+        .progress = global_progress,
         .packages = packages_to_install.values(),
     });
     defer downloads.deinit();
@@ -617,6 +631,7 @@ const DownloadAndExtractJobs = struct {
     fn init(options: struct {
         gpa: std.mem.Allocator,
         dir: std.fs.Dir,
+        progress: Progress.Node,
         packages: []const Package.Specific,
     }) !DownloadAndExtractJobs {
         var res = DownloadAndExtractJobs{
@@ -631,6 +646,7 @@ const DownloadAndExtractJobs = struct {
 
             res.jobs.appendAssumeCapacity(.{
                 .working_dir = working_dir.dir,
+                .progress = options.progress,
                 .package = package,
                 .result = {},
             });
@@ -657,11 +673,13 @@ const DownloadAndExtractJobs = struct {
 
 const DownloadAndExtractJob = struct {
     package: Package.Specific,
+    progress: Progress.Node,
     working_dir: std.fs.Dir,
     result: DownloadAndExtractReturnType,
 
     fn run(job: *DownloadAndExtractJob, pm: *PackageManager) void {
         job.result = pm.downloadAndExtractPackage(job.working_dir, job.package);
+        job.progress.advance(1);
     }
 };
 
