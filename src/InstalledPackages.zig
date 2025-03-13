@@ -81,7 +81,7 @@ pub fn parseInto(pkgs: *InstalledPackages, string: []const u8) !void {
     // Use original string lengths as a heuristic for how much data to preallocate
     try pkgs.strings.data.ensureUnusedCapacity(pkgs.gpa, string.len);
     try pkgs.strings.indices.ensureUnusedCapacity(pkgs.gpa, string.len / 32);
-    try pkgs.by_name.ensureUnusedCapacity(pkgs.gpa, string.len / 256);
+    try pkgs.by_name.ensureUnusedCapacity(pkgs.gpa, string.len / 64);
 
     // Use a debug build of `dipm list installed` to find the limits above using the code below
     // const indices_cap = pkgs.strings.indices.capacity;
