@@ -2,7 +2,13 @@ data: std.ArrayListUnmanaged(u8),
 indices: std.ArrayListUnmanaged(Index),
 pointer_stability: std.debug.SafetyLock,
 
-pub const Index = enum(u32) { _ };
+pub const Index = enum(u32) {
+    _,
+
+    pub fn get(i: Index, strings: Strings) [:0]const u8 {
+        return strings.getStr(i);
+    }
+};
 
 pub const Indices = struct {
     off: u32,
@@ -12,6 +18,10 @@ pub const Indices = struct {
         .off = 0,
         .len = 0,
     };
+
+    pub fn get(i: Indices, strings: Strings) []const Index {
+        return strings.getIndices(i);
+    }
 };
 
 pub const empty = Strings{
@@ -57,8 +67,8 @@ test putStr {
     const b = try strings.putStr(gpa, "b");
     try std.testing.expectEqual(@as(u32, 0), @intFromEnum(a));
     try std.testing.expectEqual(@as(u32, 2), @intFromEnum(b));
-    try std.testing.expectEqualStrings("a", strings.getStr(a));
-    try std.testing.expectEqualStrings("b", strings.getStr(b));
+    try std.testing.expectEqualStrings("a", a.get(strings));
+    try std.testing.expectEqualStrings("b", b.get(strings));
 }
 
 pub fn putStrs(strings: *Strings, gpa: std.mem.Allocator, strs: []const []const u8) !Indices {
@@ -102,12 +112,12 @@ test putStrs {
     try std.testing.expectEqual(@as(u32, 0), indices.off);
     try std.testing.expectEqual(@as(u32, 2), indices.len);
 
-    const indices_slice = strings.getIndices(indices);
+    const indices_slice = indices.get(strings);
     try std.testing.expectEqual(@as(usize, 2), indices_slice.len);
     try std.testing.expectEqual(@as(u32, 0), @intFromEnum(indices_slice[0]));
     try std.testing.expectEqual(@as(u32, 2), @intFromEnum(indices_slice[1]));
-    try std.testing.expectEqualStrings("a", strings.getStr(indices_slice[0]));
-    try std.testing.expectEqualStrings("b", strings.getStr(indices_slice[1]));
+    try std.testing.expectEqualStrings("a", indices_slice[0].get(strings));
+    try std.testing.expectEqualStrings("b", indices_slice[1].get(strings));
 }
 
 pub fn putIndices(strings: *Strings, gpa: std.mem.Allocator, indices: []const Index) !Indices {
@@ -141,7 +151,7 @@ test putIndices {
     try std.testing.expectEqual(@as(u32, 0), indices.off);
     try std.testing.expectEqual(@as(u32, 2), indices.len);
 
-    const indices_slice = strings.getIndices(indices);
+    const indices_slice = indices.get(strings);
     try std.testing.expectEqual(@as(usize, 2), indices_slice.len);
     try std.testing.expectEqual(a, indices_slice[0]);
     try std.testing.expectEqual(b, indices_slice[1]);
@@ -199,19 +209,19 @@ test print {
     try std.testing.expectEqualStrings("bc", strings.getStr(b));
 }
 
-pub fn getPtr(strings: Strings, index: Index) [*:0]const u8 {
+fn getPtr(strings: Strings, index: Index) [*:0]const u8 {
     strings.pointer_stability.assertUnlocked();
     const i = @intFromEnum(index);
     return strings.data.items[i .. strings.data.items.len - 1 :0];
 }
 
-pub fn getStr(strings: Strings, index: Index) [:0]const u8 {
+fn getStr(strings: Strings, index: Index) [:0]const u8 {
     strings.pointer_stability.assertUnlocked();
     const ptr = strings.getPtr(index);
     return std.mem.span(ptr);
 }
 
-pub fn getIndices(strings: Strings, indices: Indices) []const Index {
+fn getIndices(strings: Strings, indices: Indices) []const Index {
     return strings.indices.items[indices.off..][0..indices.len];
 }
 
@@ -219,7 +229,7 @@ pub const ArrayHashMapAdapter = struct {
     strings: *const Strings,
 
     pub fn eql(ctx: ArrayHashMapAdapter, a: []const u8, b: Index, _: usize) bool {
-        const b_str = ctx.strings.getStr(b);
+        const b_str = b.get(ctx.strings.*);
         return std.mem.eql(u8, a, b_str);
     }
 

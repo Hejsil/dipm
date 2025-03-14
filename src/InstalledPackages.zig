@@ -147,14 +147,6 @@ pub fn print(
     return pkgs.strings.print(pkgs.gpa, format, args);
 }
 
-pub fn getStr(pkgs: InstalledPackages, string: Strings.Index) [:0]const u8 {
-    return pkgs.strings.getStr(string);
-}
-
-pub fn getIndices(pkgs: InstalledPackages, indices: Strings.Indices) []const Strings.Index {
-    return pkgs.strings.getIndices(indices);
-}
-
 pub fn flush(pkgs: InstalledPackages) !void {
     const file = pkgs.file orelse return;
 
@@ -172,7 +164,7 @@ pub fn writeTo(pkgs: InstalledPackages, writer: anytype) !void {
         if (i != 0)
             try writer.writeAll("\n");
 
-        try package.write(pkgs.strings, pkgs.getStr(package_name), writer);
+        try package.write(pkgs.strings, package_name.get(pkgs.strings), writer);
     }
 }
 

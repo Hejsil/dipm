@@ -3,9 +3,9 @@ location: Strings.Indices,
 
 pub fn write(package: Package, strings: Strings, name: []const u8, writer: anytype) !void {
     try writer.print("[{s}]\n", .{name});
-    try writer.print("version = {s}\n", .{strings.getStr(package.version)});
-    for (strings.getIndices(package.location)) |install|
-        try writer.print("location = {s}\n", .{strings.getStr(install)});
+    try writer.print("version = {s}\n", .{package.version.get(strings)});
+    for (package.location.get(strings)) |install|
+        try writer.print("location = {s}\n", .{install.get(strings)});
 }
 
 const Package = @This();

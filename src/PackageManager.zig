@@ -311,7 +311,7 @@ fn installExtractedPackage(
     // Try to not leave files around if installation fails
     errdefer {
         for (locations.items) |location|
-            pm.prefix_dir.deleteTree(pm.installed.getStr(location)) catch {};
+            pm.prefix_dir.deleteTree(location.get(pm.installed.strings)) catch {};
     }
 
     for (package.install.install_bin) |install_field| {
@@ -324,7 +324,7 @@ fn installExtractedPackage(
             error.PathAlreadyExists => {
                 try pm.diag.pathAlreadyExists(.{
                     .name = try pm.diag.putStr(package.name),
-                    .path = try pm.diag.putStr(pm.installed.getStr(path)),
+                    .path = try pm.diag.putStr(path.get(pm.installed.strings)),
                 });
                 return Diagnostics.Error.DiagnosticsReported;
             },
@@ -354,7 +354,7 @@ fn installExtractedPackage(
                 error.PathAlreadyExists => {
                     try pm.diag.pathAlreadyExists(.{
                         .name = try pm.diag.putStr(package.name),
-                        .path = try pm.diag.putStr(pm.installed.getStr(path)),
+                        .path = try pm.diag.putStr(path.get(pm.installed.strings)),
                     });
                     return Diagnostics.Error.DiagnosticsReported;
                 },
@@ -468,7 +468,7 @@ pub fn uninstallMany(pm: *PackageManager, package_names: []const []const u8) !vo
         try pm.uninstallOneUnchecked(package_name, package);
         try pm.diag.uninstallSucceeded(.{
             .name = try pm.diag.putStr(package_name),
-            .version = try pm.diag.putStr(pm.installed.getStr(package.version)),
+            .version = try pm.diag.putStr(package.version.get(pm.installed.strings)),
         });
     }
 
@@ -504,8 +504,8 @@ fn uninstallOneUnchecked(
     package_name: []const u8,
     package: InstalledPackage,
 ) !void {
-    for (pm.installed.getIndices(package.location)) |location|
-        try pm.prefix_dir.deleteTree(pm.installed.getStr(location));
+    for (package.location.get(pm.installed.strings)) |location|
+        try pm.prefix_dir.deleteTree(location.get(pm.installed.strings));
 
     const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strings };
     _ = pm.installed.by_name.orderedRemoveAdapted(package_name, adapter);
@@ -527,7 +527,7 @@ pub fn updateAll(pm: *PackageManager, options: UpdateOptions) !void {
     try packages_to_update.ensureTotalCapacity(installed.len);
 
     for (installed) |package_name_index| {
-        const package_name = pm.installed.getStr(package_name_index);
+        const package_name = package_name_index.get(pm.installed.strings);
         packages_to_update.appendAssumeCapacity(try arena.dupe(u8, package_name));
     }
 
@@ -565,7 +565,7 @@ fn updatePackages(pm: *PackageManager, package_names: []const []const u8, option
         // Remove up to date packages from the list if we're not force updating
         for (packages_to_uninstall.keys(), packages_to_uninstall.values()) |package_name, installed_package| {
             const updated_package = packages_to_install.get(package_name) orelse continue;
-            const installed_version = pm.installed.getStr(installed_package.version);
+            const installed_version = installed_package.version.get(pm.installed.strings);
             if (!std.mem.eql(u8, installed_version, updated_package.info.version))
                 continue;
 
@@ -623,7 +623,7 @@ fn updatePackages(pm: *PackageManager, package_names: []const []const u8, option
         const installed_package = packages_to_uninstall.get(package.name).?;
         try pm.diag.updateSucceeded(.{
             .name = try pm.diag.putStr(package.name),
-            .from_version = try pm.diag.putStr(pm.installed.getStr(installed_package.version)),
+            .from_version = try pm.diag.putStr(installed_package.version.get(pm.installed.strings)),
             .to_version = try pm.diag.putStr(package.info.version),
         });
     }

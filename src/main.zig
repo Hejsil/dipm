@@ -235,7 +235,7 @@ fn donateCommand(prog: *Program) !void {
     defer installed_packages.deinit();
 
     for (installed_packages.by_name.keys()) |package_name_index| {
-        const package_name = installed_packages.getStr(package_name_index);
+        const package_name = package_name_index.get(installed_packages.strings);
         const package = packages.packages.get(package_name) orelse {
             try prog.diag.notFound(.{ .name = try prog.diag.putStr(package_name) });
             continue;
@@ -421,8 +421,8 @@ fn listInstalledCommand(prog: *Program) !void {
 
     for (installed.by_name.keys(), installed.by_name.values()) |name, package|
         try writer.print("{s}\t{s}\n", .{
-            installed.getStr(name),
-            installed.getStr(package.version),
+            name.get(installed.strings),
+            package.version.get(installed.strings),
         });
     try stdout_buffered.flush();
 }

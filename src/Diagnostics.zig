@@ -236,7 +236,7 @@ pub const PackageAlreadyInstalled = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
+            this.name.get(strings),
             esc.reset,
         });
         try writer.print("└── Package already installed\n", .{});
@@ -249,7 +249,7 @@ pub const PackageNotInstalled = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
+            this.name.get(strings),
             esc.reset,
         });
         try writer.print("└── Package is not installed\n", .{});
@@ -262,7 +262,7 @@ pub const PackageNotFound = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
+            this.name.get(strings),
             esc.reset,
         });
         try writer.print("└── Package not found\n", .{});
@@ -277,11 +277,11 @@ pub const PackageDonate = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s} {s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
-            strings.getStr(this.version),
+            this.name.get(strings),
+            this.version.get(strings),
             esc.reset,
         });
-        try writer.print("└── {s}\n", .{strings.getStr(this.donate)});
+        try writer.print("└── {s}\n", .{this.donate.get(strings)});
     }
 };
 
@@ -292,8 +292,8 @@ pub const PackageInstall = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s} {s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
-            strings.getStr(this.version),
+            this.name.get(strings),
+            this.version.get(strings),
             esc.reset,
         });
     }
@@ -306,8 +306,8 @@ pub const PackageUninstall = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s} {s} -> ✗{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
-            strings.getStr(this.version),
+            this.name.get(strings),
+            this.version.get(strings),
             esc.reset,
         });
     }
@@ -320,8 +320,8 @@ pub const PackageUpToDate = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s} {s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
-            strings.getStr(this.version),
+            this.name.get(strings),
+            this.version.get(strings),
             esc.reset,
         });
         try writer.print("└── Package is up to date\n", .{});
@@ -336,9 +336,9 @@ pub const PackageFromTo = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s} {s} -> {s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
-            strings.getStr(this.from_version),
-            strings.getStr(this.to_version),
+            this.name.get(strings),
+            this.from_version.get(strings),
+            this.to_version.get(strings),
             esc.reset,
         });
     }
@@ -351,7 +351,7 @@ pub const PackageError = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
+            this.name.get(strings),
             esc.reset,
         });
         try writer.print("└── No version found: {s}\n", .{@errorName(this.err)});
@@ -365,7 +365,7 @@ pub const PackageTarget = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
+            this.name.get(strings),
             esc.reset,
         });
         try writer.print("└── Package not found for {s}_{s}\n", .{
@@ -384,13 +384,13 @@ pub const HashMismatch = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s} {s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
-            strings.getStr(this.version),
+            this.name.get(strings),
+            this.version.get(strings),
             esc.reset,
         });
         try writer.print("│   Hash mismatch\n", .{});
-        try writer.print("│     expected: {s}\n", .{strings.getStr(this.expected_hash)});
-        try writer.print("└──   actual:   {s}\n", .{strings.getStr(this.actual_hash)});
+        try writer.print("│     expected: {s}\n", .{this.expected_hash.get(strings)});
+        try writer.print("└──   actual:   {s}\n", .{this.actual_hash.get(strings)});
     }
 };
 
@@ -403,12 +403,12 @@ pub const DownloadFailed = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s} {s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
-            strings.getStr(this.version),
+            this.name.get(strings),
+            this.version.get(strings),
             esc.reset,
         });
         try writer.print("│   Failed to download\n", .{});
-        try writer.print("│     url:   {s}\n", .{strings.getStr(this.url)});
+        try writer.print("│     url:   {s}\n", .{this.url.get(strings)});
         try writer.print("└──   error: {s}\n", .{@errorName(this.err)});
     }
 };
@@ -422,12 +422,12 @@ pub const DownloadFailedWithStatus = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s} {s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
-            strings.getStr(this.version),
+            this.name.get(strings),
+            this.version.get(strings),
             esc.reset,
         });
         try writer.print("│   Failed to download\n", .{});
-        try writer.print("│     url:   {s}\n", .{strings.getStr(this.url)});
+        try writer.print("│     url:   {s}\n", .{this.url.get(strings)});
         try writer.print("└──   status: {} {s}\n", .{
             @intFromEnum(this.status),
             this.status.phrase() orelse "",
@@ -442,10 +442,10 @@ pub const PathAlreadyExists = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.name),
+            this.name.get(strings),
             esc.reset,
         });
-        try writer.print("└── Path already exists: {s}\n", .{strings.getStr(this.path)});
+        try writer.print("└── Path already exists: {s}\n", .{this.path.get(strings)});
     }
 };
 
@@ -457,10 +457,10 @@ pub const GenericError = struct {
     fn print(this: @This(), strings: Strings, esc: Escapes, writer: anytype) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
-            strings.getStr(this.id),
+            this.id.get(strings),
             esc.reset,
         });
-        try writer.print("│   {s}\n", .{strings.getStr(this.msg)});
+        try writer.print("│   {s}\n", .{this.msg.get(strings)});
         try writer.print("└──   {s}\n", .{@errorName(this.err)});
     }
 };
