@@ -20,41 +20,41 @@ pub const MessageOptions = struct {
 /// the old and new package, the commit message will differ.
 pub fn createCommitMessage(
     gpa: std.mem.Allocator,
-    package: Package.Named,
-    m_old_package: ?Package,
+    pkg: Package.Named,
+    m_old_pkg: ?Package,
     options: MessageOptions,
 ) ![]u8 {
-    const old_package = m_old_package orelse {
+    const old_pkg = m_old_pkg orelse {
         return std.fmt.allocPrint(gpa, "{s}: Add {s}", .{
-            package.name,
-            package.package.info.version,
+            pkg.name,
+            pkg.pkg.info.version,
         });
     };
-    if (!std.mem.eql(u8, package.package.info.version, old_package.info.version)) {
+    if (!std.mem.eql(u8, pkg.pkg.info.version, old_pkg.info.version)) {
         return std.fmt.allocPrint(gpa, "{s}: Update {s}", .{
-            package.name,
-            package.package.info.version,
+            pkg.name,
+            pkg.pkg.info.version,
         });
     }
-    if (!std.mem.eql(u8, package.package.linux_x86_64.hash, old_package.linux_x86_64.hash))
-        return std.fmt.allocPrint(gpa, "{s}: Update hash", .{package.name});
-    if (!std.mem.eql(u8, package.package.linux_x86_64.url, old_package.linux_x86_64.url))
-        return std.fmt.allocPrint(gpa, "{s}: Update url", .{package.name});
-    if (options.description and !std.mem.eql(u8, package.package.info.description, old_package.info.description))
-        return std.fmt.allocPrint(gpa, "{s}: Update description", .{package.name});
-    if (package.package.info.donate.len != old_package.info.donate.len)
-        return std.fmt.allocPrint(gpa, "{s}: Update donations", .{package.name});
-    for (package.package.info.donate, old_package.info.donate) |new, old| {
+    if (!std.mem.eql(u8, pkg.pkg.linux_x86_64.hash, old_pkg.linux_x86_64.hash))
+        return std.fmt.allocPrint(gpa, "{s}: Update hash", .{pkg.name});
+    if (!std.mem.eql(u8, pkg.pkg.linux_x86_64.url, old_pkg.linux_x86_64.url))
+        return std.fmt.allocPrint(gpa, "{s}: Update url", .{pkg.name});
+    if (options.description and !std.mem.eql(u8, pkg.pkg.info.description, old_pkg.info.description))
+        return std.fmt.allocPrint(gpa, "{s}: Update description", .{pkg.name});
+    if (pkg.pkg.info.donate.len != old_pkg.info.donate.len)
+        return std.fmt.allocPrint(gpa, "{s}: Update donations", .{pkg.name});
+    for (pkg.pkg.info.donate, old_pkg.info.donate) |new, old| {
         if (!std.mem.eql(u8, new, old))
-            return std.fmt.allocPrint(gpa, "{s}: Update donations", .{package.name});
+            return std.fmt.allocPrint(gpa, "{s}: Update donations", .{pkg.name});
     }
 
     // TODO: Better message
-    return std.fmt.allocPrint(gpa, "{s}: Update something", .{package.name});
+    return std.fmt.allocPrint(gpa, "{s}: Update something", .{pkg.name});
 }
 
-fn expectCreateCommitMessage(expected: []const u8, package: Package.Named, m_old_package: ?Package) !void {
-    const actual = try createCommitMessage(std.testing.allocator, package, m_old_package, .{
+fn expectCreateCommitMessage(expected: []const u8, pkg: Package.Named, m_old_pkg: ?Package) !void {
+    const actual = try createCommitMessage(std.testing.allocator, pkg, m_old_pkg, .{
         .description = true,
     });
     defer std.testing.allocator.free(actual);
@@ -67,7 +67,7 @@ test createCommitMessage {
         "dipm: Add 0.1.0",
         .{
             .name = "dipm",
-            .package = .{
+            .pkg = .{
                 .info = .{
                     .version = "0.1.0",
                     .description = "Description 1",
@@ -85,7 +85,7 @@ test createCommitMessage {
         "dipm: Update 0.1.0",
         .{
             .name = "dipm",
-            .package = .{
+            .pkg = .{
                 .info = .{
                     .version = "0.1.0",
                     .description = "Description 1",
@@ -113,7 +113,7 @@ test createCommitMessage {
         "dipm: Update hash",
         .{
             .name = "dipm",
-            .package = .{
+            .pkg = .{
                 .info = .{
                     .version = "0.1.0",
                     .description = "Description 1",
@@ -141,7 +141,7 @@ test createCommitMessage {
         "dipm: Update url",
         .{
             .name = "dipm",
-            .package = .{
+            .pkg = .{
                 .info = .{
                     .version = "0.1.0",
                     .description = "Description 1",
@@ -169,7 +169,7 @@ test createCommitMessage {
         "dipm: Update description",
         .{
             .name = "dipm",
-            .package = .{
+            .pkg = .{
                 .info = .{
                     .version = "0.1.0",
                     .description = "Description 1",
@@ -197,7 +197,7 @@ test createCommitMessage {
         "dipm: Update donations",
         .{
             .name = "dipm",
-            .package = .{
+            .pkg = .{
                 .info = .{
                     .version = "0.1.0",
                     .description = "Description 1",
@@ -227,7 +227,7 @@ test createCommitMessage {
         "dipm: Update donations",
         .{
             .name = "dipm",
-            .package = .{
+            .pkg = .{
                 .info = .{
                     .version = "0.1.0",
                     .description = "Description 1",

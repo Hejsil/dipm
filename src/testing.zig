@@ -555,7 +555,7 @@ pub fn setupPrefix(options: struct {
     /// If null, a random prefix will be generated
     prefix: ?[]const u8 = null,
 }) !Prefix {
-    const packages = [_]TestPackage{
+    const pkgs = [_]TestPackage{
         simple_file,
         simple_tree_tar_xz,
         simple_tree_tar_gz,
@@ -600,10 +600,10 @@ pub fn setupPrefix(options: struct {
     var buffered_pkg_ini_file = std.io.bufferedWriter(pkgs_ini_file.writer());
     const pkgs_ini_writer = buffered_pkg_ini_file.writer();
 
-    for (packages, 0..) |package, i| {
-        if (package.file.content) |content|
+    for (pkgs, 0..) |pkg, i| {
+        if (pkg.file.content) |content|
             try pkgs_dir.writeFile(.{
-                .sub_path = package.file.name,
+                .sub_path = pkg.file.name,
                 .data = content,
                 .flags = .{},
             });
@@ -617,14 +617,14 @@ pub fn setupPrefix(options: struct {
             .linux_x86_64 = .{
                 .url = try std.fmt.bufPrint(&url_buf, "file://{s}/{s}", .{
                     pkgs_dir_path,
-                    package.file.name,
+                    pkg.file.name,
                 }),
-                .hash = package.file.hash,
-                .install_bin = package.install_bin,
-                .install_lib = package.install_lib,
-                .install_share = package.install_share,
+                .hash = pkg.file.hash,
+                .install_bin = pkg.install_bin,
+                .install_lib = pkg.install_lib,
+                .install_share = pkg.install_share,
             },
-        }, package.name, pkgs_ini_writer);
+        }, pkg.name, pkgs_ini_writer);
     }
 
     try buffered_pkg_ini_file.flush();

@@ -140,46 +140,46 @@ pub fn putStr(diag: *Diagnostics, string: []const u8) !Strings.Index {
     return diag.strings.putStr(diag.gpa, string);
 }
 
-pub fn donate(diag: *Diagnostics, package: PackageDonate) !void {
+pub fn donate(diag: *Diagnostics, pkg: PackageDonate) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.successes.donate.append(diag.gpa, package);
+    return diag.successes.donate.append(diag.gpa, pkg);
 }
 
-pub fn installSucceeded(diag: *Diagnostics, package: PackageInstall) !void {
+pub fn installSucceeded(diag: *Diagnostics, pkg: PackageInstall) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.successes.installs.append(diag.gpa, package);
+    return diag.successes.installs.append(diag.gpa, pkg);
 }
 
-pub fn updateSucceeded(diag: *Diagnostics, package: PackageFromTo) !void {
+pub fn updateSucceeded(diag: *Diagnostics, pkg: PackageFromTo) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.successes.updates.append(diag.gpa, package);
+    return diag.successes.updates.append(diag.gpa, pkg);
 }
 
-pub fn uninstallSucceeded(diag: *Diagnostics, package: PackageUninstall) !void {
+pub fn uninstallSucceeded(diag: *Diagnostics, pkg: PackageUninstall) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.successes.uninstalls.append(diag.gpa, package);
+    return diag.successes.uninstalls.append(diag.gpa, pkg);
 }
 
-pub fn alreadyInstalled(diag: *Diagnostics, package: PackageAlreadyInstalled) !void {
+pub fn alreadyInstalled(diag: *Diagnostics, pkg: PackageAlreadyInstalled) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.warnings.already_installed.append(diag.gpa, package);
+    return diag.warnings.already_installed.append(diag.gpa, pkg);
 }
 
-pub fn notInstalled(diag: *Diagnostics, package: PackageNotInstalled) !void {
+pub fn notInstalled(diag: *Diagnostics, pkg: PackageNotInstalled) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.warnings.not_installed.append(diag.gpa, package);
+    return diag.warnings.not_installed.append(diag.gpa, pkg);
 }
 
-pub fn notFound(diag: *Diagnostics, package: PackageNotFound) !void {
+pub fn notFound(diag: *Diagnostics, pkg: PackageNotFound) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.warnings.not_found.append(diag.gpa, package);
+    return diag.warnings.not_found.append(diag.gpa, pkg);
 }
 
 pub fn notFoundForTarget(diag: *Diagnostics, not_found: PackageTarget) !void {
@@ -188,16 +188,16 @@ pub fn notFoundForTarget(diag: *Diagnostics, not_found: PackageTarget) !void {
     return diag.warnings.not_found_for_target.append(diag.gpa, not_found);
 }
 
-pub fn upToDate(diag: *Diagnostics, package: PackageUpToDate) !void {
+pub fn upToDate(diag: *Diagnostics, pkg: PackageUpToDate) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.warnings.up_to_date.append(diag.gpa, package);
+    return diag.warnings.up_to_date.append(diag.gpa, pkg);
 }
 
-pub fn noVersionFound(diag: *Diagnostics, package: PackageError) !void {
+pub fn noVersionFound(diag: *Diagnostics, pkg: PackageError) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.failures.no_version_found.append(diag.gpa, package);
+    return diag.failures.no_version_found.append(diag.gpa, pkg);
 }
 
 pub fn hashMismatch(diag: *Diagnostics, mismatch: HashMismatch) !void {

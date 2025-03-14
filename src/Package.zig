@@ -42,7 +42,7 @@ pub const Install = struct {
 
 pub const Named = struct {
     name: []const u8,
-    package: Package,
+    pkg: Package,
 };
 
 pub const Specific = struct {
@@ -53,13 +53,13 @@ pub const Specific = struct {
 };
 
 pub fn specific(
-    package: Package,
+    pkg: Package,
     name: []const u8,
     target: Target,
 ) ?Specific {
     const install = switch (target.os) {
         .linux => switch (target.arch) {
-            .x86_64 => package.linux_x86_64,
+            .x86_64 => pkg.linux_x86_64,
             else => return null,
         },
         else => return null,
@@ -70,40 +70,40 @@ pub fn specific(
 
     return .{
         .name = name,
-        .info = package.info,
-        .update = package.update,
+        .info = pkg.info,
+        .update = pkg.update,
         .install = install,
     };
 }
 
-pub fn write(package: Package, name: []const u8, writer: anytype) !void {
+pub fn write(pkg: Package, name: []const u8, writer: anytype) !void {
     try writer.print("[{s}.info]\n", .{name});
-    try writer.print("version = {s}\n", .{package.info.version});
+    try writer.print("version = {s}\n", .{pkg.info.version});
 
-    if (package.info.description.len != 0)
-        try writer.print("description = {s}\n", .{package.info.description});
+    if (pkg.info.description.len != 0)
+        try writer.print("description = {s}\n", .{pkg.info.description});
 
-    for (package.info.donate) |donate|
+    for (pkg.info.donate) |donate|
         try writer.print("donate = {s}\n", .{donate});
     try writer.writeAll("\n");
 
     try writer.print("[{s}.update]\n", .{name});
-    if (package.update.version.len != 0)
-        try writer.print("version = {s}\n", .{package.update.version});
-    if (package.update.download.len != 0)
-        try writer.print("download = {s}\n", .{package.update.download});
+    if (pkg.update.version.len != 0)
+        try writer.print("version = {s}\n", .{pkg.update.version});
+    if (pkg.update.download.len != 0)
+        try writer.print("download = {s}\n", .{pkg.update.download});
     try writer.writeAll("\n");
 
     try writer.print("[{s}.linux_x86_64]\n", .{name});
-    for (package.linux_x86_64.install_bin) |install|
+    for (pkg.linux_x86_64.install_bin) |install|
         try writer.print("install_bin = {s}\n", .{install});
-    for (package.linux_x86_64.install_lib) |install|
+    for (pkg.linux_x86_64.install_lib) |install|
         try writer.print("install_lib = {s}\n", .{install});
-    for (package.linux_x86_64.install_share) |install|
+    for (pkg.linux_x86_64.install_share) |install|
         try writer.print("install_share = {s}\n", .{install});
 
-    try writer.print("url = {s}\n", .{package.linux_x86_64.url});
-    try writer.print("hash = {s}\n", .{package.linux_x86_64.hash});
+    try writer.print("url = {s}\n", .{pkg.linux_x86_64.url});
+    try writer.print("hash = {s}\n", .{pkg.linux_x86_64.hash});
 }
 
 /// Creates a package from a url. This function will use different methods for creating the
@@ -233,12 +233,12 @@ pub fn fromGithub(options: struct {
     var download_urls = std.ArrayList([]const u8).init(tmp_arena);
     if (options.download_uri) |download_uri| {
         var content = std.ArrayList(u8).init(tmp_arena);
-        const package_download_result = try download.download(content.writer(), .{
+        const pkg_download_result = try download.download(content.writer(), .{
             .client = options.http_client,
             .uri_str = download_uri,
             .progress = options.progress,
         });
-        if (package_download_result.status != .ok)
+        if (pkg_download_result.status != .ok)
             return error.IndexDownloadFailed;
 
         var it = UrlsIterator.init(content.items);
@@ -277,12 +277,12 @@ pub fn fromGithub(options: struct {
     const downloaded_file = try tmp_dir.dir.createFile(downloaded_file_name, .{ .read = true });
     defer downloaded_file.close();
 
-    const package_download_result = try download.download(downloaded_file.writer(), .{
+    const pkg_download_result = try download.download(downloaded_file.writer(), .{
         .client = options.http_client,
         .uri_str = download_url,
         .progress = options.progress,
     });
-    if (package_download_result.status != .ok)
+    if (pkg_download_result.status != .ok)
         return error.FileDownloadFailed;
 
     // TODO: Get rid of this once we have support for bz2 compression
@@ -310,14 +310,14 @@ pub fn fromGithub(options: struct {
         .dir = tmp_dir.dir,
     });
 
-    const hash = std.fmt.bytesToHex(package_download_result.hash, .lower);
+    const hash = std.fmt.bytesToHex(pkg_download_result.hash, .lower);
     const version_uri = try std.fmt.allocPrint(options.arena, "https://github.com/{s}/{s}", .{
         options.repo.user,
         options.repo.name,
     });
     return .{
         .name = name,
-        .package = .{
+        .pkg = .{
             .info = .{
                 .version = version,
                 .description = description,
@@ -1048,7 +1048,7 @@ fn testFromGithub(options: struct {
         , .{options.description}),
     });
 
-    const package_from_latest_release = try fromGithub(.{
+    const pkg_from_latest_release = try fromGithub(.{
         .arena = arena,
         .tmp_gpa = std.testing.allocator,
         .http_client = undefined, // Not used when downloading from file:// uris
@@ -1058,7 +1058,7 @@ fn testFromGithub(options: struct {
         .funding_uri = funding_file_uri,
         .target = options.target,
     });
-    const package_from_index = try fromGithub(.{
+    const pkg_from_index = try fromGithub(.{
         .arena = arena,
         .tmp_gpa = std.testing.allocator,
         .http_client = undefined, // Not used when downloading from file:// uris
@@ -1077,9 +1077,9 @@ fn testFromGithub(options: struct {
         "<url>",
         static_binary_uri,
     );
-    for ([_]Package.Named{ package_from_latest_release, package_from_index }) |package| {
+    for ([_]Package.Named{ pkg_from_latest_release, pkg_from_index }) |pkg| {
         var actual = std.ArrayList(u8).init(arena);
-        try package.package.write(package.name, actual.writer());
+        try pkg.pkg.write(pkg.name, actual.writer());
 
         // Remove download field
         try std.testing.expectEqualStrings(expected, try std.mem.replaceOwned(

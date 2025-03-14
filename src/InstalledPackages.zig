@@ -160,11 +160,11 @@ pub fn flush(pkgs: InstalledPackages) !void {
 }
 
 pub fn writeTo(pkgs: InstalledPackages, writer: anytype) !void {
-    for (pkgs.by_name.keys(), pkgs.by_name.values(), 0..) |package_name, package, i| {
+    for (pkgs.by_name.keys(), pkgs.by_name.values(), 0..) |pkg_name, pkg, i| {
         if (i != 0)
             try writer.writeAll("\n");
 
-        try package.write(pkgs.strings, package_name.get(pkgs.strings), writer);
+        try pkg.write(pkgs.strings, pkg_name.get(pkgs.strings), writer);
     }
 }
 
