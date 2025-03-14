@@ -195,6 +195,25 @@ test "dipm install test-file && dipm uninstall test-file && dipm uninstall test-
     );
 }
 
+test "dipm install test-xz && rm bin/test-xz && dipm uninstall test-xz" {
+    var prefix = try setupPrefix(.{ .version = "0.1.0" });
+    defer prefix.deinit();
+
+    try prefix.run(&.{ "install", "test-xz" });
+    try prefix.expectFile("stderr",
+        \\✓ test-xz 0.1.0
+        \\
+    );
+    try prefix.expectFile("bin/test-xz", "");
+
+    try prefix.rm("bin/test-xz");
+    try prefix.run(&.{ "uninstall", "test-xz" });
+    try prefix.expectFile("stderr",
+        \\✓ test-xz 0.1.0 -> ✗
+        \\
+    );
+}
+
 test "dipm install test-xz test-zst && dipm update test-xz" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
@@ -671,6 +690,10 @@ pub const Prefix = struct {
             .forced_prefix = prefix.prefix,
             .forced_pkgs_uri = prefix.pkgs_uri,
         });
+    }
+
+    pub fn rm(prefix: Prefix, path: []const u8) !void {
+        return prefix.prefix_dir.deleteTree(path);
     }
 
     pub fn expectNoFile(prefix: Prefix, file: []const u8) !void {
