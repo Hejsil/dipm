@@ -629,21 +629,20 @@ pub fn setupPrefix(options: struct {
 
         if (i != 0) try pkgs_ini_writer.writeAll("\n");
 
-        var url_buf: [std.fs.max_path_bytes]u8 = undefined;
-        try Package.write(.{
-            .info = .{ .version = options.version },
-            .update = .{},
-            .linux_x86_64 = .{
-                .url = try std.fmt.bufPrint(&url_buf, "file://{s}/{s}", .{
-                    pkgs_dir_path,
-                    pkg.file.name,
-                }),
-                .hash = pkg.file.hash,
-                .install_bin = pkg.install_bin,
-                .install_lib = pkg.install_lib,
-                .install_share = pkg.install_share,
-            },
-        }, pkg.name, pkgs_ini_writer);
+        try pkgs_ini_writer.print("[{s}.info]\n", .{pkg.name});
+        try pkgs_ini_writer.print("version = {s}\n", .{options.version});
+        try pkgs_ini_writer.print("[{s}.linux_x86_64]\n", .{pkg.name});
+        for (pkg.install_bin) |install|
+            try pkgs_ini_writer.print("install_bin = {s}\n", .{install});
+        for (pkg.install_lib) |install|
+            try pkgs_ini_writer.print("install_lib = {s}\n", .{install});
+        for (pkg.install_share) |install|
+            try pkgs_ini_writer.print("install_share = {s}\n", .{install});
+        try pkgs_ini_writer.print("url = file://{s}/{s}\n", .{
+            pkgs_dir_path,
+            pkg.file.name,
+        });
+        try pkgs_ini_writer.print("hash = {s}\n", .{pkg.file.hash});
     }
 
     try buffered_pkg_ini_file.flush();

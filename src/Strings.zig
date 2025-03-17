@@ -5,9 +5,29 @@ pointer_stability: std.debug.SafetyLock,
 pub const Index = enum(u32) {
     _,
 
-    pub fn get(i: Index, strings: Strings) [:0]const u8 {
+    pub fn get(i: Index, strings: Strings) [:0]u8 {
         return strings.getStr(i);
     }
+
+    pub const Optional = enum(u32) {
+        null = std.math.maxInt(u32),
+        _,
+
+        pub fn some(v: Index) Optional {
+            const int = @intFromEnum(v);
+            std.debug.assert(int != @intFromEnum(Optional.null));
+            return @enumFromInt(int);
+        }
+
+        pub fn unwrap(opt: Optional) ?Index {
+            if (opt == .null) return null;
+            return @enumFromInt(@intFromEnum(opt));
+        }
+
+        pub fn get(opt: Optional, strings: Strings) ?[:0]u8 {
+            return (opt.unwrap() orelse return null).get(strings);
+        }
+    };
 };
 
 pub const Indices = struct {
@@ -19,7 +39,7 @@ pub const Indices = struct {
         .len = 0,
     };
 
-    pub fn get(i: Indices, strings: Strings) []const Index {
+    pub fn get(i: Indices, strings: Strings) []Index {
         return strings.getIndices(i);
     }
 };
@@ -209,20 +229,28 @@ test print {
     try std.testing.expectEqualStrings("bc", strings.getStr(b));
 }
 
-fn getPtr(strings: Strings, index: Index) [*:0]const u8 {
+pub fn eql(strings: Strings, a: Index, b: Index) bool {
+    return std.mem.eql(u8, a.get(strings), b.get(strings));
+}
+
+fn getPtr(strings: Strings, index: Index) [*:0]u8 {
     strings.pointer_stability.assertUnlocked();
     const i = @intFromEnum(index);
     return strings.data.items[i .. strings.data.items.len - 1 :0];
 }
 
-fn getStr(strings: Strings, index: Index) [:0]const u8 {
+fn getStr(strings: Strings, index: Index) [:0]u8 {
     strings.pointer_stability.assertUnlocked();
     const ptr = strings.getPtr(index);
     return std.mem.span(ptr);
 }
 
-fn getIndices(strings: Strings, indices: Indices) []const Index {
+fn getIndices(strings: Strings, indices: Indices) []Index {
     return strings.indices.items[indices.off..][0..indices.len];
+}
+
+pub fn adapter(strings: *const Strings) ArrayHashMapAdapter {
+    return .{ .strings = strings };
 }
 
 pub const ArrayHashMapAdapter = struct {
@@ -247,13 +275,12 @@ test ArrayHashMapAdapter {
     var map = std.ArrayHashMapUnmanaged(Index, void, void, true){};
     defer map.deinit(gpa);
 
-    const adapter = ArrayHashMapAdapter{ .strings = &strings };
-    const a_entry = try map.getOrPutAdapted(gpa, "a", adapter);
+    const a_entry = try map.getOrPutAdapted(gpa, "a", strings.adapter());
     a_entry.key_ptr.* = try strings.putStr(gpa, "a");
 
     try std.testing.expect(!a_entry.found_existing);
-    try std.testing.expect(map.getAdapted("a", adapter) != null);
-    try std.testing.expect(map.getAdapted("b", adapter) == null);
+    try std.testing.expect(map.getAdapted("a", strings.adapter()) != null);
+    try std.testing.expect(map.getAdapted("b", strings.adapter()) == null);
 }
 
 const Strings = @This();

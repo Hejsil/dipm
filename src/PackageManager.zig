@@ -123,8 +123,7 @@ pub fn deinit(pm: *PackageManager) void {
 }
 
 fn isInstalled(pm: *const PackageManager, pkg_name: []const u8) bool {
-    const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strs };
-    return pm.installed.by_name.containsAdapted(pkg_name, adapter);
+    return pm.installed.by_name.containsAdapted(pkg_name, pm.installed.strs.adapter());
 }
 
 pub fn installMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
@@ -176,7 +175,7 @@ pub fn installMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
 
         try pm.diag.installSucceeded(.{
             .name = try pm.diag.putStr(pkg.name),
-            .version = try pm.diag.putStr(pkg.info.version),
+            .version = try pm.diag.putStr(pkg.info.version.get(pm.pkgs.strs)),
         });
     }
 
@@ -200,7 +199,7 @@ fn pkgsToInstall(
     while (i < pkgs_to_install.count()) {
         const pkg_name = pkgs_to_install.keys()[i];
 
-        const pkg = pm.pkgs.pkgs.get(pkg_name) orelse {
+        const pkg = pm.pkgs.by_name.getAdapted(pkg_name, pm.pkgs.strs.adapter()) orelse {
             try pm.diag.notFound(.{ .name = try pm.diag.putStr(pkg_name) });
             pkgs_to_install.swapRemoveAt(i);
             continue;
@@ -230,7 +229,7 @@ fn downloadAndExtractPackage(
     dir: std.fs.Dir,
     pkg: Package.Specific,
 ) !void {
-    const downloaded_file_name = std.fs.path.basename(pkg.install.url);
+    const downloaded_file_name = std.fs.path.basename(pkg.install.url.get(pm.pkgs.strs));
     const downloaded_file = try dir.createFile(downloaded_file_name, .{ .read = true });
     defer downloaded_file.close();
 
@@ -247,13 +246,13 @@ fn downloadAndExtractPackage(
 
         const download_result = download.download(downloaded_file.writer(), .{
             .client = &pm.http_client,
-            .uri_str = pkg.install.url,
+            .uri_str = pkg.install.url.get(pm.pkgs.strs),
             .progress = download_progress,
         }) catch |err| {
             try pm.diag.downloadFailed(.{
                 .name = try pm.diag.putStr(pkg.name),
-                .version = try pm.diag.putStr(pkg.info.version),
-                .url = try pm.diag.putStr(pkg.install.url),
+                .version = try pm.diag.putStr(pkg.info.version.get(pm.pkgs.strs)),
+                .url = try pm.diag.putStr(pkg.install.url.get(pm.pkgs.strs)),
                 .err = err,
             });
             return Diagnostics.Error.DiagnosticsReported;
@@ -261,19 +260,19 @@ fn downloadAndExtractPackage(
         if (download_result.status != .ok) {
             try pm.diag.downloadFailedWithStatus(.{
                 .name = try pm.diag.putStr(pkg.name),
-                .version = try pm.diag.putStr(pkg.info.version),
-                .url = try pm.diag.putStr(pkg.install.url),
+                .version = try pm.diag.putStr(pkg.info.version.get(pm.pkgs.strs)),
+                .url = try pm.diag.putStr(pkg.install.url.get(pm.pkgs.strs)),
                 .status = download_result.status,
             });
             return Diagnostics.Error.DiagnosticsReported;
         }
 
         const actual_hash = std.fmt.bytesToHex(download_result.hash, .lower);
-        if (!std.mem.eql(u8, pkg.install.hash, &actual_hash)) {
+        if (!std.mem.eql(u8, pkg.install.hash.get(pm.pkgs.strs), &actual_hash)) {
             try pm.diag.hashMismatch(.{
                 .name = try pm.diag.putStr(pkg.name),
-                .version = try pm.diag.putStr(pkg.info.version),
-                .expected_hash = try pm.diag.putStr(pkg.install.hash),
+                .version = try pm.diag.putStr(pkg.info.version.get(pm.pkgs.strs)),
+                .expected_hash = try pm.diag.putStr(pkg.install.hash.get(pm.pkgs.strs)),
                 .actual_hash = try pm.diag.putStr(&actual_hash),
             });
             return Diagnostics.Error.DiagnosticsReported;
@@ -314,8 +313,8 @@ fn installExtractedPackage(
             pm.prefix_dir.deleteTree(location.get(pm.installed.strs)) catch {};
     }
 
-    for (pkg.install.install_bin) |install_field| {
-        const the_install = Package.Install.fromString(install_field);
+    for (pkg.install.install_bin.get(pm.pkgs.strs)) |install_field| {
+        const the_install = Package.Install.fromString(install_field.get(pm.pkgs.strs));
         const path = try pm.installed.print("{}", .{std.fs.path.fmtJoin(&.{
             paths.bin_subpath,
             the_install.to,
@@ -336,7 +335,7 @@ fn installExtractedPackage(
     const GenericInstall = struct {
         dir: std.fs.Dir,
         path: []const u8,
-        installs: []const []const u8,
+        installs: Strings.Indices,
     };
 
     const generic_installs = [_]GenericInstall{
@@ -344,8 +343,8 @@ fn installExtractedPackage(
         .{ .dir = pm.share_dir, .path = paths.share_subpath, .installs = pkg.install.install_share },
     };
     for (generic_installs) |install| {
-        for (install.installs) |install_field| {
-            const the_install = Package.Install.fromString(install_field);
+        for (install.installs.get(pm.pkgs.strs)) |install_field| {
+            const the_install = Package.Install.fromString(install_field.get(pm.pkgs.strs));
             const path = try pm.installed.print("{}", .{std.fs.path.fmtJoin(&.{
                 install.path,
                 the_install.to,
@@ -364,13 +363,13 @@ fn installExtractedPackage(
         }
     }
 
-    const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strs };
+    const adapter = pm.installed.strs.adapter();
     const entry = try pm.installed.by_name.getOrPutAdapted(pm.installed.gpa, pkg.name, adapter);
     std.debug.assert(!entry.found_existing); // Caller ensures that pkg is not installed
 
     entry.key_ptr.* = try pm.installed.putStr(pkg.name);
     entry.value_ptr.* = .{
-        .version = try pm.installed.putStr(pkg.info.version),
+        .version = try pm.installed.putStr(pkg.info.version.get(pm.pkgs.strs)),
         .location = try pm.installed.putIndices(locations.items),
     };
 }
@@ -484,8 +483,7 @@ fn pkgsToUninstall(
 
     try pkgs_to_uninstall.ensureTotalCapacity(pkg_names.len);
     for (pkg_names) |pkg_name| {
-        const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strs };
-        const pkg = pm.installed.by_name.getAdapted(pkg_name, adapter) orelse {
+        const pkg = pm.installed.by_name.getAdapted(pkg_name, pm.installed.strs.adapter()) orelse {
             try pm.diag.notInstalled((.{ .name = try pm.diag.putStr(pkg_name) }));
             continue;
         };
@@ -499,16 +497,10 @@ fn pkgsToUninstall(
     return pkgs_to_uninstall;
 }
 
-fn uninstallOneUnchecked(
-    pm: *PackageManager,
-    pkg_name: []const u8,
-    pkg: InstalledPackage,
-) !void {
+fn uninstallOneUnchecked(pm: *PackageManager, pkg_name: []const u8, pkg: InstalledPackage) !void {
     for (pkg.location.get(pm.installed.strs)) |location|
         try pm.prefix_dir.deleteTree(location.get(pm.installed.strs));
-
-    const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strs };
-    _ = pm.installed.by_name.orderedRemoveAdapted(pkg_name, adapter);
+    _ = pm.installed.by_name.orderedRemoveAdapted(pkg_name, pm.installed.strs.adapter());
 }
 
 pub const UpdateOptions = struct {
@@ -565,8 +557,9 @@ fn updatePackages(pm: *PackageManager, pkg_names: []const []const u8, options: s
         // Remove up to date packages from the list if we're not force updating
         for (pkgs_to_uninstall.keys(), pkgs_to_uninstall.values()) |pkg_name, installed_pkg| {
             const updated_pkg = pkgs_to_install.get(pkg_name) orelse continue;
+            const updated_version = updated_pkg.info.version.get(pm.pkgs.strs);
             const installed_version = installed_pkg.version.get(pm.installed.strs);
-            if (!std.mem.eql(u8, installed_version, updated_pkg.info.version))
+            if (!std.mem.eql(u8, installed_version, updated_version))
                 continue;
 
             _ = pkgs_to_install.swapRemove(pkg_name);
@@ -624,7 +617,7 @@ fn updatePackages(pm: *PackageManager, pkg_names: []const []const u8, options: s
         try pm.diag.updateSucceeded(.{
             .name = try pm.diag.putStr(pkg.name),
             .from_version = try pm.diag.putStr(installed_pkg.version.get(pm.installed.strs)),
-            .to_version = try pm.diag.putStr(pkg.info.version),
+            .to_version = try pm.diag.putStr(pkg.info.version.get(pm.pkgs.strs)),
         });
     }
 

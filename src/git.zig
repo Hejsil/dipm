@@ -20,41 +20,52 @@ pub const MessageOptions = struct {
 /// the old and new package, the commit message will differ.
 pub fn createCommitMessage(
     gpa: std.mem.Allocator,
-    pkg: Package.Named,
-    m_old_pkg: ?Package,
+    pkgs: *const Packages,
+    new: Package.Named,
+    m_old: ?Package,
     options: MessageOptions,
 ) ![]u8 {
-    const old_pkg = m_old_pkg orelse {
+    const name = new.name.get(pkgs.strs);
+    const old = m_old orelse {
         return std.fmt.allocPrint(gpa, "{s}: Add {s}", .{
-            pkg.name,
-            pkg.pkg.info.version,
+            name,
+            new.pkg.info.version.get(pkgs.strs),
         });
     };
-    if (!std.mem.eql(u8, pkg.pkg.info.version, old_pkg.info.version)) {
+    if (!pkgs.strs.eql(new.pkg.info.version, old.info.version)) {
         return std.fmt.allocPrint(gpa, "{s}: Update {s}", .{
-            pkg.name,
-            pkg.pkg.info.version,
+            name,
+            new.pkg.info.version.get(pkgs.strs),
         });
     }
-    if (!std.mem.eql(u8, pkg.pkg.linux_x86_64.hash, old_pkg.linux_x86_64.hash))
-        return std.fmt.allocPrint(gpa, "{s}: Update hash", .{pkg.name});
-    if (!std.mem.eql(u8, pkg.pkg.linux_x86_64.url, old_pkg.linux_x86_64.url))
-        return std.fmt.allocPrint(gpa, "{s}: Update url", .{pkg.name});
-    if (options.description and !std.mem.eql(u8, pkg.pkg.info.description, old_pkg.info.description))
-        return std.fmt.allocPrint(gpa, "{s}: Update description", .{pkg.name});
-    if (pkg.pkg.info.donate.len != old_pkg.info.donate.len)
-        return std.fmt.allocPrint(gpa, "{s}: Update donations", .{pkg.name});
-    for (pkg.pkg.info.donate, old_pkg.info.donate) |new, old| {
-        if (!std.mem.eql(u8, new, old))
-            return std.fmt.allocPrint(gpa, "{s}: Update donations", .{pkg.name});
+    if (!pkgs.strs.eql(new.pkg.linux_x86_64.hash, old.linux_x86_64.hash))
+        return std.fmt.allocPrint(gpa, "{s}: Update hash", .{name});
+    if (!pkgs.strs.eql(new.pkg.linux_x86_64.url, old.linux_x86_64.url))
+        return std.fmt.allocPrint(gpa, "{s}: Update url", .{name});
+    if (options.description) {
+        const new_desc = new.pkg.info.description.get(pkgs.strs) orelse "";
+        const old_desc = old.info.description.get(pkgs.strs) orelse "";
+        if (!std.mem.eql(u8, new_desc, old_desc))
+            return std.fmt.allocPrint(gpa, "{s}: Update description", .{name});
+    }
+    if (new.pkg.info.donate.len != old.info.donate.len)
+        return std.fmt.allocPrint(gpa, "{s}: Update donations", .{name});
+    for (new.pkg.info.donate.get(pkgs.strs), old.info.donate.get(pkgs.strs)) |n, o| {
+        if (!pkgs.strs.eql(n, o))
+            return std.fmt.allocPrint(gpa, "{s}: Update donations", .{name});
     }
 
     // TODO: Better message
-    return std.fmt.allocPrint(gpa, "{s}: Update something", .{pkg.name});
+    return std.fmt.allocPrint(gpa, "{s}: Update something", .{name});
 }
 
-fn expectCreateCommitMessage(expected: []const u8, pkg: Package.Named, m_old_pkg: ?Package) !void {
-    const actual = try createCommitMessage(std.testing.allocator, pkg, m_old_pkg, .{
+fn expectCreateCommitMessage(
+    expected: []const u8,
+    pkgs: *const Packages,
+    pkg: Package.Named,
+    m_old_pkg: ?Package,
+) !void {
+    const actual = try createCommitMessage(std.testing.allocator, pkgs, pkg, m_old_pkg, .{
         .description = true,
     });
     defer std.testing.allocator.free(actual);
@@ -63,19 +74,23 @@ fn expectCreateCommitMessage(expected: []const u8, pkg: Package.Named, m_old_pkg
 }
 
 test createCommitMessage {
+    var pkgs = Packages.init(std.testing.allocator);
+    defer pkgs.deinit();
+
     try expectCreateCommitMessage(
         "dipm: Add 0.1.0",
+        &pkgs,
         .{
-            .name = "dipm",
+            .name = try pkgs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = "0.1.0",
-                    .description = "Description 1",
+                    .version = try pkgs.putStr("0.1.0"),
+                    .description = .some(try pkgs.putStr("Description 1")),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = "a",
-                    .hash = "a",
+                    .url = try pkgs.putStr("a"),
+                    .hash = try pkgs.putStr("a"),
                 },
             },
         },
@@ -83,180 +98,190 @@ test createCommitMessage {
     );
     try expectCreateCommitMessage(
         "dipm: Update 0.1.0",
+        &pkgs,
         .{
-            .name = "dipm",
+            .name = try pkgs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = "0.1.0",
-                    .description = "Description 1",
+                    .version = try pkgs.putStr("0.1.0"),
+                    .description = .some(try pkgs.putStr("Description 1")),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = "a",
-                    .hash = "a",
+                    .url = try pkgs.putStr("a"),
+                    .hash = try pkgs.putStr("a"),
                 },
             },
         },
         .{
             .info = .{
-                .version = "0.2.0",
-                .description = "Description 2",
+                .version = try pkgs.putStr("0.2.0"),
+                .description = .some(try pkgs.putStr("Description 2")),
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = "b",
-                .hash = "b",
+                .url = try pkgs.putStr("b"),
+                .hash = try pkgs.putStr("b"),
             },
         },
     );
     try expectCreateCommitMessage(
         "dipm: Update hash",
+        &pkgs,
         .{
-            .name = "dipm",
+            .name = try pkgs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = "0.1.0",
-                    .description = "Description 1",
+                    .version = try pkgs.putStr("0.1.0"),
+                    .description = .some(try pkgs.putStr("Description 1")),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = "a",
-                    .hash = "a",
+                    .url = try pkgs.putStr("a"),
+                    .hash = try pkgs.putStr("a"),
                 },
             },
         },
         .{
             .info = .{
-                .version = "0.1.0",
-                .description = "Description 2",
+                .version = try pkgs.putStr("0.1.0"),
+                .description = .some(try pkgs.putStr("Description 2")),
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = "b",
-                .hash = "b",
+                .url = try pkgs.putStr("b"),
+                .hash = try pkgs.putStr("b"),
             },
         },
     );
     try expectCreateCommitMessage(
         "dipm: Update url",
+        &pkgs,
         .{
-            .name = "dipm",
+            .name = try pkgs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = "0.1.0",
-                    .description = "Description 1",
+                    .version = try pkgs.putStr("0.1.0"),
+                    .description = .some(try pkgs.putStr("Description 1")),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = "a",
-                    .hash = "a",
+                    .url = try pkgs.putStr("a"),
+                    .hash = try pkgs.putStr("a"),
                 },
             },
         },
         .{
             .info = .{
-                .version = "0.1.0",
-                .description = "Description 2",
+                .version = try pkgs.putStr("0.1.0"),
+                .description = .some(try pkgs.putStr("Description 2")),
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = "b",
-                .hash = "a",
+                .url = try pkgs.putStr("b"),
+                .hash = try pkgs.putStr("a"),
             },
         },
     );
     try expectCreateCommitMessage(
         "dipm: Update description",
+        &pkgs,
         .{
-            .name = "dipm",
+            .name = try pkgs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = "0.1.0",
-                    .description = "Description 1",
+                    .version = try pkgs.putStr("0.1.0"),
+                    .description = .some(try pkgs.putStr("Description 1")),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = "a",
-                    .hash = "a",
+                    .url = try pkgs.putStr("a"),
+                    .hash = try pkgs.putStr("a"),
                 },
             },
         },
         .{
             .info = .{
-                .version = "0.1.0",
-                .description = "Description 2",
+                .version = try pkgs.putStr("0.1.0"),
+                .description = .some(try pkgs.putStr("Description 2")),
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = "a",
-                .hash = "a",
+                .url = try pkgs.putStr("a"),
+                .hash = try pkgs.putStr("a"),
             },
         },
     );
     try expectCreateCommitMessage(
         "dipm: Update donations",
+        &pkgs,
         .{
-            .name = "dipm",
+            .name = try pkgs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = "0.1.0",
-                    .description = "Description 1",
-                    .donate = &.{},
+                    .version = try pkgs.putStr("0.1.0"),
+                    .description = .some(try pkgs.putStr("Description 1")),
+                    .donate = .empty,
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = "a",
-                    .hash = "a",
+                    .url = try pkgs.putStr("a"),
+                    .hash = try pkgs.putStr("a"),
                 },
             },
         },
         .{
             .info = .{
-                .version = "0.1.0",
-                .description = "Description 1",
-                .donate = &.{"a"},
+                .version = try pkgs.putStr("0.1.0"),
+                .description = .some(try pkgs.putStr("Description 1")),
+                .donate = try pkgs.putStrs(&.{"a"}),
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = "a",
-                .hash = "a",
+                .url = try pkgs.putStr("a"),
+                .hash = try pkgs.putStr("a"),
             },
         },
     );
     try expectCreateCommitMessage(
         "dipm: Update donations",
+        &pkgs,
         .{
-            .name = "dipm",
+            .name = try pkgs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = "0.1.0",
-                    .description = "Description 1",
-                    .donate = &.{"a"},
+                    .version = try pkgs.putStr("0.1.0"),
+                    .description = .some(try pkgs.putStr("Description 1")),
+                    .donate = try pkgs.putStrs(&.{"a"}),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = "a",
-                    .hash = "a",
+                    .url = try pkgs.putStr("a"),
+                    .hash = try pkgs.putStr("a"),
                 },
             },
         },
         .{
             .info = .{
-                .version = "0.1.0",
-                .description = "Description 1",
-                .donate = &.{"b"},
+                .version = try pkgs.putStr("0.1.0"),
+                .description = .some(try pkgs.putStr("Description 1")),
+                .donate = try pkgs.putStrs(&.{"b"}),
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = "a",
-                .hash = "a",
+                .url = try pkgs.putStr("a"),
+                .hash = try pkgs.putStr("a"),
             },
         },
     );
 }
 
-test {}
+test {
+    _ = Package;
+    _ = Packages;
+}
 
 const Package = @import("Package.zig");
+const Packages = @import("Packages.zig");
 
 const std = @import("std");

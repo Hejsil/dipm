@@ -213,15 +213,15 @@ fn donateCommand(prog: *Program) !void {
 
     const pkgs_to_show = pkgs_to_show_hm.keys();
     for (pkgs_to_show) |pkg_name| {
-        const pkg = pkgs.pkgs.get(pkg_name) orelse {
+        const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
             try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
             continue;
         };
-        for (pkg.info.donate) |donate| {
+        for (pkg.info.donate.get(pkgs.strs)) |donate| {
             try prog.diag.donate(.{
                 .name = try prog.diag.putStr(pkg_name),
-                .version = try prog.diag.putStr(pkg.info.version),
-                .donate = try prog.diag.putStr(donate),
+                .version = try prog.diag.putStr(pkg.info.version.get(pkgs.strs)),
+                .donate = try prog.diag.putStr(donate.get(pkgs.strs)),
             });
         }
     }
@@ -236,15 +236,15 @@ fn donateCommand(prog: *Program) !void {
 
     for (installed_pkgs.by_name.keys()) |pkg_name_index| {
         const pkg_name = pkg_name_index.get(installed_pkgs.strs);
-        const pkg = pkgs.pkgs.get(pkg_name) orelse {
+        const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
             try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
             continue;
         };
-        for (pkg.info.donate) |donate| {
+        for (pkg.info.donate.get(pkgs.strs)) |donate| {
             try prog.diag.donate(.{
                 .name = try prog.diag.putStr(pkg_name),
-                .version = try prog.diag.putStr(pkg.info.version),
-                .donate = try prog.diag.putStr(donate),
+                .version = try prog.diag.putStr(pkg.info.version.get(pkgs.strs)),
+                .donate = try prog.diag.putStr(donate.get(pkgs.strs)),
             });
         }
     }
@@ -462,8 +462,12 @@ fn listAllCommand(prog: *Program) !void {
     var stdout_buffered = std.io.bufferedWriter(prog.stdout.writer());
     const writer = stdout_buffered.writer();
 
-    for (pkgs.pkgs.keys(), pkgs.pkgs.values()) |pkg_name, pkg|
-        try writer.print("{s}\t{s}\n", .{ pkg_name, pkg.info.version });
+    for (pkgs.by_name.keys(), pkgs.by_name.values()) |pkg_name, pkg| {
+        try writer.print("{s}\t{s}\n", .{
+            pkg_name.get(pkgs.strs),
+            pkg.info.version.get(pkgs.strs),
+        });
+    }
 
     try stdout_buffered.flush();
 }
@@ -545,22 +549,22 @@ fn pkgsUpdateCommand(prog: *Program) !void {
 
     var add_pkgs = std.ArrayList(AddPackage).init(prog.arena);
     for (pkgs_to_update.keys()) |pkg_name| {
-        const pkg = pkgs.pkgs.get(pkg_name) orelse {
+        const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
             try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
             continue;
         };
 
         try add_pkgs.append(.{
             .name = pkg_name,
-            .version = pkg.update.version,
-            .download = if (pkg.update.download.len == 0) null else pkg.update.download,
+            .version = pkg.update.version.get(pkgs.strs) orelse "",
+            .download = pkg.update.download.get(pkgs.strs),
         });
     }
-    if (all) for (pkgs.pkgs.keys(), pkgs.pkgs.values()) |pkg_name, pkg| {
+    if (all) for (pkgs.by_name.keys(), pkgs.by_name.values()) |pkg_name, pkg| {
         try add_pkgs.append(.{
-            .name = pkg_name,
-            .version = pkg.update.version,
-            .download = if (pkg.update.download.len == 0) null else pkg.update.download,
+            .name = pkg_name.get(pkgs.strs),
+            .version = pkg.update.version.get(pkgs.strs) orelse "",
+            .download = pkg.update.download.get(pkgs.strs),
         });
     };
 
@@ -656,8 +660,8 @@ fn pkgsAdd(prog: *Program, options: PackagesAddOptions) !void {
         defer prog.progress.end(progress);
 
         const pkg = Package.fromUrl(.{
-            .arena = pkgs.arena.allocator(),
-            .tmp_gpa = prog.gpa,
+            .gpa = pkgs.gpa,
+            .strs = &pkgs.strs,
             .http_client = &http_client,
             .name = add_pkg.name,
             .version_uri = add_pkg.version,
@@ -681,7 +685,7 @@ fn pkgsAdd(prog: *Program, options: PackagesAddOptions) !void {
             try pkgs.writeToFileOverride(pkgs_ini_file);
             try pkgs_ini_file.sync();
 
-            const msg = try git.createCommitMessage(prog.arena, pkg, old_pkg, .{
+            const msg = try git.createCommitMessage(prog.arena, &pkgs, pkg, old_pkg, .{
                 .description = options.update_description,
             });
             try git.commitFile(prog.gpa, pkgs_ini_dir, pkgs_ini_base_name, msg);

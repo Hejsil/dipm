@@ -76,8 +76,6 @@ pub fn parseInto(pkgs: *InstalledPackages, string: []const u8) !void {
         .end => return,
     };
 
-    const PackageField = std.meta.FieldEnum(InstalledPackage);
-
     // Use original string lengths as a heuristic for how much data to preallocate
     try pkgs.strs.data.ensureUnusedCapacity(pkgs.gpa, string.len);
     try pkgs.strs.indices.ensureUnusedCapacity(pkgs.gpa, string.len / 32);
@@ -95,40 +93,45 @@ pub fn parseInto(pkgs: *InstalledPackages, string: []const u8) !void {
         std.debug.assert(parsed.kind == .section);
 
         const section = parsed.section(string).?;
-        const adapter = Strings.ArrayHashMapAdapter{ .strings = &pkgs.strs };
-        const entry = try pkgs.by_name.getOrPutAdapted(pkgs.gpa, section.name, adapter);
+        const entry = try pkgs.by_name.getOrPutAdapted(pkgs.gpa, section.name, pkgs.strs.adapter());
         if (entry.found_existing)
             return error.InvalidPackagesIni;
 
-        var opt_version: ?[]const u8 = null;
-        const off = pkgs.strs.putIndicesBegin();
-
-        parsed = parser.next();
-        while (true) : (parsed = parser.next()) switch (parsed.kind) {
-            .comment => {},
-            .end, .section => break,
-            .invalid => return error.InvalidPackagesIni,
-            .property => {
-                const prop = parsed.property(string).?;
-                switch (std.meta.stringToEnum(PackageField, prop.name) orelse continue) {
-                    .version => opt_version = prop.value,
-                    .location => {
-                        const location = try pkgs.putStr(prop.value);
-                        try pkgs.strs.indices.append(pkgs.gpa, location);
-                    },
-                }
-            },
-        };
-
-        const version = opt_version orelse return error.InvalidPackagesIni;
-        const location = pkgs.strs.putIndicesEnd(off);
-
+        const next, const pkg = try pkgs.parsePackage(&parser);
         entry.key_ptr.* = try pkgs.putStr(section.name);
-        entry.value_ptr.* = .{
-            .version = try pkgs.putStr(version),
-            .location = location,
-        };
+        entry.value_ptr.* = pkg;
+        parsed = next;
     }
+}
+
+fn parsePackage(pkgs: *InstalledPackages, parser: *ini.Parser) !struct {
+    ini.Parser.Result,
+    InstalledPackage,
+} {
+    const PackageField = std.meta.FieldEnum(InstalledPackage);
+
+    const off = pkgs.strs.putIndicesBegin();
+    var version: ?[]const u8 = null;
+
+    var parsed = parser.next();
+    while (true) : (parsed = parser.next()) switch (parsed.kind) {
+        .comment => {},
+        .end, .section => break,
+        .invalid => return error.InvalidPackagesIni,
+        .property => {
+            const prop = parsed.property(parser.string).?;
+            switch (std.meta.stringToEnum(PackageField, prop.name) orelse continue) {
+                .version => version = prop.value,
+                .location => _ = try pkgs.strs.putStrs(pkgs.gpa, &.{prop.value}),
+            }
+        },
+    };
+
+    const location = pkgs.strs.putIndicesEnd(off);
+    return .{ parsed, .{
+        .version = try pkgs.putStr(version orelse return error.InvalidPackagesIni),
+        .location = location,
+    } };
 }
 
 pub fn putStr(pkgs: *InstalledPackages, string: []const u8) !Strings.Index {

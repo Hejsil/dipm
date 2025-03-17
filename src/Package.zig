@@ -1,24 +1,24 @@
-info: Info = .{},
+info: Info,
 update: Update = .{},
-linux_x86_64: Arch = .{},
+linux_x86_64: Arch,
 
 pub const Info = struct {
-    version: []const u8 = "",
-    description: []const u8 = "",
-    donate: []const []const u8 = &.{},
+    version: Strings.Index,
+    description: Strings.Index.Optional = .null,
+    donate: Strings.Indices = .empty,
 };
 
 pub const Update = struct {
-    version: []const u8 = "",
-    download: []const u8 = "",
+    version: Strings.Index.Optional = .null,
+    download: Strings.Index.Optional = .null,
 };
 
 pub const Arch = struct {
-    url: []const u8 = "",
-    hash: []const u8 = "",
-    install_bin: []const []const u8 = &.{},
-    install_lib: []const []const u8 = &.{},
-    install_share: []const []const u8 = &.{},
+    url: Strings.Index,
+    hash: Strings.Index,
+    install_bin: Strings.Indices = .empty,
+    install_lib: Strings.Indices = .empty,
+    install_share: Strings.Indices = .empty,
 };
 
 pub const Install = struct {
@@ -41,7 +41,7 @@ pub const Install = struct {
 };
 
 pub const Named = struct {
-    name: []const u8,
+    name: Strings.Index,
     pkg: Package,
 };
 
@@ -65,9 +65,6 @@ pub fn specific(
         else => return null,
     };
 
-    if (install.url.len == 0 or install.hash.len == 0)
-        return null;
-
     return .{
         .name = name,
         .info = pkg.info,
@@ -76,46 +73,41 @@ pub fn specific(
     };
 }
 
-pub fn write(pkg: Package, name: []const u8, writer: anytype) !void {
+pub fn write(pkg: Package, strs: Strings, name: []const u8, writer: anytype) !void {
     try writer.print("[{s}.info]\n", .{name});
-    try writer.print("version = {s}\n", .{pkg.info.version});
+    try writer.print("version = {s}\n", .{pkg.info.version.get(strs)});
+    if (pkg.info.description.get(strs)) |desc|
+        try writer.print("description = {s}\n", .{desc});
 
-    if (pkg.info.description.len != 0)
-        try writer.print("description = {s}\n", .{pkg.info.description});
-
-    for (pkg.info.donate) |donate|
-        try writer.print("donate = {s}\n", .{donate});
+    for (pkg.info.donate.get(strs)) |donate|
+        try writer.print("donate = {s}\n", .{donate.get(strs)});
     try writer.writeAll("\n");
 
     try writer.print("[{s}.update]\n", .{name});
-    if (pkg.update.version.len != 0)
-        try writer.print("version = {s}\n", .{pkg.update.version});
-    if (pkg.update.download.len != 0)
-        try writer.print("download = {s}\n", .{pkg.update.download});
+    if (pkg.update.version.get(strs)) |version|
+        try writer.print("version = {s}\n", .{version});
+    if (pkg.update.download.get(strs)) |down|
+        try writer.print("download = {s}\n", .{down});
     try writer.writeAll("\n");
 
     try writer.print("[{s}.linux_x86_64]\n", .{name});
-    for (pkg.linux_x86_64.install_bin) |install|
-        try writer.print("install_bin = {s}\n", .{install});
-    for (pkg.linux_x86_64.install_lib) |install|
-        try writer.print("install_lib = {s}\n", .{install});
-    for (pkg.linux_x86_64.install_share) |install|
-        try writer.print("install_share = {s}\n", .{install});
+    for (pkg.linux_x86_64.install_bin.get(strs)) |install|
+        try writer.print("install_bin = {s}\n", .{install.get(strs)});
+    for (pkg.linux_x86_64.install_lib.get(strs)) |install|
+        try writer.print("install_lib = {s}\n", .{install.get(strs)});
+    for (pkg.linux_x86_64.install_share.get(strs)) |install|
+        try writer.print("install_share = {s}\n", .{install.get(strs)});
 
-    try writer.print("url = {s}\n", .{pkg.linux_x86_64.url});
-    try writer.print("hash = {s}\n", .{pkg.linux_x86_64.hash});
+    try writer.print("url = {s}\n", .{pkg.linux_x86_64.url.get(strs)});
+    try writer.print("hash = {s}\n", .{pkg.linux_x86_64.hash.get(strs)});
 }
 
 /// Creates a package from a url. This function will use different methods for creating the
 /// package based on the domain. See:
 /// * fromGithub
 pub fn fromUrl(options: struct {
-    /// Allocator used for the result
-    arena: std.mem.Allocator,
-
-    /// Allocator used for internal allocations. None of the allocations made with this
-    /// allocator will be returned.
-    tmp_gpa: ?std.mem.Allocator = null,
+    gpa: std.mem.Allocator,
+    strs: *Strings,
 
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
@@ -140,8 +132,8 @@ pub fn fromUrl(options: struct {
         const repo_user = repo_split.first();
         const repo_name = repo_split.next() orelse "";
         return fromGithub(.{
-            .arena = options.arena,
-            .tmp_gpa = options.tmp_gpa,
+            .gpa = options.gpa,
+            .strs = options.strs,
             .http_client = options.http_client,
             .progress = options.progress,
             .name = options.name,
@@ -164,13 +156,9 @@ pub const GithubRepo = struct {
 
 /// Creates a package a Github repository. Will query the github API to figure out the
 /// latest release of the repository and look for suitable download links for that release.
-pub fn fromGithub(options: struct {
-    /// Allocator used for the result
-    arena: std.mem.Allocator,
-
-    /// Allocator used for internal allocations. None of the allocations made with this
-    /// allocator will be returned.
-    tmp_gpa: ?std.mem.Allocator = null,
+pub fn fromGithub(args: struct {
+    gpa: std.mem.Allocator,
+    strs: *Strings,
 
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
@@ -197,46 +185,42 @@ pub fn fromGithub(options: struct {
 
     target: Target,
 }) !Named {
-    const tmp_gpa = options.tmp_gpa orelse options.arena;
-    var tmp_arena_state = std.heap.ArenaAllocator.init(tmp_gpa);
+    var tmp_arena_state = std.heap.ArenaAllocator.init(args.gpa);
     const tmp_arena = tmp_arena_state.allocator();
     defer tmp_arena_state.deinit();
 
     const repository = try githubDownloadRepository(.{
         .arena = tmp_arena,
-        .http_client = options.http_client,
-        .repo = options.repo,
-        .repository_uri = options.repository_uri,
+        .http_client = args.http_client,
+        .repo = args.repo,
+        .repository_uri = args.repository_uri,
     });
     const latest_release = try githubDownloadLatestRelease(.{
         .arena = tmp_arena,
-        .http_client = options.http_client,
-        .repo = options.repo,
-        .latest_release_uri = options.latest_release_uri,
+        .http_client = args.http_client,
+        .repo = args.repo,
+        .latest_release_uri = args.latest_release_uri,
     });
     const donate = try githubDownloadSponsorUrls(.{
-        .arena = options.arena,
-        .tmp_arena = tmp_arena,
-        .http_client = options.http_client,
-        .repo = options.repo,
+        .gpa = args.gpa,
+        .strs = args.strs,
+        .http_client = args.http_client,
+        .repo = args.repo,
         .ref = latest_release.tag_name,
-        .funding_uri = options.funding_uri,
+        .funding_uri = args.funding_uri,
     });
-    errdefer options.arena.free(donate);
-    errdefer heap.freeItems(options.arena, donate);
 
-    const trimmed_description = std.mem.trim(u8, repository.description, " ");
-    const description = try options.arena.dupe(u8, trimmed_description);
-    const name = try options.arena.dupe(u8, options.name orelse options.repo.name);
-    const version = try options.arena.dupe(u8, versionFromTag(latest_release.tag_name));
+    const description = std.mem.trim(u8, repository.description, " ");
+    const name = args.name orelse args.repo.name;
+    const version = versionFromTag(latest_release.tag_name);
 
     var download_urls = std.ArrayList([]const u8).init(tmp_arena);
-    if (options.download_uri) |download_uri| {
+    if (args.download_uri) |download_uri| {
         var content = std.ArrayList(u8).init(tmp_arena);
         const pkg_download_result = try download.download(content.writer(), .{
-            .client = options.http_client,
+            .client = args.http_client,
             .uri_str = download_uri,
-            .progress = options.progress,
+            .progress = args.progress,
         });
         if (pkg_download_result.status != .ok)
             return error.IndexDownloadFailed;
@@ -251,7 +235,7 @@ pub fn fromGithub(options: struct {
     }
 
     const download_url = try findDownloadUrl(.{
-        .target = options.target,
+        .target = args.target,
         .extra_strs = &.{
             name,
             version,
@@ -278,9 +262,9 @@ pub fn fromGithub(options: struct {
     defer downloaded_file.close();
 
     const pkg_download_result = try download.download(downloaded_file.writer(), .{
-        .client = options.http_client,
+        .client = args.http_client,
         .uri_str = download_url,
-        .progress = options.progress,
+        .progress = args.progress,
     });
     if (pkg_download_result.status != .ok)
         return error.FileDownloadFailed;
@@ -298,40 +282,38 @@ pub fn fromGithub(options: struct {
     });
 
     const man_pages = try findManPages(.{
-        .arena = options.arena,
-        .tmp_arena = tmp_arena,
+        .gpa = args.gpa,
+        .strs = args.strs,
         .dir = tmp_dir.dir,
     });
-
     const binaries = try findStaticallyLinkedBinaries(.{
-        .arena = options.arena,
-        .tmp_arena = tmp_arena,
-        .arch = options.target.arch,
+        .gpa = args.gpa,
+        .strs = args.strs,
+        .arch = args.target.arch,
         .dir = tmp_dir.dir,
     });
 
     const hash = std.fmt.bytesToHex(pkg_download_result.hash, .lower);
-    const version_uri = try std.fmt.allocPrint(options.arena, "https://github.com/{s}/{s}", .{
-        options.repo.user,
-        options.repo.name,
+    const version_uri = try args.strs.print(args.gpa, "https://github.com/{s}/{s}", .{
+        args.repo.user,
+        args.repo.name,
     });
     return .{
-        .name = name,
+        .name = try args.strs.putStr(args.gpa, name),
         .pkg = .{
             .info = .{
-                .version = version,
-                .description = description,
+                .version = try args.strs.putStr(args.gpa, version),
+                .description = .some(try args.strs.putStr(args.gpa, description)),
                 .donate = donate,
             },
             .update = .{
-                .version = version_uri,
-                .download = try options.arena.dupe(u8, options.download_uri orelse ""),
+                .version = .some(version_uri),
+                .download = if (args.download_uri) |d| .some(try args.strs.putStr(args.gpa, d)) else .null,
             },
             .linux_x86_64 = .{
-                .url = try options.arena.dupe(u8, download_url),
-                .hash = try options.arena.dupe(u8, &hash),
+                .url = try args.strs.putStr(args.gpa, download_url),
+                .hash = try args.strs.putStr(args.gpa, &hash),
                 .install_bin = binaries,
-                .install_lib = &.{},
                 .install_share = man_pages,
             },
         },
@@ -414,38 +396,41 @@ fn githubDownloadRepository(options: struct {
     return latest_release_value.value;
 }
 
-fn githubDownloadSponsorUrls(options: struct {
-    arena: std.mem.Allocator,
-    tmp_arena: std.mem.Allocator,
+fn githubDownloadSponsorUrls(args: struct {
+    gpa: std.mem.Allocator,
+    strs: *Strings,
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
     repo: GithubRepo,
     ref: []const u8,
     funding_uri: ?[]const u8,
-}) ![]const []const u8 {
-    const funding_uri = options.funding_uri orelse try std.fmt.allocPrint(
-        options.tmp_arena,
+}) !Strings.Indices {
+    var arena_state = std.heap.ArenaAllocator.init(args.gpa);
+    const arena = arena_state.allocator();
+    defer arena_state.deinit();
+
+    const funding_uri = args.funding_uri orelse try std.fmt.allocPrint(
+        arena,
         "{s}{s}/{s}/refs/tags/{s}/.github/FUNDING.yml",
-        .{ github_funding_uri_prefix, options.repo.user, options.repo.name, options.ref },
+        .{ github_funding_uri_prefix, args.repo.user, args.repo.name, args.ref },
     );
 
-    var funding_yml = std.ArrayList(u8).init(options.tmp_arena);
+    var funding_yml = std.ArrayList(u8).init(arena);
     const repository_result = try download.download(funding_yml.writer(), .{
-        .client = options.http_client,
+        .client = args.http_client,
         .uri_str = funding_uri,
-        .progress = options.progress,
+        .progress = args.progress,
     });
     if (repository_result.status != .ok)
-        return &.{};
+        return .empty;
 
-    return fundingYmlToUrls(options.arena, funding_yml.items);
+    return fundingYmlToUrls(args.gpa, args.strs, funding_yml.items);
 }
 
 // Very scuffed but working parser for FUNDING.yml. Didn't really wonna write something proper or
 // pull in a yaml dependency.
-fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []const u8 {
-    var urls = std.ArrayList([]const u8).init(arena);
-
+fn fundingYmlToUrls(gpa: std.mem.Allocator, strs: *Strings, string: []const u8) !Strings.Indices {
+    const off = strs.putIndicesBegin();
     const Tokenizer = struct {
         str: []const u8,
 
@@ -559,7 +544,8 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
                     break;
 
                 const value = tok.nextValue();
-                try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
+                const url = try strs.print(gpa, "{s}{s}", .{ prefix, value });
+                try strs.indices.append(gpa, url);
             },
             '[' => while (true) {
                 reset = tok;
@@ -575,32 +561,34 @@ fn fundingYmlToUrls(arena: std.mem.Allocator, string: []const u8) ![]const []con
 
                 tok = reset;
                 const value = tok.nextValue();
-                try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
+                const url = try strs.print(gpa, "{s}{s}", .{ prefix, value });
+                try strs.indices.append(gpa, url);
             },
             else => {
                 tok = reset;
                 const value = tok.nextValue();
-                try urls.append(try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, value }));
+                const url = try strs.print(gpa, "{s}{s}", .{ prefix, value });
+                try strs.indices.append(gpa, url);
                 curr = tok.next();
             },
         }
     }
 
-    return urls.toOwnedSlice();
+    return strs.putIndicesEnd(off);
 }
 
 fn expectFundingUrls(funding_yml: []const u8, expected: []const []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
+    var strs = Strings.empty;
+    defer strs.deinit(std.testing.allocator);
 
-    const actual = try fundingYmlToUrls(arena.allocator(), funding_yml);
+    const actual = try fundingYmlToUrls(std.testing.allocator, &strs, funding_yml);
     const len = @min(expected.len, actual.len);
-    for (expected[0..len], actual[0..len]) |e, a|
-        try std.testing.expectEqualStrings(e, a);
+    for (expected[0..len], actual.get(strs)[0..len]) |e, a|
+        try std.testing.expectEqualStrings(e, a.get(strs));
     for (expected[len..]) |e|
         try std.testing.expectEqualStrings(e, "");
-    for (actual[len..]) |a|
-        try std.testing.expectEqualStrings("", a);
+    for (actual.get(strs)[len..]) |a|
+        try std.testing.expectEqualStrings("", a.get(strs));
     try std.testing.expectEqual(expected.len, actual.len);
 }
 
@@ -1048,9 +1036,10 @@ fn testFromGithub(options: struct {
         , .{options.description}),
     });
 
+    var strs = Strings.empty;
     const pkg_from_latest_release = try fromGithub(.{
-        .arena = arena,
-        .tmp_gpa = std.testing.allocator,
+        .gpa = arena,
+        .strs = &strs,
         .http_client = undefined, // Not used when downloading from file:// uris
         .repo = options.repo,
         .repository_uri = repository_file_uri,
@@ -1059,8 +1048,8 @@ fn testFromGithub(options: struct {
         .target = options.target,
     });
     const pkg_from_index = try fromGithub(.{
-        .arena = arena,
-        .tmp_gpa = std.testing.allocator,
+        .gpa = arena,
+        .strs = &strs,
         .http_client = undefined, // Not used when downloading from file:// uris
         .repo = options.repo,
         .download_uri = download_file_uri,
@@ -1079,7 +1068,7 @@ fn testFromGithub(options: struct {
     );
     for ([_]Package.Named{ pkg_from_latest_release, pkg_from_index }) |pkg| {
         var actual = std.ArrayList(u8).init(arena);
-        try pkg.pkg.write(pkg.name, actual.writer());
+        try pkg.pkg.write(strs, pkg.name.get(strs), actual.writer());
 
         // Remove download field
         try std.testing.expectEqualStrings(expected, try std.mem.replaceOwned(
@@ -1139,19 +1128,23 @@ test fromGithub {
     });
 }
 
-fn findStaticallyLinkedBinaries(options: struct {
-    arena: std.mem.Allocator,
-    tmp_arena: std.mem.Allocator,
+fn findStaticallyLinkedBinaries(args: struct {
+    gpa: std.mem.Allocator,
+    strs: *Strings,
     arch: std.Target.Cpu.Arch,
     dir: std.fs.Dir,
-}) ![]const []const u8 {
-    const arch_str = switch (options.arch) {
+}) !Strings.Indices {
+    var arena_state = std.heap.ArenaAllocator.init(args.gpa);
+    const arena = arena_state.allocator();
+    defer arena_state.deinit();
+
+    const arch_str = switch (args.arch) {
         .x86_64 => "x86-64",
         .arm => "ARM",
         else => unreachable, // Unsupported
     };
     const shell_script = try std.fmt.allocPrint(
-        options.tmp_arena,
+        arena,
         \\find -type f -exec file '{{}}' '+' |
         \\    grep -E '{s}.*(statically linked|static-pie linked)' |
         \\    cut -d: -f1 |
@@ -1163,20 +1156,20 @@ fn findStaticallyLinkedBinaries(options: struct {
     );
 
     const static_files_result = try std.process.Child.run(.{
-        .allocator = options.tmp_arena,
+        .allocator = arena,
         .argv = &.{ "sh", "-c", shell_script },
-        .cwd_dir = options.dir,
+        .cwd_dir = args.dir,
     });
 
     if (static_files_result.stdout.len < 1)
         return error.NoStaticallyLinkedFiles;
 
-    var bins_list = std.ArrayList([]const u8).init(options.arena);
+    const off = args.strs.putIndicesBegin();
     var static_files_lines = std.mem.tokenizeScalar(u8, static_files_result.stdout, '\n');
     while (static_files_lines.next()) |static_bin|
-        try bins_list.append(try options.arena.dupe(u8, static_bin));
+        _ = try args.strs.putStrs(args.gpa, &.{static_bin});
 
-    return bins_list.toOwnedSlice();
+    return args.strs.putIndicesEnd(off);
 }
 
 fn testFindStaticallyLinkedBinaries(options: struct {
@@ -1184,9 +1177,6 @@ fn testFindStaticallyLinkedBinaries(options: struct {
     files: []const std.fs.Dir.WriteFileOptions,
     expected: []const []const u8,
 }) !void {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-
     var tmp_dir = try fs.zigCacheTmpDir(.{});
     defer tmp_dir.deleteAndClose();
 
@@ -1195,16 +1185,20 @@ fn testFindStaticallyLinkedBinaries(options: struct {
         try tmp_dir.dir.writeFile(file_options);
     }
 
+    const gpa = std.testing.allocator;
+    var strs = Strings.empty;
+    defer strs.deinit(gpa);
+
     const result = try findStaticallyLinkedBinaries(.{
-        .arena = arena.allocator(),
-        .tmp_arena = arena.allocator(),
+        .gpa = gpa,
+        .strs = &strs,
         .arch = options.arch,
         .dir = tmp_dir.dir,
     });
 
     const len = @min(options.expected.len, result.len);
-    for (options.expected[0..len], result[0..len]) |expected, actual|
-        try std.testing.expectEqualStrings(expected, actual);
+    for (options.expected[0..len], result.get(strs)[0..len]) |expected, actual|
+        try std.testing.expectEqualStrings(expected, actual.get(strs));
     try std.testing.expectEqual(options.expected.len, result.len);
 }
 
@@ -1241,13 +1235,15 @@ test findStaticallyLinkedBinaries {
     });
 }
 
-fn findManPages(options: struct {
-    arena: std.mem.Allocator,
-    tmp_arena: std.mem.Allocator,
+fn findManPages(args: struct {
+    gpa: std.mem.Allocator,
+    strs: *Strings,
     dir: std.fs.Dir,
-}) ![][]const u8 {
-    var walker = try options.dir.walk(options.tmp_arena);
-    var result = std.ArrayList([]const u8).init(options.arena);
+}) !Strings.Indices {
+    var walker = try args.dir.walk(args.gpa);
+    defer walker.deinit();
+
+    const off = args.strs.putIndicesBegin();
     while (try walker.next()) |entry| {
         if (entry.kind != .file)
             continue;
@@ -1255,12 +1251,26 @@ fn findManPages(options: struct {
             continue;
         if (!isManPage(entry.basename))
             continue;
-
-        try result.append(try options.arena.dupe(u8, entry.path));
+        _ = try args.strs.putStrs(args.gpa, &.{entry.path});
     }
 
-    std.mem.sort([]const u8, result.items, {}, mem.sortLessThan(u8));
-    return result.toOwnedSlice();
+    const res = args.strs.putIndicesEnd(off);
+
+    const SortContext = struct {
+        strs: *Strings,
+
+        fn lessThan(ctx: @This(), a: Strings.Index, b: Strings.Index) bool {
+            return std.mem.lessThan(u8, a.get(ctx.strs.*), b.get(ctx.strs.*));
+        }
+    };
+    std.mem.sort(
+        Strings.Index,
+        res.get(args.strs.*),
+        SortContext{ .strs = args.strs },
+        SortContext.lessThan,
+    );
+
+    return res;
 }
 
 fn isManPage(filename: []const u8) bool {
@@ -1302,9 +1312,6 @@ fn testfindManPages(options: struct {
     files: []const std.fs.Dir.WriteFileOptions,
     expected: []const []const u8,
 }) !void {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-
     var tmp_dir = try fs.zigCacheTmpDir(.{ .iterate = true });
     defer tmp_dir.deleteAndClose();
 
@@ -1313,15 +1320,19 @@ fn testfindManPages(options: struct {
         try tmp_dir.dir.writeFile(file_options);
     }
 
+    const gpa = std.testing.allocator;
+    var strs = Strings.empty;
+    defer strs.deinit(gpa);
+
     const result = try findManPages(.{
-        .arena = arena.allocator(),
-        .tmp_arena = arena.allocator(),
+        .gpa = gpa,
+        .strs = &strs,
         .dir = tmp_dir.dir,
     });
 
     const len = @min(options.expected.len, result.len);
-    for (options.expected[0..len], result[0..len]) |expected, actual|
-        try std.testing.expectEqualStrings(expected, actual);
+    for (options.expected[0..len], result.get(strs)[0..len]) |expected, actual|
+        try std.testing.expectEqualStrings(expected, actual.get(strs));
     try std.testing.expectEqual(options.expected.len, result.len);
 }
 
@@ -2549,22 +2560,23 @@ test versionFromTag {
 
 test {
     _ = Progress;
+    _ = Strings;
     _ = Target;
 
     _ = download;
     _ = fs;
     _ = heap;
-    _ = mem;
 }
 
 const Package = @This();
 
+const Packages = @import("Packages.zig");
 const Progress = @import("Progress.zig");
+const Strings = @import("Strings.zig");
 const Target = @import("Target.zig");
 
 const builtin = @import("builtin");
 const download = @import("download.zig");
 const fs = @import("fs.zig");
 const heap = @import("heap.zig");
-const mem = @import("mem.zig");
 const std = @import("std");
