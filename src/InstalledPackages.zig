@@ -1,5 +1,5 @@
 gpa: std.mem.Allocator,
-strings: Strings,
+strs: Strings,
 by_name: std.ArrayHashMapUnmanaged(Strings.Index, InstalledPackage, void, true),
 
 file: ?std.fs.File,
@@ -30,7 +30,7 @@ pub fn deinit(pkgs: *InstalledPackages) void {
     if (pkgs.file) |f|
         f.close();
 
-    pkgs.strings.deinit(pkgs.gpa);
+    pkgs.strs.deinit(pkgs.gpa);
     pkgs.by_name.deinit(pkgs.gpa);
     pkgs.* = undefined;
 }
@@ -54,7 +54,7 @@ pub fn parseFromFile(options: struct {
 pub fn parse(gpa: std.mem.Allocator, string: []const u8) !InstalledPackages {
     var pkgs = InstalledPackages{
         .gpa = gpa,
-        .strings = .empty,
+        .strs = .empty,
         .by_name = .{},
         .file = null,
     };
@@ -79,29 +79,29 @@ pub fn parseInto(pkgs: *InstalledPackages, string: []const u8) !void {
     const PackageField = std.meta.FieldEnum(InstalledPackage);
 
     // Use original string lengths as a heuristic for how much data to preallocate
-    try pkgs.strings.data.ensureUnusedCapacity(pkgs.gpa, string.len);
-    try pkgs.strings.indices.ensureUnusedCapacity(pkgs.gpa, string.len / 32);
+    try pkgs.strs.data.ensureUnusedCapacity(pkgs.gpa, string.len);
+    try pkgs.strs.indices.ensureUnusedCapacity(pkgs.gpa, string.len / 32);
     try pkgs.by_name.ensureUnusedCapacity(pkgs.gpa, string.len / 64);
 
     // Use a debug build of `dipm list installed` to find the limits above using the code below
-    // const indices_cap = pkgs.strings.indices.capacity;
-    // const data_cap = pkgs.strings.data.capacity;
+    // const indices_cap = pkgs.strs.indices.capacity;
+    // const data_cap = pkgs.strs.data.capacity;
     // const by_name_cap = pkgs.by_name.entries.capacity;
-    // defer std.debug.assert(pkgs.strings.data.capacity == data_cap);
-    // defer std.debug.assert(pkgs.strings.indices.capacity == indices_cap);
+    // defer std.debug.assert(pkgs.strs.data.capacity == data_cap);
+    // defer std.debug.assert(pkgs.strs.indices.capacity == indices_cap);
     // defer std.debug.assert(pkgs.by_name.entries.capacity == by_name_cap);
 
     while (parsed.kind != .end) {
         std.debug.assert(parsed.kind == .section);
 
         const section = parsed.section(string).?;
-        const adapter = Strings.ArrayHashMapAdapter{ .strings = &pkgs.strings };
+        const adapter = Strings.ArrayHashMapAdapter{ .strings = &pkgs.strs };
         const entry = try pkgs.by_name.getOrPutAdapted(pkgs.gpa, section.name, adapter);
         if (entry.found_existing)
             return error.InvalidPackagesIni;
 
         var opt_version: ?[]const u8 = null;
-        const off = pkgs.strings.putIndicesBegin();
+        const off = pkgs.strs.putIndicesBegin();
 
         parsed = parser.next();
         while (true) : (parsed = parser.next()) switch (parsed.kind) {
@@ -114,14 +114,14 @@ pub fn parseInto(pkgs: *InstalledPackages, string: []const u8) !void {
                     .version => opt_version = prop.value,
                     .location => {
                         const location = try pkgs.putStr(prop.value);
-                        try pkgs.strings.indices.append(pkgs.gpa, location);
+                        try pkgs.strs.indices.append(pkgs.gpa, location);
                     },
                 }
             },
         };
 
         const version = opt_version orelse return error.InvalidPackagesIni;
-        const location = pkgs.strings.putIndicesEnd(off);
+        const location = pkgs.strs.putIndicesEnd(off);
 
         entry.key_ptr.* = try pkgs.putStr(section.name);
         entry.value_ptr.* = .{
@@ -132,11 +132,11 @@ pub fn parseInto(pkgs: *InstalledPackages, string: []const u8) !void {
 }
 
 pub fn putStr(pkgs: *InstalledPackages, string: []const u8) !Strings.Index {
-    return pkgs.strings.putStr(pkgs.gpa, string);
+    return pkgs.strs.putStr(pkgs.gpa, string);
 }
 
 pub fn putIndices(pkgs: *InstalledPackages, indices: []const Strings.Index) !Strings.Indices {
-    return pkgs.strings.putIndices(pkgs.gpa, indices);
+    return pkgs.strs.putIndices(pkgs.gpa, indices);
 }
 
 pub fn print(
@@ -144,7 +144,7 @@ pub fn print(
     comptime format: []const u8,
     args: anytype,
 ) !Strings.Index {
-    return pkgs.strings.print(pkgs.gpa, format, args);
+    return pkgs.strs.print(pkgs.gpa, format, args);
 }
 
 pub fn flush(pkgs: InstalledPackages) !void {
@@ -164,7 +164,7 @@ pub fn writeTo(pkgs: InstalledPackages, writer: anytype) !void {
         if (i != 0)
             try writer.writeAll("\n");
 
-        try pkg.write(pkgs.strings, pkg_name.get(pkgs.strings), writer);
+        try pkg.write(pkgs.strs, pkg_name.get(pkgs.strs), writer);
     }
 }
 

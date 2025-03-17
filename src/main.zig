@@ -235,7 +235,7 @@ fn donateCommand(prog: *Program) !void {
     defer installed_pkgs.deinit();
 
     for (installed_pkgs.by_name.keys()) |pkg_name_index| {
-        const pkg_name = pkg_name_index.get(installed_pkgs.strings);
+        const pkg_name = pkg_name_index.get(installed_pkgs.strs);
         const pkg = pkgs.pkgs.get(pkg_name) orelse {
             try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
             continue;
@@ -421,8 +421,8 @@ fn listInstalledCommand(prog: *Program) !void {
 
     for (installed.by_name.keys(), installed.by_name.values()) |name, pkg|
         try writer.print("{s}\t{s}\n", .{
-            name.get(installed.strings),
-            pkg.version.get(installed.strings),
+            name.get(installed.strs),
+            pkg.version.get(installed.strs),
         });
     try stdout_buffered.flush();
 }

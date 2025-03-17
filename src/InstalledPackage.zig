@@ -1,11 +1,11 @@
 version: Strings.Index,
 location: Strings.Indices,
 
-pub fn write(pkg: Package, strings: Strings, name: []const u8, writer: anytype) !void {
+pub fn write(pkg: Package, strs: Strings, name: []const u8, writer: anytype) !void {
     try writer.print("[{s}]\n", .{name});
-    try writer.print("version = {s}\n", .{pkg.version.get(strings)});
-    for (pkg.location.get(strings)) |install|
-        try writer.print("location = {s}\n", .{install.get(strings)});
+    try writer.print("version = {s}\n", .{pkg.version.get(strs)});
+    for (pkg.location.get(strs)) |install|
+        try writer.print("location = {s}\n", .{install.get(strs)});
 }
 
 const Package = @This();

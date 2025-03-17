@@ -123,7 +123,7 @@ pub fn deinit(pm: *PackageManager) void {
 }
 
 fn isInstalled(pm: *const PackageManager, pkg_name: []const u8) bool {
-    const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strings };
+    const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strs };
     return pm.installed.by_name.containsAdapted(pkg_name, adapter);
 }
 
@@ -311,7 +311,7 @@ fn installExtractedPackage(
     // Try to not leave files around if installation fails
     errdefer {
         for (locations.items) |location|
-            pm.prefix_dir.deleteTree(location.get(pm.installed.strings)) catch {};
+            pm.prefix_dir.deleteTree(location.get(pm.installed.strs)) catch {};
     }
 
     for (pkg.install.install_bin) |install_field| {
@@ -324,7 +324,7 @@ fn installExtractedPackage(
             error.PathAlreadyExists => {
                 try pm.diag.pathAlreadyExists(.{
                     .name = try pm.diag.putStr(pkg.name),
-                    .path = try pm.diag.putStr(path.get(pm.installed.strings)),
+                    .path = try pm.diag.putStr(path.get(pm.installed.strs)),
                 });
                 return Diagnostics.Error.DiagnosticsReported;
             },
@@ -354,7 +354,7 @@ fn installExtractedPackage(
                 error.PathAlreadyExists => {
                     try pm.diag.pathAlreadyExists(.{
                         .name = try pm.diag.putStr(pkg.name),
-                        .path = try pm.diag.putStr(path.get(pm.installed.strings)),
+                        .path = try pm.diag.putStr(path.get(pm.installed.strs)),
                     });
                     return Diagnostics.Error.DiagnosticsReported;
                 },
@@ -364,7 +364,7 @@ fn installExtractedPackage(
         }
     }
 
-    const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strings };
+    const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strs };
     const entry = try pm.installed.by_name.getOrPutAdapted(pm.installed.gpa, pkg.name, adapter);
     std.debug.assert(!entry.found_existing); // Caller ensures that pkg is not installed
 
@@ -468,7 +468,7 @@ pub fn uninstallMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
         try pm.uninstallOneUnchecked(pkg_name, pkg);
         try pm.diag.uninstallSucceeded(.{
             .name = try pm.diag.putStr(pkg_name),
-            .version = try pm.diag.putStr(pkg.version.get(pm.installed.strings)),
+            .version = try pm.diag.putStr(pkg.version.get(pm.installed.strs)),
         });
     }
 
@@ -484,7 +484,7 @@ fn pkgsToUninstall(
 
     try pkgs_to_uninstall.ensureTotalCapacity(pkg_names.len);
     for (pkg_names) |pkg_name| {
-        const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strings };
+        const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strs };
         const pkg = pm.installed.by_name.getAdapted(pkg_name, adapter) orelse {
             try pm.diag.notInstalled((.{ .name = try pm.diag.putStr(pkg_name) }));
             continue;
@@ -504,10 +504,10 @@ fn uninstallOneUnchecked(
     pkg_name: []const u8,
     pkg: InstalledPackage,
 ) !void {
-    for (pkg.location.get(pm.installed.strings)) |location|
-        try pm.prefix_dir.deleteTree(location.get(pm.installed.strings));
+    for (pkg.location.get(pm.installed.strs)) |location|
+        try pm.prefix_dir.deleteTree(location.get(pm.installed.strs));
 
-    const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strings };
+    const adapter = Strings.ArrayHashMapAdapter{ .strings = &pm.installed.strs };
     _ = pm.installed.by_name.orderedRemoveAdapted(pkg_name, adapter);
 }
 
@@ -527,7 +527,7 @@ pub fn updateAll(pm: *PackageManager, options: UpdateOptions) !void {
     try pkgs_to_update.ensureTotalCapacity(installed.len);
 
     for (installed) |pkg_name_index| {
-        const pkg_name = pkg_name_index.get(pm.installed.strings);
+        const pkg_name = pkg_name_index.get(pm.installed.strs);
         pkgs_to_update.appendAssumeCapacity(try arena.dupe(u8, pkg_name));
     }
 
@@ -565,7 +565,7 @@ fn updatePackages(pm: *PackageManager, pkg_names: []const []const u8, options: s
         // Remove up to date packages from the list if we're not force updating
         for (pkgs_to_uninstall.keys(), pkgs_to_uninstall.values()) |pkg_name, installed_pkg| {
             const updated_pkg = pkgs_to_install.get(pkg_name) orelse continue;
-            const installed_version = installed_pkg.version.get(pm.installed.strings);
+            const installed_version = installed_pkg.version.get(pm.installed.strs);
             if (!std.mem.eql(u8, installed_version, updated_pkg.info.version))
                 continue;
 
@@ -623,7 +623,7 @@ fn updatePackages(pm: *PackageManager, pkg_names: []const []const u8, options: s
         const installed_pkg = pkgs_to_uninstall.get(pkg.name).?;
         try pm.diag.updateSucceeded(.{
             .name = try pm.diag.putStr(pkg.name),
-            .from_version = try pm.diag.putStr(installed_pkg.version.get(pm.installed.strings)),
+            .from_version = try pm.diag.putStr(installed_pkg.version.get(pm.installed.strs)),
             .to_version = try pm.diag.putStr(pkg.info.version),
         });
     }
