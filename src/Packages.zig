@@ -127,6 +127,19 @@ pub fn parseInto(pkgs: *Packages, string: []const u8) !void {
         .property, .invalid => return error.InvalidPackagesIni,
     };
 
+    // Use original string lengths as a heuristic for how much data to preallocate
+    try pkgs.strs.data.ensureUnusedCapacity(pkgs.gpa, string.len);
+    try pkgs.strs.indices.ensureUnusedCapacity(pkgs.gpa, string.len / 256);
+    try pkgs.by_name.ensureUnusedCapacity(pkgs.gpa, string.len / 512);
+
+    // Use a debug build of `dipm list all` to find the limits above using the code below
+    // const indices_cap = pkgs.strs.indices.capacity;
+    // const data_cap = pkgs.strs.data.capacity;
+    // const by_name_cap = pkgs.by_name.entries.capacity;
+    // defer std.debug.assert(pkgs.strs.data.capacity == data_cap);
+    // defer std.debug.assert(pkgs.strs.indices.capacity == indices_cap);
+    // defer std.debug.assert(pkgs.by_name.entries.capacity == by_name_cap);
+
     while (parsed.kind != .end) {
         std.debug.assert(parsed.kind == .section);
 
@@ -237,17 +250,16 @@ fn parseUpdate(pkgs: *Packages, parser: *ini.Parser) !struct { ini.Parser.Result
 }
 
 fn parseArch(pkgs: *Packages, parser: *ini.Parser) !struct { ini.Parser.Result, Package.Arch } {
-    var arena_state = std.heap.ArenaAllocator.init(pkgs.gpa);
-    const arena = arena_state.allocator();
-    defer arena_state.deinit();
-
-    var install_bin = std.ArrayList([]const u8).init(arena);
-    var install_lib = std.ArrayList([]const u8).init(arena);
-    var install_share = std.ArrayList([]const u8).init(arena);
+    var install_bin: Strings.Indices = .empty;
+    var install_lib: Strings.Indices = .empty;
+    var install_share: Strings.Indices = .empty;
 
     var url: ?[]const u8 = null;
     var hash: ?[]const u8 = null;
 
+    const ArchField = std.meta.FieldEnum(Package.Arch);
+    var prev_field: ArchField = .install_bin;
+    var off = pkgs.strs.putIndicesBegin();
     var parsed = parser.next();
     while (true) : (parsed = parser.next()) switch (parsed.kind) {
         .comment => {},
@@ -255,23 +267,48 @@ fn parseArch(pkgs: *Packages, parser: *ini.Parser) !struct { ini.Parser.Result, 
         .invalid => return error.InvalidPackagesIni,
         .property => {
             const prop = parsed.property(parser.string).?;
-            const ArchField = std.meta.FieldEnum(Package.Arch);
-            switch (std.meta.stringToEnum(ArchField, prop.name) orelse continue) {
+            const field = std.meta.stringToEnum(ArchField, prop.name) orelse continue;
+            if (field != prev_field) {
+                switch (prev_field) {
+                    .install_bin => install_bin = pkgs.strs.putIndicesEnd(off),
+                    .install_lib => install_lib = pkgs.strs.putIndicesEnd(off),
+                    .install_share => install_share = pkgs.strs.putIndicesEnd(off),
+                    else => {},
+                }
+
+                off = pkgs.strs.putIndicesBegin();
+                prev_field = field;
+                _ = try pkgs.strs.putIndices(pkgs.gpa, switch (field) {
+                    .install_bin => install_bin.get(pkgs.strs),
+                    .install_lib => install_lib.get(pkgs.strs),
+                    .install_share => install_share.get(pkgs.strs),
+                    else => &.{},
+                });
+            }
+
+            switch (field) {
                 .url => url = prop.value,
                 .hash => hash = prop.value,
-                .install_bin => try install_bin.append(prop.value),
-                .install_lib => try install_lib.append(prop.value),
-                .install_share => try install_share.append(prop.value),
+                .install_bin, .install_lib, .install_share => {
+                    _ = try pkgs.strs.putStrs(pkgs.gpa, &.{prop.value});
+                },
             }
         },
     };
 
+    switch (prev_field) {
+        .install_bin => install_bin = pkgs.strs.putIndicesEnd(off),
+        .install_lib => install_lib = pkgs.strs.putIndicesEnd(off),
+        .install_share => install_share = pkgs.strs.putIndicesEnd(off),
+        else => {},
+    }
+
     return .{ parsed, .{
         .url = try pkgs.putStr(url orelse return error.InvalidPackagesIni),
         .hash = try pkgs.putStr(hash orelse return error.InvalidPackagesIni),
-        .install_bin = try pkgs.putStrs(install_bin.items),
-        .install_lib = try pkgs.putStrs(install_lib.items),
-        .install_share = try pkgs.putStrs(install_share.items),
+        .install_bin = install_bin,
+        .install_lib = install_lib,
+        .install_share = install_share,
     } };
 }
 
