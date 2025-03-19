@@ -229,7 +229,7 @@ fn donateCommand(prog: *Program) !void {
         return;
 
     var installed_pkgs = try InstalledPackages.open(prog.gpa, prog.prefix());
-    defer installed_pkgs.deinit();
+    defer installed_pkgs.deinit(prog.gpa);
 
     for (installed_pkgs.by_name.keys()) |pkg_name_index| {
         const pkg_name = pkg_name_index.get(installed_pkgs.strs);
@@ -408,7 +408,7 @@ fn listInstalledCommand(prog: *Program) !void {
     }
 
     var installed = try InstalledPackages.open(prog.gpa, prog.prefix());
-    defer installed.deinit();
+    defer installed.deinit(prog.gpa);
 
     var stdout_buffered = std.io.bufferedWriter(prog.stdout.writer());
     const writer = stdout_buffered.writer();

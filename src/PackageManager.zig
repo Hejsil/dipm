@@ -48,7 +48,7 @@ pub fn init(options: Options) !PackageManager {
     errdefer http_client.deinit();
 
     var installed = try InstalledPackages.open(options.gpa, options.prefix);
-    errdefer installed.deinit();
+    errdefer installed.deinit(options.gpa);
 
     var pkgs = try Packages.download(.{
         .gpa = options.gpa,
@@ -109,7 +109,7 @@ pub fn cleanup(pm: PackageManager) !void {
 pub fn deinit(pm: *PackageManager) void {
     pm.http_client.deinit();
     pm.pkgs.deinit();
-    pm.installed.deinit();
+    pm.installed.deinit(pm.gpa);
     pm.lock.close();
     pm.prefix_dir.close();
     pm.bin_dir.close();
@@ -312,10 +312,8 @@ fn installExtractedPackage(
 
     for (pkg.install.install_bin.get(pm.pkgs.strs)) |install_field| {
         const the_install = Package.Install.fromString(install_field.get(pm.pkgs.strs));
-        const path = try pm.installed.print("{}", .{std.fs.path.fmtJoin(&.{
-            paths.bin_subpath,
-            the_install.to,
-        })});
+        const join_fmt = std.fs.path.fmtJoin(&.{ paths.bin_subpath, the_install.to });
+        const path = try pm.installed.strs.print(pm.gpa, "{}", .{join_fmt});
         installBin(the_install, from_dir, pm.bin_dir) catch |err| switch (err) {
             error.PathAlreadyExists => {
                 try pm.diag.pathAlreadyExists(.{
@@ -342,10 +340,8 @@ fn installExtractedPackage(
     for (generic_installs) |install| {
         for (install.installs.get(pm.pkgs.strs)) |install_field| {
             const the_install = Package.Install.fromString(install_field.get(pm.pkgs.strs));
-            const path = try pm.installed.print("{}", .{std.fs.path.fmtJoin(&.{
-                install.path,
-                the_install.to,
-            })});
+            const join_fmt = std.fs.path.fmtJoin(&.{ install.path, the_install.to });
+            const path = try pm.installed.strs.print(pm.gpa, "{}", .{join_fmt});
             installGeneric(the_install, from_dir, install.dir) catch |err| switch (err) {
                 error.PathAlreadyExists => {
                     try pm.diag.pathAlreadyExists(.{
@@ -361,13 +357,13 @@ fn installExtractedPackage(
     }
 
     const adapter = pm.installed.strs.adapter();
-    const entry = try pm.installed.by_name.getOrPutAdapted(pm.installed.gpa, pkg.name, adapter);
+    const entry = try pm.installed.by_name.getOrPutAdapted(pm.gpa, pkg.name, adapter);
     std.debug.assert(!entry.found_existing); // Caller ensures that pkg is not installed
 
-    entry.key_ptr.* = try pm.installed.putStr(pkg.name);
+    entry.key_ptr.* = try pm.installed.strs.putStr(pm.gpa, pkg.name);
     entry.value_ptr.* = .{
-        .version = try pm.installed.putStr(pkg.info.version.get(pm.pkgs.strs)),
-        .location = try pm.installed.putIndices(locations.items),
+        .version = try pm.installed.strs.putStr(pm.gpa, pkg.info.version.get(pm.pkgs.strs)),
+        .location = try pm.installed.strs.putIndices(pm.gpa, locations.items),
     };
 }
 
