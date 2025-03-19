@@ -510,19 +510,16 @@ const pkgs_update_usage =
 
 fn pkgsUpdateCommand(prog: *Program) !void {
     var pkgs_to_update = std.StringArrayHashMap(void).init(prog.arena);
-    var all: bool = false;
+    var delay: u64 = 0;
     var options = PackagesAddOptions{
         .update_description = false,
-        .add_pkgs = undefined,
     };
 
     while (prog.args.next()) {
         if (prog.args.option(&.{ "-f", "--pkgs-file" })) |file|
             options.pkgs_ini_path = file;
-        if (prog.args.option(&.{"--delay"})) |delay|
-            options.delay = try prog.parseDuration(delay);
-        if (prog.args.flag(&.{ "-a", "--all" }))
-            all = true;
+        if (prog.args.option(&.{"--delay"})) |d|
+            delay = try prog.parseDuration(d);
         if (prog.args.flag(&.{ "-c", "--commit" }))
             options.commit = true;
         if (prog.args.flag(&.{ "-d", "--update-description" }))
@@ -537,29 +534,44 @@ fn pkgsUpdateCommand(prog: *Program) !void {
     var pkgs = try Packages.parseFromPath(prog.gpa, cwd, options.pkgs_ini_path);
     defer pkgs.deinit(prog.gpa);
 
-    var add_pkgs = std.ArrayList(AddPackage).init(prog.arena);
-    for (pkgs_to_update.keys()) |pkg_name| {
-        const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
-            try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
-            continue;
-        };
-
-        try add_pkgs.append(.{
-            .name = pkg_name,
-            .version = pkg.update.version.get(pkgs.strs) orelse "",
-            .download = pkg.update.download.get(pkgs.strs),
-        });
-    }
-    if (all) for (pkgs.by_name.keys(), pkgs.by_name.values()) |pkg_name, pkg| {
-        try add_pkgs.append(.{
-            .name = pkg_name.get(pkgs.strs),
-            .version = pkg.update.version.get(pkgs.strs) orelse "",
-            .download = pkg.update.download.get(pkgs.strs),
-        });
+    const update_all = pkgs_to_update.count() == 0;
+    const num = if (update_all) pkgs.by_name.count() else pkgs_to_update.count();
+    const progress = switch (num) {
+        0, 1 => .none,
+        else => prog.progress.start("progress", @intCast(num)),
     };
+    defer prog.progress.end(progress);
 
-    options.add_pkgs = add_pkgs.items;
-    return prog.pkgsAdd(options);
+    if (update_all) {
+        for (pkgs.by_name.keys(), pkgs.by_name.values(), 0..) |pkg_name, pkg, i| {
+            defer progress.advance(1);
+            if (i != 0 and delay != 0)
+                std.Thread.sleep(delay);
+
+            try prog.pkgsAdd(.{
+                .name = pkg_name.get(pkgs.strs),
+                .version = pkg.update.version.get(pkgs.strs) orelse "",
+                .download = pkg.update.download.get(pkgs.strs),
+            }, options);
+        }
+    } else {
+        for (pkgs_to_update.keys(), 0..) |pkg_name, i| {
+            defer progress.advance(1);
+            if (i != 0 and delay != 0)
+                std.Thread.sleep(delay);
+
+            const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
+                try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
+                continue;
+            };
+
+            try prog.pkgsAdd(.{
+                .name = pkg_name,
+                .version = pkg.update.version.get(pkgs.strs) orelse "",
+                .download = pkg.update.download.get(pkgs.strs),
+            }, options);
+        }
+    }
 }
 
 const pkgs_add_usage =
@@ -578,7 +590,6 @@ fn pkgsAddCommand(prog: *Program) !void {
     var name: ?[]const u8 = null;
     var options = PackagesAddOptions{
         .update_description = true,
-        .add_pkgs = undefined,
     };
 
     while (prog.args.next()) {
@@ -596,20 +607,17 @@ fn pkgsAddCommand(prog: *Program) !void {
             version = url;
     }
 
-    options.add_pkgs = &.{.{
+    return prog.pkgsAdd(.{
         .version = version orelse return,
         .download = down,
         .name = name,
-    }};
-    return prog.pkgsAdd(options);
+    }, options);
 }
 
 const PackagesAddOptions = struct {
     pkgs_ini_path: []const u8 = "./pkgs.ini",
     commit: bool = false,
     update_description: bool,
-    delay: u64 = 0,
-    add_pkgs: []const AddPackage,
 };
 
 const AddPackage = struct {
@@ -618,7 +626,7 @@ const AddPackage = struct {
     name: ?[]const u8 = null,
 };
 
-fn pkgsAdd(prog: *Program, options: PackagesAddOptions) !void {
+fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !void {
     var http_client = std.http.Client{ .allocator = prog.gpa };
     defer http_client.deinit();
 
@@ -634,56 +642,38 @@ fn pkgsAdd(prog: *Program, options: PackagesAddOptions) !void {
     var pkgs = try Packages.parseFile(prog.gpa, pkgs_ini_file);
     defer pkgs.deinit(prog.gpa);
 
-    const global_progress = switch (options.add_pkgs.len) {
-        0, 1 => .none,
-        else => prog.progress.start("progress", @intCast(options.add_pkgs.len)),
+    const progress = prog.progress.start(add_pkg.name orelse add_pkg.version, 1);
+    defer prog.progress.end(progress);
+
+    const pkg = Package.fromUrl(.{
+        .gpa = prog.gpa,
+        .strs = &pkgs.strs,
+        .http_client = &http_client,
+        .name = add_pkg.name,
+        .version_uri = add_pkg.version,
+        .download_uri = add_pkg.download,
+        .target = .{ .os = builtin.os.tag, .arch = builtin.target.cpu.arch },
+    }) catch |err| {
+        try prog.diag.genericError(.{
+            .id = try prog.diag.putStr(add_pkg.version),
+            .msg = try prog.diag.putStr("Failed to create pkg from url"),
+            .err = err,
+        });
+        return;
     };
-    defer prog.progress.end(global_progress);
 
-    for (options.add_pkgs, 0..) |add_pkg, i| {
-        defer global_progress.advance(1);
+    const old_pkg = try pkgs.update(prog.gpa, pkg, .{
+        .description = options.update_description,
+    });
 
-        if (i != 0 and options.delay != 0)
-            std.Thread.sleep(options.delay);
-
-        const progress = prog.progress.start(add_pkg.name orelse add_pkg.version, 1);
-        defer prog.progress.end(progress);
-
-        const pkg = Package.fromUrl(.{
-            .gpa = prog.gpa,
-            .strs = &pkgs.strs,
-            .http_client = &http_client,
-            .name = add_pkg.name,
-            .version_uri = add_pkg.version,
-            .download_uri = add_pkg.download,
-            .target = .{ .os = builtin.os.tag, .arch = builtin.target.cpu.arch },
-        }) catch |err| {
-            try prog.diag.genericError(.{
-                .id = try prog.diag.putStr(add_pkg.version),
-                .msg = try prog.diag.putStr("Failed to create pkg from url"),
-                .err = err,
-            });
-            continue;
-        };
-
-        const old_pkg = try pkgs.update(prog.gpa, pkg, .{
+    pkgs.sort();
+    try pkgs.writeToFileOverride(pkgs_ini_file);
+    try pkgs_ini_file.sync();
+    if (options.commit) {
+        const msg = try git.createCommitMessage(prog.arena, &pkgs, pkg, old_pkg, .{
             .description = options.update_description,
         });
-        if (options.commit) {
-            pkgs.sort();
-            try pkgs.writeToFileOverride(pkgs_ini_file);
-            try pkgs_ini_file.sync();
-
-            const msg = try git.createCommitMessage(prog.arena, &pkgs, pkg, old_pkg, .{
-                .description = options.update_description,
-            });
-            try git.commitFile(prog.gpa, pkgs_ini_dir, pkgs_ini_base_name, msg);
-        }
-    }
-
-    if (!options.commit) {
-        pkgs.sort();
-        try pkgs.writeToFileOverride(pkgs_ini_file);
+        try git.commitFile(prog.gpa, pkgs_ini_dir, pkgs_ini_base_name, msg);
     }
 }
 
