@@ -209,7 +209,7 @@ fn donateCommand(prog: *Program) !void {
         .pkgs_uri = prog.pkgsUri(),
         .download = .only_if_required,
     });
-    defer pkgs.deinit();
+    defer pkgs.deinit(prog.gpa);
 
     const pkgs_to_show = pkgs_to_show_hm.keys();
     for (pkgs_to_show) |pkg_name| {
@@ -298,10 +298,6 @@ fn uninstallCommand(prog: *Program) !void {
         if (prog.args.positional()) |name|
             pkgs_to_uninstall.appendAssumeCapacity(name);
     }
-
-    // Uninstall does not need to download packages
-    var pkgs = Packages.init(prog.gpa);
-    defer pkgs.deinit();
 
     var pm = try PackageManager.init(.{
         .gpa = prog.gpa,
@@ -451,7 +447,7 @@ fn listAllCommand(prog: *Program) !void {
         .pkgs_uri = prog.pkgsUri(),
         .download = .only_if_required,
     });
-    defer pkgs.deinit();
+    defer pkgs.deinit(prog.gpa);
 
     var stdout_buffered = std.io.bufferedWriter(prog.stdout.writer());
     const writer = stdout_buffered.writer();
@@ -539,7 +535,7 @@ fn pkgsUpdateCommand(prog: *Program) !void {
 
     const cwd = std.fs.cwd();
     var pkgs = try Packages.parseFromPath(prog.gpa, cwd, options.pkgs_ini_path);
-    defer pkgs.deinit();
+    defer pkgs.deinit(prog.gpa);
 
     var add_pkgs = std.ArrayList(AddPackage).init(prog.arena);
     for (pkgs_to_update.keys()) |pkg_name| {
@@ -636,7 +632,7 @@ fn pkgsAdd(prog: *Program, options: PackagesAddOptions) !void {
     defer pkgs_ini_file.close();
 
     var pkgs = try Packages.parseFile(prog.gpa, pkgs_ini_file);
-    defer pkgs.deinit();
+    defer pkgs.deinit(prog.gpa);
 
     const global_progress = switch (options.add_pkgs.len) {
         0, 1 => .none,
@@ -654,7 +650,7 @@ fn pkgsAdd(prog: *Program, options: PackagesAddOptions) !void {
         defer prog.progress.end(progress);
 
         const pkg = Package.fromUrl(.{
-            .gpa = pkgs.gpa,
+            .gpa = prog.gpa,
             .strs = &pkgs.strs,
             .http_client = &http_client,
             .name = add_pkg.name,
@@ -670,10 +666,9 @@ fn pkgsAdd(prog: *Program, options: PackagesAddOptions) !void {
             continue;
         };
 
-        const old_pkg = try pkgs.update(pkg, .{
+        const old_pkg = try pkgs.update(prog.gpa, pkg, .{
             .description = options.update_description,
         });
-
         if (options.commit) {
             pkgs.sort();
             try pkgs.writeToFileOverride(pkgs_ini_file);

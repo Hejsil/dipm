@@ -108,7 +108,7 @@ pub fn cleanup(pm: PackageManager) !void {
 
 pub fn deinit(pm: *PackageManager) void {
     pm.http_client.deinit();
-    pm.pkgs.deinit();
+    pm.pkgs.deinit(pm.gpa);
     pm.installed.deinit(pm.gpa);
     pm.lock.close();
     pm.prefix_dir.close();
