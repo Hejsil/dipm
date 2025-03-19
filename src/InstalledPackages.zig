@@ -27,7 +27,7 @@ pub fn deinit(pkgs: *InstalledPackages, gpa: std.mem.Allocator) void {
 }
 
 pub fn parseFromFile(gpa: std.mem.Allocator, file: std.fs.File) !InstalledPackages {
-    const data_str = try file.readToEndAlloc(gpa, std.math.maxInt(usize));
+    const data_str = try file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, 1, 0);
     defer gpa.free(data_str);
 
     var res = try parse(gpa, data_str);
@@ -37,7 +37,7 @@ pub fn parseFromFile(gpa: std.mem.Allocator, file: std.fs.File) !InstalledPackag
     return res;
 }
 
-pub fn parse(gpa: std.mem.Allocator, string: []const u8) !InstalledPackages {
+pub fn parse(gpa: std.mem.Allocator, string: [:0]const u8) !InstalledPackages {
     var pkgs = InstalledPackages{
         .strs = .empty,
         .by_name = .{},
@@ -49,7 +49,7 @@ pub fn parse(gpa: std.mem.Allocator, string: []const u8) !InstalledPackages {
     return pkgs;
 }
 
-pub fn parseInto(pkgs: *InstalledPackages, gpa: std.mem.Allocator, string: []const u8) !void {
+pub fn parseInto(pkgs: *InstalledPackages, gpa: std.mem.Allocator, string: [:0]const u8) !void {
     var parser = ini.Parser.init(string);
     var parsed = parser.next();
 
@@ -140,7 +140,7 @@ pub fn writeTo(pkgs: InstalledPackages, writer: anytype) !void {
     }
 }
 
-fn expectTransform(from: []const u8, to: []const u8) !void {
+fn expectTransform(from: [:0]const u8, to: []const u8) !void {
     const gpa = std.testing.allocator;
     var pkgs = try parse(gpa, from);
     defer pkgs.deinit(gpa);
@@ -152,7 +152,7 @@ fn expectTransform(from: []const u8, to: []const u8) !void {
     try std.testing.expectEqualStrings(to, rendered.items);
 }
 
-fn expectCanonical(string: []const u8) !void {
+fn expectCanonical(string: [:0]const u8) !void {
     return expectTransform(string, string);
 }
 

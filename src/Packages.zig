@@ -78,7 +78,7 @@ pub fn download(options: DownloadOptions) !Packages {
         try pkgs_file.seekTo(0);
     }
 
-    const string = try pkgs_file.readToEndAlloc(options.gpa, std.math.maxInt(usize));
+    const string = try pkgs_file.readToEndAllocOptions(options.gpa, std.math.maxInt(usize), null, 1, 0);
     defer options.gpa.free(string);
 
     try pkgs.parseInto(options.gpa, string);
@@ -97,13 +97,13 @@ pub fn parseFromPath(
 }
 
 pub fn parseFile(gpa: std.mem.Allocator, file: std.fs.File) !Packages {
-    const string = try file.readToEndAlloc(gpa, std.math.maxInt(usize));
+    const string = try file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, 1, 0);
     defer gpa.free(string);
 
     return parse(gpa, string);
 }
 
-pub fn parse(gpa: std.mem.Allocator, string: []const u8) !Packages {
+pub fn parse(gpa: std.mem.Allocator, string: [:0]const u8) !Packages {
     var res = Packages.init;
     errdefer res.deinit(gpa);
 
@@ -111,7 +111,7 @@ pub fn parse(gpa: std.mem.Allocator, string: []const u8) !Packages {
     return res;
 }
 
-pub fn parseInto(pkgs: *Packages, gpa: std.mem.Allocator, string: []const u8) !void {
+pub fn parseInto(pkgs: *Packages, gpa: std.mem.Allocator, string: [:0]const u8) !void {
     var parser = ini.Parser.init(string);
     var parsed = parser.next();
 
@@ -350,14 +350,14 @@ fn expectWrite(pkgs: *Packages, string: []const u8) !void {
     try std.testing.expectEqualStrings(string, rendered.items);
 }
 
-fn expectTransform(from: []const u8, to: []const u8) !void {
+fn expectTransform(from: [:0]const u8, to: []const u8) !void {
     var pkgs = try parse(std.testing.allocator, from);
     defer pkgs.deinit(std.testing.allocator);
 
     return expectWrite(&pkgs, to);
 }
 
-fn expectCanonical(string: []const u8) !void {
+fn expectCanonical(string: [:0]const u8) !void {
     return expectTransform(string, string);
 }
 
@@ -428,10 +428,13 @@ test parse {
 }
 
 fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
+    const str_z = try gpa.dupeZ(u8, string);
+    defer gpa.free(str_z);
+
     var out = std.ArrayList(u8).init(gpa);
     defer out.deinit();
 
-    var pkgs = try parse(gpa, string);
+    var pkgs = try parse(gpa, str_z);
     defer pkgs.deinit(gpa);
 
     try pkgs.write(out.writer());

@@ -1,12 +1,12 @@
-string: []const u8,
+string: [:0]const u8,
 index: u32,
 
-pub fn init(string: []const u8) Parser {
+pub fn init(string: [:0]const u8) Parser {
     return Parser{ .string = string, .index = 0 };
 }
 
 pub fn next(parser: *Parser) Result {
-    var state: enum {
+    const State = enum {
         start,
         comment,
         section_inner_start,
@@ -18,151 +18,222 @@ pub fn next(parser: *Parser) Result {
         property_name_end,
         property_value,
         property_value_end,
-    } = .start;
+    };
 
     var invalid_start: u32 = parser.index;
     var start: u32 = parser.index;
     var end: u32 = parser.index;
-    while (parser.index < parser.string.len) : (parser.index += 1) switch (state) {
+    loop: switch (State.start) {
         .start => switch (parser.string[parser.index]) {
+            0 => return .init(.end, start, parser.index),
             ' ', '\t', '\n', '\r' => {
                 start += 1;
                 invalid_start += 1;
+                parser.index += 1;
+                continue :loop .start;
             },
-            ';', '#' => state = .comment,
-            '[' => state = .section_inner_start,
-            '=' => state = .invalid,
-            else => state = .property_name,
+            ';', '#' => {
+                parser.index += 1;
+                continue :loop .comment;
+            },
+            '[' => {
+                parser.index += 1;
+                continue :loop .section_inner_start;
+            },
+            '=' => {
+                parser.index += 1;
+                continue :loop .invalid;
+            },
+            else => {
+                parser.index += 1;
+                continue :loop .property_name;
+            },
         },
         .comment => switch (parser.string[parser.index]) {
+            0 => return .init(.comment, start, parser.index),
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .comment, .start = start, .end = parser.index };
+                return .init(.comment, start, parser.index);
             },
-            else => {},
+            else => {
+                parser.index += 1;
+                continue :loop .comment;
+            },
         },
         .section_inner_start => switch (parser.string[parser.index]) {
+            0 => return .init(.invalid, invalid_start, parser.index),
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .invalid, .start = invalid_start, .end = parser.index };
+                return .init(.invalid, invalid_start, parser.index);
             },
             ']' => {
                 start = parser.index;
                 end = parser.index;
-                state = .section_end;
+                parser.index += 1;
+                continue :loop .section_end;
             },
-            ' ', '\t' => {},
+            ' ', '\t' => {
+                parser.index += 1;
+                continue :loop .section_inner_start;
+            },
             else => {
                 start = parser.index;
-                state = .section_inner;
+                parser.index += 1;
+                continue :loop .section_inner;
             },
         },
         .section_inner => switch (parser.string[parser.index]) {
+            0 => return .init(.invalid, invalid_start, parser.index),
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .invalid, .start = invalid_start, .end = parser.index };
+                return .init(.invalid, invalid_start, parser.index);
             },
             ']' => {
                 end = parser.index;
-                state = .section_end;
+                parser.index += 1;
+                continue :loop .section_end;
             },
             ' ', '\t' => {
                 end = parser.index;
-                state = .section_inner_end;
+                parser.index += 1;
+                continue :loop .section_inner_end;
             },
-            else => {},
+            else => {
+                parser.index += 1;
+                continue :loop .section_inner;
+            },
         },
         .section_inner_end => switch (parser.string[parser.index]) {
+            0 => return .init(.invalid, invalid_start, parser.index),
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .invalid, .start = invalid_start, .end = parser.index };
+                return .init(.invalid, invalid_start, parser.index);
             },
-            ']' => state = .section_end,
-            ' ', '\t' => {},
-            else => state = .section_inner,
+            ']' => {
+                parser.index += 1;
+                continue :loop .section_end;
+            },
+            ' ', '\t' => {
+                parser.index += 1;
+                continue :loop .section_inner_end;
+            },
+            else => {
+                parser.index += 1;
+                continue :loop .section_inner;
+            },
         },
         .section_end => switch (parser.string[parser.index]) {
+            0 => return .init(.section, start, end),
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .section, .start = start, .end = end };
+                return .init(.section, start, end);
             },
-            ' ', '\t' => {},
-            else => state = .invalid,
+            ' ', '\t' => {
+                parser.index += 1;
+                continue :loop .section_end;
+            },
+            else => {
+                parser.index += 1;
+                continue :loop .invalid;
+            },
         },
         .property_name => switch (parser.string[parser.index]) {
+            0 => return .init(.property, start, parser.index),
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .property, .start = start, .end = parser.index };
+                return .init(.property, start, parser.index);
             },
-            '=' => state = .property_value,
+            '=' => {
+                parser.index += 1;
+                continue :loop .property_value;
+            },
             ' ', '\t' => {
                 end = parser.index;
-                state = .property_name_end;
+                parser.index += 1;
+                continue :loop .property_name_end;
             },
-            else => {},
+            else => {
+                parser.index += 1;
+                continue :loop .property_name;
+            },
         },
         .property_name_end => switch (parser.string[parser.index]) {
+            0 => return .init(.property, start, end),
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .property, .start = start, .end = end };
+                return .init(.property, start, end);
             },
-            '=' => state = .property_value,
-            ' ', '\t' => {},
-            else => state = .property_name,
+            '=' => {
+                parser.index += 1;
+                continue :loop .property_value;
+            },
+            ' ', '\t' => {
+                parser.index += 1;
+                continue :loop .property_name_end;
+            },
+            else => {
+                parser.index += 1;
+                continue :loop .property_name;
+            },
         },
         .property_value => switch (parser.string[parser.index]) {
+            0 => return .init(.property, start, parser.index),
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .property, .start = start, .end = parser.index };
+                return .init(.property, start, parser.index);
             },
             ' ', '\t' => {
                 end = parser.index;
-                state = .property_value_end;
+                parser.index += 1;
+                continue :loop .property_value_end;
             },
-            else => {},
+            else => {
+                parser.index += 1;
+                continue :loop .property_value;
+            },
         },
         .property_value_end => switch (parser.string[parser.index]) {
+            0 => return .init(.property, start, end),
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .property, .start = start, .end = end };
+                return .init(.property, start, end);
             },
-            ' ', '\t' => {},
-            else => state = .property_value,
+            ' ', '\t' => {
+                parser.index += 1;
+                continue :loop .property_value_end;
+            },
+            else => {
+                parser.index += 1;
+                continue :loop .property_value;
+            },
         },
         .invalid => switch (parser.string[parser.index]) {
+            0 => return .init(.invalid, invalid_start, parser.index),
             '\n' => {
                 defer parser.index += 1;
-                return .{ .kind = .invalid, .start = invalid_start, .end = parser.index };
+                return .init(.invalid, invalid_start, parser.index);
             },
-            else => {},
+            else => {
+                parser.index += 1;
+                continue :loop .invalid;
+            },
         },
-    };
-
-    switch (state) {
-        .start => return .{ .kind = .end, .start = start, .end = parser.index },
-        .comment => return .{ .kind = .comment, .start = start, .end = parser.index },
-        .section_inner_start => return .{ .kind = .invalid, .start = invalid_start, .end = parser.index },
-        .section_inner => return .{ .kind = .invalid, .start = invalid_start, .end = parser.index },
-        .section_inner_end => return .{ .kind = .invalid, .start = invalid_start, .end = parser.index },
-        .section_end => return .{ .kind = .section, .start = start, .end = end },
-        .property_name => return .{ .kind = .property, .start = start, .end = parser.index },
-        .property_name_end => return .{ .kind = .property, .start = start, .end = end },
-        .property_value => return .{ .kind = .property, .start = start, .end = parser.index },
-        .property_value_end => return .{ .kind = .property, .start = start, .end = end },
-        .invalid => return .{ .kind = .invalid, .start = invalid_start, .end = parser.index },
     }
 }
 
-fn expectedParsed(string: []const u8, expected: []const Result.Kind) !void {
-    const without_leading_or_trailing_ws = std.mem.trim(u8, string, " \t\n");
-    try expectedParsedInner(without_leading_or_trailing_ws, expected);
+fn expectedParsed(string: [:0]const u8, expected: []const Result.Kind) !void {
+    const gpa = std.testing.allocator;
+    const without_leading_or_trailing_ws = try gpa.dupeZ(u8, std.mem.trim(u8, string, " \t\n"));
+    defer gpa.free(without_leading_or_trailing_ws);
 
-    const with_trailing_nl = try std.fmt.allocPrint(std.testing.allocator, "{s}\n", .{string});
+    const with_trailing_nl = try std.fmt.allocPrintZ(std.testing.allocator, "{s}\n", .{string});
     defer std.testing.allocator.free(with_trailing_nl);
+
+    try expectedParsedInner(without_leading_or_trailing_ws, expected);
     try expectedParsedInner(with_trailing_nl, expected);
 }
 
-fn expectedParsedInner(string: []const u8, expected: []const Result.Kind) !void {
+fn expectedParsedInner(string: [:0]const u8, expected: []const Result.Kind) !void {
     var parser = Parser.init(string);
     for (expected) |expect|
         try std.testing.expectEqual(expect, parser.next().kind);
@@ -355,10 +426,13 @@ test "Parser tokens" {
 }
 
 fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
-    var parser = Parser.init(string);
+    const str_z = try gpa.dupeZ(u8, string);
+    defer gpa.free(str_z);
+
     var out = std.ArrayList(u8).init(gpa);
     defer out.deinit();
 
+    var parser = Parser.init(str_z);
     while (true) {
         const result = parser.next();
         if (result.kind == .end)
@@ -376,6 +450,10 @@ pub const Result = struct {
     kind: Kind,
     start: u32,
     end: u32,
+
+    pub fn init(kind: Kind, start: u32, end: u32) Result {
+        return .{ .kind = kind, .start = start, .end = end };
+    }
 
     pub fn slice(result: Result, string: []const u8) []const u8 {
         return string[result.start..result.end];
@@ -444,7 +522,7 @@ pub const Result = struct {
     };
 };
 
-fn expectResult(string: []const u8, result: Result) !void {
+fn expectResult(string: [:0]const u8, result: Result) !void {
     var parser = Parser.init(string);
     const actual = parser.next();
     try std.testing.expectEqual(result.kind, actual.kind);
@@ -452,7 +530,7 @@ fn expectResult(string: []const u8, result: Result) !void {
     try std.testing.expectEqual(result.end, actual.end);
 }
 
-fn expectProperty(string: []const u8, result: Result, expected: Result.Property) !void {
+fn expectProperty(string: [:0]const u8, result: Result, expected: Result.Property) !void {
     try expectResult(string, result);
 
     const property = result.property(string);
@@ -524,7 +602,7 @@ test "Result.property" {
     );
 }
 
-fn expectSection(string: []const u8, result: Result, expected: Result.Section) !void {
+fn expectSection(string: [:0]const u8, result: Result, expected: Result.Section) !void {
     try expectResult(string, result);
 
     const section = result.section(string);
