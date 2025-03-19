@@ -4,13 +4,9 @@ by_name: std.ArrayHashMapUnmanaged(Strings.Index, InstalledPackage, void, true),
 
 file: ?std.fs.File,
 
-pub fn open(options: struct {
-    gpa: std.mem.Allocator,
-    tmp_gpa: ?std.mem.Allocator = null,
-    prefix: []const u8,
-}) !InstalledPackages {
+pub fn open(gpa: std.mem.Allocator, prefix: []const u8) !InstalledPackages {
     const cwd = std.fs.cwd();
-    var prefix_dir = try cwd.makeOpenPath(options.prefix, .{});
+    var prefix_dir = try cwd.makeOpenPath(prefix, .{});
     defer prefix_dir.close();
 
     var own_data_dir = try prefix_dir.makeOpenPath(paths.own_data_subpath, .{});
@@ -19,11 +15,7 @@ pub fn open(options: struct {
     const file = try own_data_dir.createFile(paths.installed_file_name, .{ .read = true, .truncate = false });
     errdefer file.close();
 
-    return parseFromFile(.{
-        .gpa = options.gpa,
-        .tmp_gpa = options.tmp_gpa,
-        .file = file,
-    });
+    return parseFromFile(gpa, file);
 }
 
 pub fn deinit(pkgs: *InstalledPackages) void {
@@ -35,19 +27,14 @@ pub fn deinit(pkgs: *InstalledPackages) void {
     pkgs.* = undefined;
 }
 
-pub fn parseFromFile(options: struct {
-    gpa: std.mem.Allocator,
-    tmp_gpa: ?std.mem.Allocator = null,
-    file: std.fs.File,
-}) !InstalledPackages {
-    const tmp_gpa = options.tmp_gpa orelse options.gpa;
-    const data_str = try options.file.readToEndAlloc(tmp_gpa, std.math.maxInt(usize));
-    defer tmp_gpa.free(data_str);
+pub fn parseFromFile(gpa: std.mem.Allocator, file: std.fs.File) !InstalledPackages {
+    const data_str = try file.readToEndAlloc(gpa, std.math.maxInt(usize));
+    defer gpa.free(data_str);
 
-    var res = try parse(options.gpa, data_str);
+    var res = try parse(gpa, data_str);
     errdefer res.deinit();
 
-    res.file = options.file;
+    res.file = file;
     return res;
 }
 

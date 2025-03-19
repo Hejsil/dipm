@@ -47,10 +47,7 @@ pub fn init(options: Options) !PackageManager {
     var http_client = std.http.Client{ .allocator = options.gpa };
     errdefer http_client.deinit();
 
-    var installed = try InstalledPackages.open(.{
-        .gpa = options.gpa,
-        .prefix = options.prefix,
-    });
+    var installed = try InstalledPackages.open(options.gpa, options.prefix);
     errdefer installed.deinit();
 
     var pkgs = try Packages.download(.{
