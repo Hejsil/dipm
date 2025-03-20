@@ -90,7 +90,6 @@ pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
     defer diag.lock.unlock();
 
     const esc = opt.escapes;
-
     inline for (@typeInfo(@TypeOf(diag.successes)).@"struct".fields) |field| {
         for (@field(diag.successes, field.name).items) |item| {
             try writer.print("{s}{s}✓{s} ", .{ esc.bold, esc.green, esc.reset });
@@ -108,20 +107,6 @@ pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
             try writer.print("{s}{s}✗{s} ", .{ esc.bold, esc.red, esc.reset });
             try item.print(diag.strs, esc, writer);
         }
-    }
-
-    const show_donate_reminder = opt.is_tty and !diag.hasFailed() and
-        (diag.successes.installs.items.len != 0 or diag.successes.updates.items.len != 0);
-
-    if (show_donate_reminder) {
-        try writer.writeAll("\n");
-        try writer.writeAll(esc.dim);
-        try writer.writeAll(
-            \\Consider donating to the open source software you use.
-            \\└── see dipm donate
-            \\
-        );
-        try writer.writeAll(esc.reset);
     }
 }
 
