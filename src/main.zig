@@ -98,6 +98,8 @@ fn renderThread(prog: *Program) void {
 }
 
 const main_usage =
+    \\A package manager for installing self contained linux programs
+    \\
     \\Usage: dipm [options] [command]
     \\
     \\Commands:
@@ -108,15 +110,19 @@ const main_usage =
     \\  update [pkg]...     Update packages
     \\  update              Update all packages
     \\  list                List packages
-    \\  pkgs                Manipulate and work pkgs.ini file
+    \\  pkgs                Manipulate pkgs.ini
     \\  help                Display this message
     \\
     \\Options:
-    \\  -p, --prefix        Set the prefix dipm will work and install things in.
-    \\                      The following folders will be created in the prefix:
-    \\                        {prefix}/bin/
-    \\                        {prefix}/lib/
-    \\                        {prefix}/share/dipm/
+    \\  -h, --help
+    \\          Display this message
+    \\
+    \\  -p, --prefix <path>
+    \\          Set the prefix dipm will work and install things in.
+    \\          The following folders will be created in the prefix:
+    \\            {prefix}/bin/
+    \\            {prefix}/lib/
+    \\            {prefix}/share/dipm/
     \\
     \\
 ;
@@ -179,10 +185,14 @@ fn pkgsUri(prog: Program) []const u8 {
 }
 
 const donate_usage =
+    \\Show donate links for packages
+    \\
     \\Usage: dipm donate [options] [pkg]...
+    \\       dipm donate [options]
     \\
     \\Options:
-    \\  -h, --help          Display this message
+    \\  -h, --help
+    \\          Display this message
     \\
 ;
 
@@ -248,10 +258,13 @@ fn donateCommand(prog: *Program) !void {
 }
 
 const install_usage =
+    \\Install packages
+    \\
     \\Usage: dipm install [options] [pkg]...
     \\
     \\Options:
-    \\  -h, --help          Display this message
+    \\  -h, --help
+    \\          Display this message
     \\
 ;
 
@@ -281,10 +294,13 @@ fn installCommand(prog: *Program) !void {
 }
 
 const uninstall_usage =
+    \\Uninstall packages
+    \\
     \\Usage: dipm uninstall [options] [pkg]...
     \\
     \\Options:
-    \\  -h, --help          Display this message
+    \\  -h, --help
+    \\          Display this message
     \\
 ;
 
@@ -314,13 +330,17 @@ fn uninstallCommand(prog: *Program) !void {
 }
 
 const update_usage =
-    \\Usage:
-    \\  dipm update [options] [pkg]...
-    \\  dipm update [options]
+    \\Update packages
+    \\
+    \\Usage: dipm update [options] [pkg]...
+    \\       dipm update [options]
     \\
     \\Options:
-    \\  -f, --force         Force update of pkgs even if they're up to date
-    \\  -h, --help          Display this message
+    \\  -f, --force
+    \\          Force update of pkgs even if they're up to date
+    \\
+    \\  -h, --help
+    \\          Display this message
     \\
 ;
 
@@ -360,6 +380,8 @@ fn updateCommand(prog: *Program) !void {
 }
 
 const list_usage =
+    \\List packages
+    \\
     \\Usage: dipm list [options] [command]
     \\
     \\Commands:
@@ -386,10 +408,13 @@ fn listCommand(prog: *Program) !void {
 }
 
 const list_installed_usage =
+    \\List installed packages
+    \\
     \\Usage: dipm list installed [options]
     \\
     \\Options:
-    \\  -h, --help          Display this message
+    \\  -h, --help
+    \\          Display this message
     \\
 ;
 
@@ -418,10 +443,13 @@ fn listInstalledCommand(prog: *Program) !void {
 }
 
 const list_all_usage =
+    \\List all packages
+    \\
     \\Usage: dipm list all [options]
     \\
     \\Options:
-    \\  -h, --help          Display this message
+    \\  -h, --help
+    \\          Display this message
     \\
 ;
 
@@ -463,14 +491,19 @@ fn listAllCommand(prog: *Program) !void {
 }
 
 const pkgs_usage =
+    \\Manipulate pkgs.ini
+    \\
     \\Usage: dipm pkgs [options] [command]
     \\
     \\Commands:
-    \\  update              Update packages in pkgs.ini
-    \\  add                 Make packages and add them to pkgs.ini
-    \\  make                Make packages
-    \\  outdated            Check if any packages are outdated from upstream
+    \\  update [pkg]...     Update packages in pkgs.ini
+    \\  update              Update all packages in pkgs.ini
+    \\  add                 Add new package to pkgs.ini
     \\  help                Display this message
+    \\
+    \\Options:
+    \\  -h, --help
+    \\          Display this message
     \\
 ;
 
@@ -498,13 +531,26 @@ fn pkgsCommand(prog: *Program) !void {
 }
 
 const pkgs_update_usage =
-    \\Usage: dipm pkgs update [options] [url]...
+    \\Update packages in pkgs.ini
+    \\
+    \\Usage: dipm pkgs update [options] [pkg]...
+    \\       dipm pkgs update [options]
     \\
     \\Options:
-    \\  -f, --pkgs-file           Path to pkgs.ini (default: ./pkgs.ini)
-    \\  -c, --commit              Commit each pkg updated to pkgs.ini
-    \\  -d, --update-description  Also update the description of the pkg
-    \\  -h, --help                Display this message
+    \\  -c, --commit
+    \\          Commit each pkg updated to pkgs.ini
+    \\
+    \\  -d, --update-description
+    \\          Also update the description of the pkg
+    \\
+    \\      --delay <duration>
+    \\          Sleep for the specified delay between updates
+    \\
+    \\  -f, --pkgs-file <path>
+    \\          Path to pkgs.ini (default: ./pkgs.ini)
+    \\
+    \\  -h, --help
+    \\          Display this message
     \\
 ;
 
@@ -575,12 +621,25 @@ fn pkgsUpdateCommand(prog: *Program) !void {
 }
 
 const pkgs_add_usage =
-    \\Usage: dipm pkgs add [options] [[name=]url]...
+    \\Manipulate pkgs.ini
+    \\
+    \\Usage: dipm pkgs add [options] [url]
     \\
     \\Options:
-    \\  -f, --pkgs-file     Path to pkgs.ini (default: ./pkgs.ini)
-    \\  -c, --commit        Commit each package added to pkgs.ini
-    \\  -h, --help          Display this message
+    \\  -c, --commit
+    \\          Commit pkgs.ini after adding the package
+    \\
+    \\  -d, --download <url>
+    \\          Link to where the download url for the package can be located
+    \\
+    \\  -f, --pkgs-file <path>
+    \\          Path to pkgs.ini (default: ./pkgs.ini)
+    \\
+    \\  -h, --help
+    \\          Display this message
+    \\
+    \\  -n, --name <name>
+    \\          The name of the package
     \\
 ;
 
