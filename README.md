@@ -15,11 +15,11 @@ curl -L "https://github.com/Hejsil/dipm/releases/latest/download/dipm-$(uname -m
 
 # Why?
 
-I love Arch linux. The main reason for this is the Arch User Repositiory (AUR). With the AUR, most
+I love Arch linux. The main reason for this is the Arch User Repository (AUR). With the AUR, most
 tools a developer could ever want can be installed on the system with relative ease.
 
 But life isn't always kind and sometimes you end up having to use Ubuntu. I'm sure the distro has
-many advantages, but the package repositiory is a fraction of the size.
+many advantages, but the package repository is a fraction of the size.
 
 I want to use [zoxide](https://github.com/ajeetdsouza/zoxide),
 [eza](https://github.com/eza-community/eza), [fzf](https://github.com/junegunn/fzf) and other modern
@@ -32,14 +32,14 @@ then guide their users to download and run install scripts like so:
 curl <my-cool-pkg-install-script> | sh
 ```
 
-But imagine a world where we had a package manager for installing these binaries. This is what `dipm`
-tries to be.
+But imagine a world where we had a package manager for installing these binaries. This is what
+`dipm` tries to be.
 
 # Why not X?
 
 There are package managers that work on multiple distros like [homebrew](https://brew.sh/) or
 [nix](https://nixos.org/). While these are great, they're quite complicated for what I want.
 
-There are also [eget](https://github.com/zyedidia/eget) and [stow](https://github.com/marwanhawari/stew)
-which are much simpler. The only issue I see with these is that they are dependent on Github and
-cannot install binaries from elsewhere.
+There are also [eget](https://github.com/zyedidia/eget) and
+[stow](https://github.com/marwanhawari/stew) which are much simpler. The only issue I see with these
+is that they are dependent on Github and cannot install binaries from elsewhere.
