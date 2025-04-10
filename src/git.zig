@@ -38,10 +38,10 @@ pub fn createCommitMessage(
             new.pkg.info.version.get(pkgs.strs),
         });
     }
-    if (!pkgs.strs.eql(new.pkg.linux_x86_64.hash, old.linux_x86_64.hash))
-        return std.fmt.allocPrint(gpa, "{s}: Update hash", .{name});
     if (!pkgs.strs.eql(new.pkg.linux_x86_64.url, old.linux_x86_64.url))
         return std.fmt.allocPrint(gpa, "{s}: Update url", .{name});
+    if (!pkgs.strs.eql(new.pkg.linux_x86_64.hash, old.linux_x86_64.hash))
+        return std.fmt.allocPrint(gpa, "{s}: Update hash", .{name});
     if (options.description) {
         const new_desc = new.pkg.info.description.get(pkgs.strs) orelse "";
         const old_desc = old.info.description.get(pkgs.strs) orelse "";
@@ -127,7 +127,7 @@ test createCommitMessage {
         },
     );
     try expectCreateCommitMessage(
-        "dipm: Update hash",
+        "dipm: Update url",
         &pkgs,
         .{
             .name = try pkgs.strs.putStr(gpa, "dipm"),
@@ -156,7 +156,7 @@ test createCommitMessage {
         },
     );
     try expectCreateCommitMessage(
-        "dipm: Update url",
+        "dipm: Update hash",
         &pkgs,
         .{
             .name = try pkgs.strs.putStr(gpa, "dipm"),
@@ -179,8 +179,8 @@ test createCommitMessage {
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = try pkgs.strs.putStr(gpa, "b"),
-                .hash = try pkgs.strs.putStr(gpa, "a"),
+                .url = try pkgs.strs.putStr(gpa, "a"),
+                .hash = try pkgs.strs.putStr(gpa, "b"),
             },
         },
     );
