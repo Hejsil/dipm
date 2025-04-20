@@ -27,7 +27,7 @@ pub fn deinit(pkgs: *InstalledPackages, gpa: std.mem.Allocator) void {
 }
 
 pub fn parseFromFile(gpa: std.mem.Allocator, file: std.fs.File) !InstalledPackages {
-    const data_str = try file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, 1, 0);
+    const data_str = try file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, .@"1", 0);
     defer gpa.free(data_str);
 
     var res = try parse(gpa, data_str);

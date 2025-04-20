@@ -78,7 +78,7 @@ pub fn download(options: DownloadOptions) !Packages {
         try pkgs_file.seekTo(0);
     }
 
-    const string = try pkgs_file.readToEndAllocOptions(options.gpa, std.math.maxInt(usize), null, 1, 0);
+    const string = try pkgs_file.readToEndAllocOptions(options.gpa, std.math.maxInt(usize), null, .@"1", 0);
     defer options.gpa.free(string);
 
     try pkgs.parseInto(options.gpa, string);
@@ -97,7 +97,7 @@ pub fn parseFromPath(
 }
 
 pub fn parseFile(gpa: std.mem.Allocator, file: std.fs.File) !Packages {
-    const string = try file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, 1, 0);
+    const string = try file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, .@"1", 0);
     defer gpa.free(string);
 
     return parse(gpa, string);
