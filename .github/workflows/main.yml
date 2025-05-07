@@ -9,23 +9,32 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest]
-        step: [install, test]
         optimize: [Debug, ReleaseSmall, ReleaseSafe, ReleaseFast]
-    runs-on: ${{matrix.os}}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: mlugg/setup-zig@v1
+      - uses: mlugg/setup-zig@v2
         with:
           version: master
-      - run: zig build ${{ matrix.step }} -Doptimize=${{ matrix.optimize }}
+          cache-key: ${{ matrix.optimize }}
+      - run: zig build test -Doptimize=${{ matrix.optimize }}
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: master
+      - run: zig build install
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v1
+      - uses: mlugg/setup-zig@v2
         with:
           version: master
       - run: zig fmt --check .
