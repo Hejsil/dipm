@@ -1458,6 +1458,7 @@ fn findDownloadUrl(options: struct {
             ".sha512",
             ".sha512sum",
             ".sig",
+            ".sigstore",
 
             // HACK: atuin has an "update" binary used for (I assume) updating atuin itself. This
             //       is picked instead of the actual binary, so lets just deprioritized it
