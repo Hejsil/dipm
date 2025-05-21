@@ -1,6 +1,6 @@
 .{
     .name = .dipm,
-    .version = "0.30.2",
+    .version = "0.31.1",
     .minimum_zig_version = "0.15.0-dev.375+8f8f37fb0",
     .fingerprint = 0xce3a2bf46fc8eacf,
     .dependencies = .{},
