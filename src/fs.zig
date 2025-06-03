@@ -288,8 +288,11 @@ pub fn copyTree(from_dir: std.fs.Dir, to_dir: std.fs.Dir) !void {
             try copyTree(child_from_dir, child_to_dir);
         },
         .file => try from_dir.copyFile(entry.name, to_dir, entry.name, .{}),
-
-        .sym_link,
+        .sym_link => {
+            var buf: [std.fs.max_path_bytes]u8 = undefined;
+            const link = try from_dir.readLink(entry.name, &buf);
+            try to_dir.symLink(link, entry.name, .{});
+        },
         .block_device,
         .character_device,
         .named_pipe,
