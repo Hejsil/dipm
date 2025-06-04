@@ -139,7 +139,8 @@ pub fn installMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
     }
 
     const global_progress = switch (pkgs_to_install.count()) {
-        0, 1 => .none,
+        0 => return,
+        1 => .none,
         else => pm.progress.start("progress", @intCast(pkgs_to_install.count())),
     };
     defer pm.progress.end(global_progress);
