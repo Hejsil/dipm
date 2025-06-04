@@ -739,7 +739,7 @@ pub const TestPackage = struct {
     };
 };
 
-pub const simple_file = TestPackage{
+const simple_file = TestPackage{
     .name = "test-file",
     .file = .{
         .name = "pkg",
@@ -762,7 +762,7 @@ pub const simple_file = TestPackage{
 //   xxd -p "$FILE" | tr -d '\n' | sed -E 's/([a-z0-9]{2})/0x\1,/g'
 //   sha256sum "$FILE"
 //
-pub const simple_tree_tar_xz = TestPackage{
+const simple_tree_tar_xz = TestPackage{
     .name = "test-xz",
     .file = .{
         .name = "pkg.tar.xz",
@@ -795,7 +795,7 @@ pub const simple_tree_tar_xz = TestPackage{
     .install_share = &.{ "test-xz-dir:share/dir", "test-xz:share/dir/file" },
 };
 
-pub const simple_tree_tar_gz = TestPackage{
+const simple_tree_tar_gz = TestPackage{
     .name = "test-gz",
     .file = .{
         .name = "pkg.tar.gz",
@@ -826,7 +826,7 @@ pub const simple_tree_tar_gz = TestPackage{
     .install_share = &.{ "test-gz-dir:share/dir", "test-gz:share/dir/file" },
 };
 
-pub const simple_tree_tar_zst = TestPackage{
+const simple_tree_tar_zst = TestPackage{
     .name = "test-zst",
     .file = .{
         .name = "pkg.tar.zst",
@@ -856,7 +856,7 @@ pub const simple_tree_tar_zst = TestPackage{
     .install_share = &.{ "test-zst-dir:share/dir", "test-zst:share/dir/file" },
 };
 
-pub const wrong_hash = TestPackage{
+const wrong_hash = TestPackage{
     .name = "wrong-hash",
     .file = .{
         .name = "wrong-hash",
@@ -866,7 +866,7 @@ pub const wrong_hash = TestPackage{
     .install_bin = &.{"wrong-hash"},
 };
 
-pub const fails_download = TestPackage{
+const fails_download = TestPackage{
     .name = "fails-download",
     .file = .{
         .name = "fails-download",
@@ -876,7 +876,7 @@ pub const fails_download = TestPackage{
     .install_bin = &.{"fails-download"},
 };
 
-pub const duplicate_bin_file1 = TestPackage{
+const duplicate_bin_file1 = TestPackage{
     .name = "dup-bin1",
     .file = .{
         .name = "pkg",
@@ -886,7 +886,7 @@ pub const duplicate_bin_file1 = TestPackage{
     .install_bin = &.{"test-file:pkg"},
 };
 
-pub const duplicate_bin_file2 = TestPackage{
+const duplicate_bin_file2 = TestPackage{
     .name = "dup-bin2",
     .file = .{
         .name = "pkg",
@@ -896,7 +896,7 @@ pub const duplicate_bin_file2 = TestPackage{
     .install_bin = &.{"test-file:pkg"},
 };
 
-pub const duplicate_bin_file3 = TestPackage{
+const duplicate_bin_file3 = TestPackage{
     .name = "dup-bin3",
     .file = .{
         .name = "pkg",
@@ -906,7 +906,7 @@ pub const duplicate_bin_file3 = TestPackage{
     .install_bin = &.{"test-file:pkg"},
 };
 
-pub const duplicate_lib_file1 = TestPackage{
+const duplicate_lib_file1 = TestPackage{
     .name = "dup-lib1",
     .file = .{
         .name = "pkg",
@@ -916,7 +916,7 @@ pub const duplicate_lib_file1 = TestPackage{
     .install_lib = &.{"test-file:pkg"},
 };
 
-pub const duplicate_lib_file2 = TestPackage{
+const duplicate_lib_file2 = TestPackage{
     .name = "dup-lib2",
     .file = .{
         .name = "pkg",
@@ -926,7 +926,7 @@ pub const duplicate_lib_file2 = TestPackage{
     .install_lib = &.{"test-file:pkg"},
 };
 
-pub const duplicate_lib_file3 = TestPackage{
+const duplicate_lib_file3 = TestPackage{
     .name = "dup-lib3",
     .file = .{
         .name = "pkg",
