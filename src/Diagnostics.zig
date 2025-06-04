@@ -73,7 +73,6 @@ pub fn reportToFile(diag: *Diagnostics, file: std.fs.File) !void {
     const is_tty = file.supportsAnsiEscapeCodes();
     const escapes = if (is_tty) Escapes.ansi else Escapes.none;
     try diag.report(buffered.writer(), .{
-        .is_tty = is_tty,
         .escapes = escapes,
     });
 
@@ -81,7 +80,6 @@ pub fn reportToFile(diag: *Diagnostics, file: std.fs.File) !void {
 }
 
 pub const ReportOptions = struct {
-    is_tty: bool = false,
     escapes: Escapes = Escapes.none,
 };
 
@@ -456,6 +454,7 @@ pub const Error = error{
 
 test {
     _ = Escapes;
+    _ = Strings;
     _ = Target;
 }
 
