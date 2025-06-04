@@ -26,6 +26,10 @@ pub fn deinit(pkgs: *InstalledPackages, gpa: std.mem.Allocator) void {
     pkgs.* = undefined;
 }
 
+pub fn isInstalled(pkgs: *const InstalledPackages, pkg_name: []const u8) bool {
+    return pkgs.by_name.containsAdapted(pkg_name, pkgs.strs.adapter());
+}
+
 pub fn parseFromFile(gpa: std.mem.Allocator, file: std.fs.File) !InstalledPackages {
     const data_str = try file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, .@"1", 0);
     defer gpa.free(data_str);

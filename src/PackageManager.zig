@@ -119,10 +119,6 @@ pub fn deinit(pm: *PackageManager) void {
     pm.own_tmp_dir.close();
 }
 
-fn isInstalled(pm: *const PackageManager, pkg_name: []const u8) bool {
-    return pm.installed.by_name.containsAdapted(pkg_name, pm.installed.strs.adapter());
-}
-
 pub fn installMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
     var pkgs_to_install = try pm.pkgsToInstall(pkg_names);
     defer pkgs_to_install.deinit();
@@ -132,7 +128,7 @@ pub fn installMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
         const i_backwards = len - (i_forward + 1);
         const pkg = pkgs_to_install.values()[i_backwards];
 
-        if (pm.isInstalled(pkg.name)) {
+        if (pm.installed.isInstalled(pkg.name)) {
             try pm.diag.alreadyInstalled(.{ .name = try pm.diag.putStr(pkg.name) });
             _ = pkgs_to_install.swapRemoveAt(i_backwards);
         }
