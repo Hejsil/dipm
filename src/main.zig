@@ -604,7 +604,7 @@ fn pkgsUpdateCommand(prog: *Program) !void {
         if (prog.args.option(&.{ "-f", "--pkgs-file" })) |file|
             options.pkgs_ini_path = file;
         if (prog.args.option(&.{"--delay"})) |d|
-            delay = try prog.parseDuration(d);
+            delay = try fmt.parseDuration(d);
         if (prog.args.flag(&.{ "-c", "--commit" }))
             options.commit = true;
         if (prog.args.flag(&.{ "-d", "--update-description" }))
@@ -775,29 +775,6 @@ fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !vo
     }
 }
 
-fn parseDuration(prog: *Program, str: []const u8) !u64 {
-    _ = prog;
-
-    const Suffix = struct {
-        str: []const u8,
-        mult: u64,
-    };
-
-    const suffixes = [_]Suffix{
-        .{ .str = "s", .mult = std.time.ns_per_s },
-        .{ .str = "m", .mult = std.time.ns_per_min },
-        .{ .str = "h", .mult = std.time.ns_per_hour },
-        .{ .str = "d", .mult = std.time.ns_per_day },
-    };
-    const trimmed, const mult = for (suffixes) |suffix| {
-        if (std.mem.endsWith(u8, str, suffix.str)) {
-            break .{ str[0 .. str.len - suffix.str.len], suffix.mult };
-        }
-    } else .{ str, std.time.ns_per_s };
-
-    return (try std.fmt.parseUnsigned(u8, trimmed, 10)) * mult;
-}
-
 test {
     _ = ArgParser;
     _ = Diagnostics;
@@ -808,6 +785,7 @@ test {
     _ = Progress;
 
     _ = download;
+    _ = fmt;
     _ = fs;
     _ = git;
 
@@ -824,6 +802,7 @@ const Progress = @import("Progress.zig");
 
 const builtin = @import("builtin");
 const download = @import("download.zig");
+const fmt = @import("fmt.zig");
 const fs = @import("fs.zig");
 const git = @import("git.zig");
 const std = @import("std");
