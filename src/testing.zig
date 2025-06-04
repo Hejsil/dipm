@@ -567,7 +567,7 @@ test "fuzz" {
     try std.testing.fuzz({}, fuzz, .{});
 }
 
-pub fn setupPrefix(options: struct {
+fn setupPrefix(options: struct {
     gpa: std.mem.Allocator = std.testing.allocator,
     version: []const u8,
 
@@ -658,20 +658,20 @@ pub fn setupPrefix(options: struct {
     };
 }
 
-pub const Prefix = struct {
+const Prefix = struct {
     gpa: std.mem.Allocator,
     pkgs_uri: []const u8,
     prefix: []const u8,
     prefix_dir: std.fs.Dir,
 
-    pub fn deinit(prefix: *Prefix) void {
+    fn deinit(prefix: *Prefix) void {
         prefix.prefix_dir.close();
         std.fs.cwd().deleteTree(prefix.prefix) catch {};
         prefix.gpa.free(prefix.pkgs_uri);
         prefix.gpa.free(prefix.prefix);
     }
 
-    pub fn run(prefix: Prefix, args: []const []const u8) !void {
+    fn run(prefix: Prefix, args: []const []const u8) !void {
         var dir = try std.fs.cwd().openDir(prefix.prefix, .{});
         defer dir.close();
 
@@ -693,18 +693,18 @@ pub const Prefix = struct {
         });
     }
 
-    pub fn rm(prefix: Prefix, path: []const u8) !void {
+    fn rm(prefix: Prefix, path: []const u8) !void {
         return prefix.prefix_dir.deleteTree(path);
     }
 
-    pub fn expectNoFile(prefix: Prefix, file: []const u8) !void {
+    fn expectNoFile(prefix: Prefix, file: []const u8) !void {
         const err_file = prefix.prefix_dir.openFile(file, .{});
         defer if (err_file) |f| f.close() else |_| {};
 
         try std.testing.expectError(error.FileNotFound, err_file);
     }
 
-    pub fn expectFile(prefix: Prefix, file: []const u8, content: []const u8) !void {
+    fn expectFile(prefix: Prefix, file: []const u8, content: []const u8) !void {
         const actual = try prefix.prefix_dir.readFileAlloc(
             std.testing.allocator,
             file,
@@ -714,7 +714,7 @@ pub const Prefix = struct {
         try std.testing.expectEqualStrings(actual, content);
     }
 
-    pub fn expectFileStartsWith(prefix: Prefix, file: []const u8, content: []const u8) !void {
+    fn expectFileStartsWith(prefix: Prefix, file: []const u8, content: []const u8) !void {
         const actual = try prefix.prefix_dir.readFileAlloc(
             std.testing.allocator,
             file,
@@ -725,7 +725,7 @@ pub const Prefix = struct {
     }
 };
 
-pub const TestPackage = struct {
+const TestPackage = struct {
     name: []const u8,
     file: File,
     install_bin: []const []const u8 = &.{},
