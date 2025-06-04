@@ -753,7 +753,7 @@ pub const simple_file = TestPackage{
 
 // All `simple_tree_` binaries are compressed archives. They're generated with the following
 // commands:
-//   COMPRESSION='<compresssion>'
+//   COMPRESSION='<compression>'
 //   FILE='file.tar.<ext>'
 //   cd "$(mktemp -d)"
 //   mkdir -p bin lib/dir share/dir
