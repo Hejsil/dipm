@@ -3,6 +3,12 @@ maximum_node_name_len: u32,
 
 pub var dummy = Progress{ .nodes = &.{}, .maximum_node_name_len = 0 };
 
+var nodes_buf: [128]NodeState = @splat(NodeState.none);
+pub var global = Progress{
+    .nodes = &nodes_buf,
+    .maximum_node_name_len = 15,
+};
+
 pub const Node = enum(usize) {
     none = 0,
     _,
@@ -130,29 +136,6 @@ const NodeState = struct {
         node.lock.unlock();
     }
 };
-
-pub fn init(options: Options) !Progress {
-    const nodes = try options.gpa.alloc(NodeState, options.maximum_nodes);
-    errdefer options.gpa.free(nodes);
-
-    @memset(nodes, NodeState.none);
-
-    return .{
-        .nodes = nodes,
-        .maximum_node_name_len = options.maximum_node_name_len,
-    };
-}
-
-pub const Options = struct {
-    gpa: std.mem.Allocator,
-    maximum_node_name_len: u32,
-    maximum_nodes: u32 = 128,
-};
-
-pub fn deinit(progress: *Progress, gpa: std.mem.Allocator) void {
-    gpa.free(progress.nodes);
-    progress.* = undefined;
-}
 
 pub fn start(progress: Progress, name: []const u8, max: u32) Node {
     for (progress.nodes) |*node| {
@@ -300,15 +283,18 @@ fn expectRender(
     expected: []const u8,
     nodes: []const NodeState.Inner,
     render_options: RenderOptions,
-    options: Options,
+    maximum_node_name_len: u32,
 ) !void {
-    var progress = try Progress.init(options);
-    defer progress.deinit(options.gpa);
+    var buf: [128]NodeState = @splat(NodeState.none);
+    var progress = Progress{
+        .nodes = &buf,
+        .maximum_node_name_len = maximum_node_name_len,
+    };
 
     for (progress.nodes[0..nodes.len], nodes) |*out, in|
         try std.testing.expect(out.acquire(in));
 
-    var actual = std.ArrayList(u8).init(options.gpa);
+    var actual = std.ArrayList(u8).init(std.testing.allocator);
     defer actual.deinit();
 
     _ = try progress.render(actual.writer(), render_options);
@@ -330,10 +316,7 @@ test "render" {
             .{ .name = "node 10", .curr = 10, .max = 10 },
         },
         .{ .width = 25, .height = 4 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 7,
-        },
+        7,
     );
 }
 
@@ -351,10 +334,7 @@ test "render: empty node" {
             .{ .name = "node 10", .curr = 10, .max = 10 },
         },
         .{ .width = 25, .height = 4 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 7,
-        },
+        7,
     );
 }
 
@@ -368,10 +348,7 @@ test "render: more nodes than height" {
             .{ .name = "node 5", .curr = 5, .max = 10 },
         },
         .{ .width = 25, .height = 1 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 7,
-        },
+        7,
     );
 }
 
@@ -383,10 +360,7 @@ test "render: no room for bar" {
         ,
             &.{.{ .name = "node 0", .curr = 0, .max = 10 }},
             .{ .width = width, .height = 1 },
-            .{
-                .gpa = std.testing.allocator,
-                .maximum_node_name_len = 6,
-            },
+            6,
         );
     }
 }
@@ -398,10 +372,7 @@ test "render: only room for percent without %" {
     ,
         &.{.{ .name = "node 0", .curr = 0, .max = 10 }},
         .{ .width = 10, .height = 1 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 6,
-        },
+        6,
     );
 }
 
@@ -413,10 +384,7 @@ test "render: only room for percent" {
         ,
             &.{.{ .name = "node 0", .curr = 0, .max = 10 }},
             .{ .width = width, .height = 1 },
-            .{
-                .gpa = std.testing.allocator,
-                .maximum_node_name_len = 6,
-            },
+            6,
         );
     }
 }
@@ -428,10 +396,7 @@ test "render: no room for name" {
     ,
         &.{.{ .name = "node 0", .curr = 0, .max = 10 }},
         .{ .width = 25, .height = 4 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 0,
-        },
+        0,
     );
     try expectRender(
         \\.   0% [                ]
@@ -439,10 +404,7 @@ test "render: no room for name" {
     ,
         &.{.{ .name = "node 0", .curr = 0, .max = 10 }},
         .{ .width = 25, .height = 4 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 1,
-        },
+        1,
     );
     try expectRender(
         \\..   0% [               ]
@@ -450,10 +412,7 @@ test "render: no room for name" {
     ,
         &.{.{ .name = "node 0", .curr = 0, .max = 10 }},
         .{ .width = 25, .height = 4 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 2,
-        },
+        2,
     );
     try expectRender(
         \\...   0% [              ]
@@ -461,10 +420,7 @@ test "render: no room for name" {
     ,
         &.{.{ .name = "node 0", .curr = 0, .max = 10 }},
         .{ .width = 25, .height = 4 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 3,
-        },
+        3,
     );
     try expectRender(
         \\n...   0% [             ]
@@ -472,10 +428,7 @@ test "render: no room for name" {
     ,
         &.{.{ .name = "node 0", .curr = 0, .max = 10 }},
         .{ .width = 25, .height = 4 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 4,
-        },
+        4,
     );
     try expectRender(
         \\no...   0% [            ]
@@ -483,10 +436,7 @@ test "render: no room for name" {
     ,
         &.{.{ .name = "node 0", .curr = 0, .max = 10 }},
         .{ .width = 25, .height = 4 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 5,
-        },
+        5,
     );
     try expectRender(
         \\node 0   0% [           ]
@@ -494,10 +444,7 @@ test "render: no room for name" {
     ,
         &.{.{ .name = "node 0", .curr = 0, .max = 10 }},
         .{ .width = 25, .height = 4 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 6,
-        },
+        6,
     );
 
     try expectRender(
@@ -506,10 +453,7 @@ test "render: no room for name" {
     ,
         &.{.{ .name = "↓ node", .curr = 0, .max = 10 }},
         .{ .width = 25, .height = 4 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 5,
-        },
+        5,
     );
     try expectRender(
         \\↓ node   0% [           ]
@@ -517,10 +461,7 @@ test "render: no room for name" {
     ,
         &.{.{ .name = "↓ node", .curr = 0, .max = 10 }},
         .{ .width = 25, .height = 4 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 6,
-        },
+        6,
     );
 }
 
@@ -531,10 +472,7 @@ test "render: max greater than curr" {
     ,
         &.{.{ .name = "node 0", .curr = 20, .max = 10 }},
         .{ .width = 25, .height = 1 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 7,
-        },
+        7,
     );
 }
 
@@ -545,10 +483,7 @@ test "render: max is 0" {
     ,
         &.{.{ .name = "node 0", .curr = 0, .max = 0 }},
         .{ .width = 25, .height = 1 },
-        .{
-            .gpa = std.testing.allocator,
-            .maximum_node_name_len = 7,
-        },
+        7,
     );
 }
 

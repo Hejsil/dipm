@@ -681,9 +681,11 @@ pub const Prefix = struct {
         var stderr = try dir.createFile("stderr", .{ .read = true });
         defer stderr.close();
 
+        var io_lock = std.Thread.Mutex{};
         try main.mainFull(.{
             .gpa = prefix.gpa,
             .args = args,
+            .io_lock = &io_lock,
             .stdout = stdout,
             .stderr = stderr,
             .forced_prefix = prefix.prefix,

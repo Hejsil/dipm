@@ -6,7 +6,36 @@ pub fn main() !u8 {
     const args = std.process.argsAlloc(gpa) catch @panic("OOM");
     defer std.process.argsFree(gpa, args);
 
-    mainFull(.{ .gpa = gpa, .args = args[1..] }) catch |err| switch (err) {
+    const progress = &Progress.global;
+    const stderr = std.io.getStdErr();
+    var io_lock = std.Thread.Mutex{};
+
+    // We don't really care to store the thread. Just let the os clean it up
+    if (stderr.supportsAnsiEscapeCodes()) blk: {
+        const thread = std.Thread.spawn(.{}, renderThread, .{
+            stderr,
+            progress,
+            &io_lock,
+        }) catch |err| {
+            std.log.warn("failed to spawn rendering thread: {}", .{err});
+            break :blk;
+        };
+        thread.detach();
+    }
+
+    defer {
+        io_lock.lock();
+        progress.cleanupTty(stderr) catch {};
+    }
+
+    mainFull(.{
+        .gpa = gpa,
+        .args = args[1..],
+        .io_lock = &io_lock,
+        .stderr = stderr,
+        .stdout = std.io.getStdOut(),
+        .progress = progress,
+    }) catch |err| switch (err) {
         Diagnostics.Error.DiagnosticsReported => return 1,
         else => |e| {
             if (builtin.mode == .Debug)
@@ -20,14 +49,31 @@ pub fn main() !u8 {
     return 0;
 }
 
+fn renderThread(stderr: std.fs.File, progress: *Progress, io_lock: *std.Thread.Mutex) void {
+    const fps = 15;
+    const delay = std.time.ns_per_s / fps;
+    const initial_delay = std.time.ns_per_s / 4;
+
+    std.time.sleep(initial_delay);
+    while (true) {
+        io_lock.lock();
+        progress.renderToTty(stderr) catch {};
+        io_lock.unlock();
+        std.time.sleep(delay);
+    }
+}
+
 pub const MainOptions = struct {
     gpa: std.mem.Allocator,
     args: []const []const u8,
 
+    io_lock: *std.Thread.Mutex,
+    stdout: std.fs.File,
+    stderr: std.fs.File,
+
     forced_prefix: ?[]const u8 = null,
     forced_pkgs_uri: ?[]const u8 = null,
-    stdout: std.fs.File = std.io.getStdOut(),
-    stderr: std.fs.File = std.io.getStdErr(),
+    progress: *Progress = &Progress.dummy,
 };
 
 pub fn mainFull(options: MainOptions) !void {
@@ -41,16 +87,12 @@ pub fn mainFull(options: MainOptions) !void {
     var diag = Diagnostics.init(options.gpa);
     defer diag.deinit();
 
-    var progress = try Progress.init(.{
-        .gpa = arena,
-        .maximum_node_name_len = 15,
-    });
-
     var prog = Program{
         .gpa = options.gpa,
         .arena = arena,
-        .progress = &progress,
         .diag = &diag,
+        .progress = options.progress,
+        .io_lock = options.io_lock,
         .stdout = options.stdout,
         .stderr = options.stderr,
 
@@ -62,39 +104,16 @@ pub fn mainFull(options: MainOptions) !void {
         },
     };
 
-    // We don't really care to store the thread. Just let the os clean it up
-    if (prog.stderr.supportsAnsiEscapeCodes()) {
-        _ = std.Thread.spawn(.{}, renderThread, .{&prog}) catch |err| blk: {
-            std.log.warn("failed to spawn rendering thread: {}", .{err});
-            break :blk null;
-        };
-    }
-
     const res = prog.mainCommand();
 
-    // Stop `renderThread` from rendering by locking stderr for the rest of the progs execution.
     prog.io_lock.lock();
-    try progress.cleanupTty(prog.stderr);
-    try diag.reportToFile(prog.stderr);
+    defer prog.io_lock.unlock();
 
+    try diag.reportToFile(prog.stderr);
     if (diag.hasFailed())
         return Diagnostics.Error.DiagnosticsReported;
 
     return res;
-}
-
-fn renderThread(prog: *Program) void {
-    const fps = 15;
-    const delay = std.time.ns_per_s / fps;
-    const initial_delay = std.time.ns_per_s / 4;
-
-    std.time.sleep(initial_delay);
-    while (true) {
-        prog.io_lock.lock();
-        prog.progress.renderToTty(prog.stderr) catch {};
-        prog.io_lock.unlock();
-        std.time.sleep(delay);
-    }
 }
 
 const main_usage =
@@ -144,12 +163,12 @@ pub fn mainCommand(prog: *Program) !void {
         if (prog.args.flag(&.{"pkgs"}))
             return prog.pkgsCommand();
         if (prog.args.flag(&.{ "-h", "--help", "help" }))
-            return prog.stdout.writeAll(main_usage);
+            return prog.stdoutWriteAllLocked(main_usage);
         if (prog.args.positional()) |_|
             break;
     }
 
-    try prog.stderr.writeAll(main_usage);
+    try prog.stderrWriteAllLocked(main_usage);
     return error.InvalidArgument;
 }
 
@@ -157,10 +176,11 @@ const Program = @This();
 
 gpa: std.mem.Allocator,
 arena: std.mem.Allocator,
-progress: *Progress,
 diag: *Diagnostics,
+progress: *Progress,
 
-io_lock: std.Thread.Mutex = .{},
+// Ensures that only one thread can write to stdout/stderr at a time
+io_lock: *std.Thread.Mutex,
 stdout: std.fs.File,
 stderr: std.fs.File,
 
@@ -184,6 +204,20 @@ fn pkgsUri(prog: Program) []const u8 {
     return prog.options.forced_pkgs_uri orelse prog.options.pkgs_uri;
 }
 
+fn stdoutWriteAllLocked(prog: Program, str: []const u8) !void {
+    prog.io_lock.lock();
+    defer prog.io_lock.unlock();
+
+    return prog.stdout.writeAll(str);
+}
+
+fn stderrWriteAllLocked(prog: Program, str: []const u8) !void {
+    prog.io_lock.lock();
+    defer prog.io_lock.unlock();
+
+    return prog.stderr.writeAll(str);
+}
+
 const donate_usage =
     \\Show donate links for packages
     \\
@@ -202,7 +236,7 @@ fn donateCommand(prog: *Program) !void {
 
     while (prog.args.next()) {
         if (prog.args.flag(&.{ "-h", "--help" }))
-            return prog.stdout.writeAll(install_usage);
+            return prog.stdoutWriteAllLocked(install_usage);
         if (prog.args.positional()) |name|
             pkgs_to_show_hm.putAssumeCapacity(name, {});
     }
@@ -214,7 +248,6 @@ fn donateCommand(prog: *Program) !void {
         .gpa = prog.gpa,
         .http_client = &http_client,
         .diagnostics = prog.diag,
-        .progress = prog.progress,
         .prefix = prog.prefix(),
         .pkgs_uri = prog.pkgsUri(),
         .download = .only_if_required,
@@ -274,7 +307,7 @@ fn installCommand(prog: *Program) !void {
 
     while (prog.args.next()) {
         if (prog.args.flag(&.{ "-h", "--help" }))
-            return prog.stdout.writeAll(install_usage);
+            return prog.stdoutWriteAllLocked(install_usage);
         if (prog.args.positional()) |name|
             pkgs_to_install.appendAssumeCapacity(name);
     }
@@ -310,7 +343,7 @@ fn uninstallCommand(prog: *Program) !void {
 
     while (prog.args.next()) {
         if (prog.args.flag(&.{ "-h", "--help" }))
-            return prog.stdout.writeAll(uninstall_usage);
+            return prog.stdoutWriteAllLocked(uninstall_usage);
         if (prog.args.positional()) |name|
             pkgs_to_uninstall.appendAssumeCapacity(name);
     }
@@ -353,7 +386,7 @@ fn updateCommand(prog: *Program) !void {
         if (prog.args.flag(&.{ "-f", "--force" }))
             force_update = true;
         if (prog.args.flag(&.{ "-h", "--help" }))
-            return prog.stdout.writeAll(update_usage);
+            return prog.stdoutWriteAllLocked(update_usage);
         if (prog.args.positional()) |name|
             pkgs_to_update.appendAssumeCapacity(name);
     }
@@ -398,12 +431,12 @@ fn listCommand(prog: *Program) !void {
         if (prog.args.flag(&.{"installed"}))
             return prog.listInstalledCommand();
         if (prog.args.flag(&.{ "-h", "--help", "help" }))
-            return prog.stdout.writeAll(list_usage);
+            return prog.stdoutWriteAllLocked(list_usage);
         if (prog.args.positional()) |_|
             break;
     }
 
-    try prog.stderr.writeAll(list_usage);
+    try prog.stderrWriteAllLocked(list_usage);
     return error.InvalidArgument;
 }
 
@@ -421,15 +454,18 @@ const list_installed_usage =
 fn listInstalledCommand(prog: *Program) !void {
     while (prog.args.next()) {
         if (prog.args.flag(&.{ "-h", "--help" }))
-            return prog.stdout.writeAll(list_installed_usage);
+            return prog.stdoutWriteAllLocked(list_installed_usage);
         if (prog.args.positional()) |_| {
-            try prog.stderr.writeAll(list_installed_usage);
+            try prog.stderrWriteAllLocked(list_installed_usage);
             return error.InvalidArgument;
         }
     }
 
     var installed = try InstalledPackages.open(prog.gpa, prog.prefix());
     defer installed.deinit(prog.gpa);
+
+    prog.io_lock.lock();
+    defer prog.io_lock.unlock();
 
     var stdout_buffered = std.io.bufferedWriter(prog.stdout.writer());
     const writer = stdout_buffered.writer();
@@ -456,9 +492,9 @@ const list_all_usage =
 fn listAllCommand(prog: *Program) !void {
     while (prog.args.next()) {
         if (prog.args.flag(&.{ "-h", "--help" }))
-            return prog.stdout.writeAll(list_all_usage);
+            return prog.stdoutWriteAllLocked(list_all_usage);
         if (prog.args.positional()) |_| {
-            try prog.stderr.writeAll(list_all_usage);
+            try prog.stderrWriteAllLocked(list_all_usage);
             return error.InvalidArgument;
         }
     }
@@ -476,6 +512,9 @@ fn listAllCommand(prog: *Program) !void {
         .download = .only_if_required,
     });
     defer pkgs.deinit(prog.gpa);
+
+    prog.io_lock.lock();
+    defer prog.io_lock.unlock();
 
     var stdout_buffered = std.io.bufferedWriter(prog.stdout.writer());
     const writer = stdout_buffered.writer();
@@ -511,7 +550,7 @@ fn pkgsCommand(prog: *Program) !void {
     if (builtin.is_test) {
         // `pkgs` subcommand is disabled in tests because there are no ways to avoid downloads
         // running these commands.
-        try prog.stderr.writeAll(pkgs_usage);
+        try prog.stderrWriteAllLocked(pkgs_usage);
         return error.InvalidArgument;
     }
 
@@ -521,12 +560,12 @@ fn pkgsCommand(prog: *Program) !void {
         if (prog.args.flag(&.{"add"}))
             return prog.pkgsAddCommand();
         if (prog.args.flag(&.{ "-h", "--help", "help" }))
-            return prog.stdout.writeAll(pkgs_usage);
+            return prog.stdoutWriteAllLocked(pkgs_usage);
         if (prog.args.positional()) |_|
             break;
     }
 
-    try prog.stderr.writeAll(pkgs_usage);
+    try prog.stderrWriteAllLocked(pkgs_usage);
     return error.InvalidArgument;
 }
 
@@ -571,7 +610,7 @@ fn pkgsUpdateCommand(prog: *Program) !void {
         if (prog.args.flag(&.{ "-d", "--update-description" }))
             options.update_description = true;
         if (prog.args.flag(&.{ "-h", "--help" }))
-            return prog.stdout.writeAll(pkgs_update_usage);
+            return prog.stdoutWriteAllLocked(pkgs_update_usage);
         if (prog.args.positional()) |url|
             try pkgs_to_update.put(url, {});
     }
@@ -661,7 +700,7 @@ fn pkgsAddCommand(prog: *Program) !void {
         if (prog.args.flag(&.{ "-c", "--commit" }))
             options.commit = true;
         if (prog.args.flag(&.{ "-h", "--help" }))
-            return prog.stdout.writeAll(pkgs_add_usage);
+            return prog.stdoutWriteAllLocked(pkgs_add_usage);
         if (prog.args.positional()) |url|
             version = url;
     }

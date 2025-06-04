@@ -28,7 +28,7 @@ const DownloadOptions = struct {
     /// Successes and failures are reported to the diagnostics. Set this for more details
     /// about failures.
     diagnostics: *Diagnostics,
-    progress: *Progress,
+    progress: *Progress = &Progress.global,
 
     /// The prefix path where the package manager will work and install packages
     prefix: []const u8,
