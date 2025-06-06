@@ -38,6 +38,10 @@ pub fn main() !u8 {
     }) catch |err| switch (err) {
         Diagnostics.Error.DiagnosticsReported => return 1,
         else => |e| {
+            io_lock.lock();
+            defer io_lock.lock();
+
+            progress.cleanupTty(stderr) catch {};
             if (builtin.mode == .Debug)
                 return e;
 
@@ -109,6 +113,7 @@ pub fn mainFull(options: MainOptions) !void {
     prog.io_lock.lock();
     defer prog.io_lock.unlock();
 
+    try prog.progress.cleanupTty(prog.stderr);
     try diag.reportToFile(prog.stderr);
     if (diag.hasFailed())
         return Diagnostics.Error.DiagnosticsReported;
