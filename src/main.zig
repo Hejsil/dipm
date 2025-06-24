@@ -253,6 +253,7 @@ fn donateCommand(prog: *Program) !void {
         .gpa = prog.gpa,
         .http_client = &http_client,
         .diagnostics = prog.diag,
+        .progress = prog.progress,
         .prefix = prog.prefix(),
         .pkgs_uri = prog.pkgsUri(),
         .download = .only_if_required,
