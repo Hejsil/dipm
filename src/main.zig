@@ -39,7 +39,7 @@ pub fn main() !u8 {
         Diagnostics.Error.DiagnosticsReported => return 1,
         else => |e| {
             io_lock.lock();
-            defer io_lock.lock();
+            defer io_lock.unlock();
 
             progress.cleanupTty(stderr) catch {};
             if (builtin.mode == .Debug)
