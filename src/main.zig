@@ -198,7 +198,7 @@ options: struct {
     /// If set, this pkgs_uri will be used instead of `pkgs_uri`. Unlike `prefix` this options
     /// cannot be set by command line arguments.
     forced_pkgs_uri: ?[]const u8 = null,
-    pkgs_uri: []const u8 = "https://github.com/Hejsil/dipm-pkgs/raw/master/pkgs.ini",
+    pkgs_uri: []const u8 = "https://github.com/Hejsil/dipm-pkgs/raw/0.31.3/pkgs.ini",
 },
 
 fn prefix(prog: Program) []const u8 {
