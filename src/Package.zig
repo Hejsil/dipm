@@ -214,7 +214,10 @@ pub fn fromGithub(args: struct {
     const name = args.name orelse args.repo.name;
     const version = versionFromTag(latest_release.tag_name);
 
-    var download_urls = std.ArrayList([]const u8).init(tmp_arena);
+    var download_urls: std.MultiArrayList(struct {
+        url: []const u8,
+        digest: []const u8 = "",
+    }) = .empty;
     if (args.download_uri) |download_uri| {
         var content = std.ArrayList(u8).init(tmp_arena);
         const pkg_download_result = try download.download(content.writer(), .{
@@ -227,14 +230,17 @@ pub fn fromGithub(args: struct {
 
         var it = UrlsIterator.init(content.items);
         while (it.next()) |download_url|
-            try download_urls.append(download_url);
+            try download_urls.append(tmp_arena, .{ .url = download_url });
     } else {
-        try download_urls.ensureTotalCapacity(latest_release.assets.len);
+        try download_urls.ensureTotalCapacity(tmp_arena, latest_release.assets.len);
         for (latest_release.assets) |asset|
-            download_urls.appendAssumeCapacity(asset.browser_download_url);
+            download_urls.appendAssumeCapacity(.{
+                .url = asset.browser_download_url,
+                .digest = asset.digest,
+            });
     }
 
-    const download_url = try findDownloadUrl(.{
+    const download_url_idx = try findDownloadUrlIndex(.{
         .target = args.target,
         .extra_strs = &.{
             name,
@@ -247,9 +253,9 @@ pub fn fromGithub(args: struct {
             try std.fmt.allocPrint(tmp_arena, "{s}-{s}", .{ name, latest_release.tag_name }),
             try std.fmt.allocPrint(tmp_arena, "{s}_{s}", .{ name, latest_release.tag_name }),
         },
-        // This is only save because `assets` only have the field `browser_download_url`
-        .urls = download_urls.items,
+        .urls = download_urls.items(.url),
     });
+    const download_url = download_urls.get(download_url_idx);
 
     var global_tmp_dir = try std.fs.cwd().makeOpenPath("/tmp/dipm/", .{});
     defer global_tmp_dir.close();
@@ -257,13 +263,13 @@ pub fn fromGithub(args: struct {
     var tmp_dir = try fs.tmpDir(global_tmp_dir, .{ .iterate = true });
     defer tmp_dir.deleteAndClose();
 
-    const downloaded_file_name = std.fs.path.basename(download_url);
+    const downloaded_file_name = std.fs.path.basename(download_url.url);
     const downloaded_file = try tmp_dir.dir.createFile(downloaded_file_name, .{ .read = true });
     defer downloaded_file.close();
 
     const pkg_download_result = try download.download(downloaded_file.writer(), .{
         .client = args.http_client,
-        .uri_str = download_url,
+        .uri_str = download_url.url,
         .progress = args.progress,
     });
     if (pkg_download_result.status != .ok)
@@ -298,6 +304,12 @@ pub fn fromGithub(args: struct {
         args.repo.user,
         args.repo.name,
     });
+    if (std.mem.startsWith(u8, download_url.digest, "sha256:") and
+        !std.mem.endsWith(u8, download_url.digest, &hash))
+    {
+        return error.InvalidHash;
+    }
+
     return .{
         .name = try args.strs.putStr(args.gpa, name),
         .pkg = .{
@@ -311,7 +323,7 @@ pub fn fromGithub(args: struct {
                 .download = if (args.download_uri) |d| .some(try args.strs.putStr(args.gpa, d)) else .null,
             },
             .linux_x86_64 = .{
-                .url = try args.strs.putStr(args.gpa, download_url),
+                .url = try args.strs.putStr(args.gpa, download_url.url),
                 .hash = try args.strs.putStr(args.gpa, &hash),
                 .install_bin = binaries,
                 .install_share = man_pages,
@@ -326,6 +338,7 @@ const github_funding_uri_prefix = "https://raw.githubusercontent.com/";
 const GithubLatestRelease = struct {
     tag_name: []const u8,
     assets: []const struct {
+        digest: []const u8 = "",
         browser_download_url: []const u8,
     },
 };
@@ -931,6 +944,7 @@ const testing_static_arm_binary = [_]u8{
 fn testFromGithub(options: struct {
     /// Name of the package. `null` means it should be inferred
     name: ?[]const u8 = null,
+    digest: ?[]const u8 = null,
     description: []const u8,
     repo: GithubRepo,
     tag_name: []const u8,
@@ -979,21 +993,24 @@ fn testFromGithub(options: struct {
     });
     try cwd.writeFile(.{
         .sub_path = latest_release_file_path,
-        .data = try std.fmt.allocPrint(arena,
-            \\{{
-            \\  "tag_name": "{s}",
-            \\  "assets": [
-            \\    {{"browser_download_url": "{s}"}}
-            \\  ]
-            \\}}
-            \\
-        , .{ options.tag_name, static_binary_uri }),
+        .data = blk: {
+            var out = std.ArrayList(u8).init(arena);
+            try out.appendSlice("{\"tag_name\": \"");
+            try out.appendSlice(options.tag_name);
+            try out.appendSlice("\",\"assets\": [{");
+            if (options.digest) |digest| {
+                try out.appendSlice("\"digest\": \"");
+                try out.appendSlice(digest);
+                try out.appendSlice("\",");
+            }
+            try out.appendSlice("\"browser_download_url\": \"");
+            try out.appendSlice(static_binary_uri);
+            try out.appendSlice("\"}]}");
+            break :blk out.items;
+        },
     });
 
-    const download_file_path = try std.fs.path.join(arena, &.{
-        tmp_dir_path,
-        "index",
-    });
+    const download_file_path = try std.fs.path.join(arena, &.{ tmp_dir_path, "index" });
     const download_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{download_file_path});
     try cwd.writeFile(.{
         .sub_path = download_file_path,
@@ -1003,10 +1020,7 @@ fn testFromGithub(options: struct {
         , .{static_binary_uri}),
     });
 
-    const funding_file_path = try std.fs.path.join(arena, &.{
-        tmp_dir_path,
-        "FUNDING.yml",
-    });
+    const funding_file_path = try std.fs.path.join(arena, &.{ tmp_dir_path, "FUNDING.yml" });
     const funding_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{
         funding_file_path,
     });
@@ -1106,6 +1120,7 @@ test fromGithub {
     });
     try testFromGithub(.{
         .description = "Where in we pursue oxidizing (context: https://github.com/googlefonts/oxidize) fontmake.",
+        .digest = "sha256:86e9fa65b9f0f0f6949ac09c6692d78db54443bf9a69cc8ba366c5ab281b26cf",
         .repo = .{ .user = "googlefonts", .name = "fontc" },
         .tag_name = "fontc-v0.0.1",
         .target = .{ .os = .linux, .arch = .x86_64 },
@@ -1126,6 +1141,14 @@ test fromGithub {
         \\
         ,
     });
+    try std.testing.expectError(error.InvalidHash, testFromGithub(.{
+        .description = "Where in we pursue oxidizing (context: https://github.com/googlefonts/oxidize) fontmake.",
+        .digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        .repo = .{ .user = "googlefonts", .name = "fontc" },
+        .tag_name = "fontc-v0.0.1",
+        .target = .{ .os = .linux, .arch = .x86_64 },
+        .expect = "",
+    }));
 }
 
 fn findStaticallyLinkedBinaries(args: struct {
@@ -1373,11 +1396,18 @@ test findManPages {
     });
 }
 
-fn findDownloadUrl(options: struct {
+const FindDownloadUrlOptions = struct {
     target: Target,
     extra_strs: []const []const u8 = &.{},
     urls: []const []const u8,
-}) ![]const u8 {
+};
+
+fn findDownloadUrl(options: FindDownloadUrlOptions) ![]const u8 {
+    const idx = try findDownloadUrlIndex(options);
+    return options.urls[idx];
+}
+
+fn findDownloadUrlIndex(options: FindDownloadUrlOptions) !usize {
     if (options.urls.len == 0)
         return error.DownloadUrlNotFound;
 
@@ -1493,7 +1523,7 @@ fn findDownloadUrl(options: struct {
         }
     }
 
-    return options.urls[best_index];
+    return best_index;
 }
 
 test findDownloadUrl {
