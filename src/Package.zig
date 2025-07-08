@@ -287,6 +287,11 @@ pub fn fromGithub(args: struct {
         .output_dir = tmp_dir.dir,
     });
 
+    const shares = try findShare(.{
+        .gpa = args.gpa,
+        .strs = args.strs,
+        .dir = tmp_dir.dir,
+    });
     const man_pages = try findManPages(.{
         .gpa = args.gpa,
         .strs = args.strs,
@@ -326,7 +331,7 @@ pub fn fromGithub(args: struct {
                 .url = try args.strs.putStr(args.gpa, download_url.url),
                 .hash = try args.strs.putStr(args.gpa, &hash),
                 .install_bin = binaries,
-                .install_share = man_pages,
+                .install_share = try args.strs.concatIndices(args.gpa, &.{ shares, man_pages }),
             },
         },
     };
@@ -1254,6 +1259,105 @@ test findStaticallyLinkedBinaries {
         .expected = &.{
             "binary_arm",
             "subdir/binary_arm",
+        },
+    });
+}
+
+fn findShare(args: struct {
+    gpa: std.mem.Allocator,
+    strs: *Strings,
+    dir: std.fs.Dir,
+}) !Strings.Indices {
+    var walker = try args.dir.walk(args.gpa);
+    defer walker.deinit();
+
+    const off = args.strs.putIndicesBegin();
+    while (try walker.next()) |entry| {
+        if (entry.kind != .directory)
+            continue;
+        if (!std.mem.eql(u8, entry.basename, "share"))
+            continue;
+
+        var dir = try args.dir.openDir(entry.path, .{ .iterate = true });
+        var it = dir.iterate();
+        while (try it.next()) |share_dir_entry| {
+            // Some of the folders we don't want to install
+            if (std.mem.eql(u8, share_dir_entry.name, "man"))
+                continue;
+            if (std.mem.eql(u8, share_dir_entry.name, "doc"))
+                continue;
+            if (std.mem.eql(u8, share_dir_entry.name, "applications"))
+                continue;
+            if (std.mem.indexOf(u8, share_dir_entry.name, "completion") != null)
+                continue;
+
+            const path = try args.strs.print(args.gpa, "{s}/{s}", .{ entry.path, share_dir_entry.name });
+            _ = try args.strs.putIndices(args.gpa, &.{path});
+        }
+        break;
+    }
+
+    const res = args.strs.putIndicesEnd(off);
+
+    const SortContext = struct {
+        strs: *Strings,
+
+        fn lessThan(ctx: @This(), a: Strings.Index, b: Strings.Index) bool {
+            return std.mem.lessThan(u8, a.get(ctx.strs.*), b.get(ctx.strs.*));
+        }
+    };
+    std.mem.sort(
+        Strings.Index,
+        res.get(args.strs.*),
+        SortContext{ .strs = args.strs },
+        SortContext.lessThan,
+    );
+
+    return res;
+}
+
+fn testFindShare(options: struct {
+    files: []const std.fs.Dir.WriteFileOptions,
+    expected: []const []const u8,
+}) !void {
+    var tmp_dir = try fs.zigCacheTmpDir(.{ .iterate = true });
+    defer tmp_dir.deleteAndClose();
+
+    for (options.files) |file_options| {
+        try tmp_dir.dir.makePath(std.fs.path.dirname(file_options.sub_path) orelse ".");
+        try tmp_dir.dir.writeFile(file_options);
+    }
+
+    const gpa = std.testing.allocator;
+    var strs = Strings.empty;
+    defer strs.deinit(gpa);
+
+    const result = try findShare(.{
+        .gpa = gpa,
+        .strs = &strs,
+        .dir = tmp_dir.dir,
+    });
+
+    const len = @min(options.expected.len, result.len);
+    for (options.expected[0..len], result.get(strs)[0..len]) |expected, actual|
+        try std.testing.expectEqualStrings(expected, actual.get(strs));
+    try std.testing.expectEqual(options.expected.len, result.len);
+}
+
+test findShare {
+    try testFindShare(.{
+        .files = &.{
+            .{ .sub_path = "bin/bin", .data = "" },
+            .{ .sub_path = "libexec/bin", .data = "" },
+            .{ .sub_path = "share/a/test.txt", .data = "" },
+            .{ .sub_path = "share/b/test.txt", .data = "" },
+            .{ .sub_path = "share/bash-completion/test.txt", .data = "" },
+            .{ .sub_path = "share/doc/test.txt", .data = "" },
+            .{ .sub_path = "share/man/test.txt", .data = "" },
+        },
+        .expected = &.{
+            "share/a",
+            "share/b",
         },
     });
 }
