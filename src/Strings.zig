@@ -179,6 +179,40 @@ test putIndices {
     try std.testing.expectEqualStrings("b", strings.getStr(indices_slice[1]));
 }
 
+pub fn concatIndices(strings: *Strings, gpa: std.mem.Allocator, indices: []const Indices) !Indices {
+    strings.pointer_stability.lock();
+    defer strings.pointer_stability.unlock();
+
+    var num: usize = 0;
+    for (indices) |i|
+        num += i.len;
+
+    const off = strings.putIndicesBegin();
+    try strings.indices.ensureUnusedCapacity(gpa, num);
+    for (indices) |i| {
+        strings.indices.appendSliceAssumeCapacity(i.get(strings.*));
+    }
+    return strings.putIndicesEnd(off);
+}
+
+test concatIndices {
+    const gpa = std.testing.allocator;
+    var strings = Strings.empty;
+    defer strings.deinit(gpa);
+
+    const as = try strings.putStrs(gpa, &.{ "a", "aa", "aaa" });
+    const bs = try strings.putStrs(gpa, &.{ "b", "bb", "bbb" });
+    const both = try strings.concatIndices(gpa, &.{ as, bs });
+    const both_slice = both.get(strings);
+    try std.testing.expectEqual(@as(usize, 6), both_slice.len);
+    try std.testing.expectEqualStrings("a", strings.getStr(both_slice[0]));
+    try std.testing.expectEqualStrings("aa", strings.getStr(both_slice[1]));
+    try std.testing.expectEqualStrings("aaa", strings.getStr(both_slice[2]));
+    try std.testing.expectEqualStrings("b", strings.getStr(both_slice[3]));
+    try std.testing.expectEqualStrings("bb", strings.getStr(both_slice[4]));
+    try std.testing.expectEqualStrings("bbb", strings.getStr(both_slice[5]));
+}
+
 pub fn putIndicesBegin(strings: *Strings) u32 {
     return @intCast(strings.indices.items.len);
 }
