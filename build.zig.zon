@@ -1,7 +1,7 @@
 .{
     .name = .dipm,
     .version = "0.31.3",
-    .minimum_zig_version = "0.15.0-dev.375+8f8f37fb0",
+    .minimum_zig_version = "0.15.0-dev.921+97ecb6c55",
     .fingerprint = 0xce3a2bf46fc8eacf,
     .dependencies = .{},
     .paths = .{
