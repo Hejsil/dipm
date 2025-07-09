@@ -236,7 +236,7 @@ pub fn fromGithub(args: struct {
         for (latest_release.assets) |asset|
             download_urls.appendAssumeCapacity(.{
                 .url = asset.browser_download_url,
-                .digest = asset.digest,
+                .digest = asset.digest orelse "",
             });
     }
 
@@ -343,7 +343,7 @@ const github_funding_uri_prefix = "https://raw.githubusercontent.com/";
 const GithubLatestRelease = struct {
     tag_name: []const u8,
     assets: []const struct {
-        digest: []const u8 = "",
+        digest: ?[]const u8 = null,
         browser_download_url: []const u8,
     },
 };
