@@ -607,6 +607,8 @@ fn updateInstall(pkgs: *Packages, gpa: std.mem.Allocator, options: struct {
     defer arena_state.deinit();
 
     const off = pkgs.strs.putIndicesBegin();
+    try pkgs.strs.indices.ensureUnusedCapacity(gpa, options.new_installs.len);
+
     outer: for (options.new_installs.get(pkgs.strs)) |new_install_idx| {
         const new_install = Package.Install.fromString(new_install_idx.get(pkgs.strs));
 
@@ -616,7 +618,7 @@ fn updateInstall(pkgs: *Packages, gpa: std.mem.Allocator, options: struct {
                 // Old and new installs the same file. This happens when the path changes, but
                 // the file name stays the same:
                 //   test-0.1.0/test, test-0.2.0/test -> test-0.2.0/test
-                try pkgs.strs.indices.append(gpa, new_install_idx);
+                pkgs.strs.indices.appendAssumeCapacity(new_install_idx);
                 continue :outer;
             }
 
@@ -636,13 +638,13 @@ fn updateInstall(pkgs: *Packages, gpa: std.mem.Allocator, options: struct {
                     old_install_replaced.to,
                     new_install.from,
                 });
-                try pkgs.strs.indices.append(gpa, install);
+                pkgs.strs.indices.appendAssumeCapacity(install);
                 continue :outer;
             }
         }
 
         // Seems like this new install does not match any of the old installs. Just add it.
-        try pkgs.strs.indices.append(gpa, new_install_idx);
+        pkgs.strs.indices.appendAssumeCapacity(new_install_idx);
     }
 
     return pkgs.strs.putIndicesEnd(off);
