@@ -6,64 +6,70 @@ pub fn main() !u8 {
     const args = std.process.argsAlloc(gpa) catch @panic("OOM");
     defer std.process.argsFree(gpa, args);
 
-    const progress = &Progress.global;
-    const stderr = std.io.getStdErr();
     var io_lock = std.Thread.Mutex{};
+    const progress = &Progress.global;
+
+    var stdout_buf: [std.heap.page_size_min]u8 = undefined;
+    var stderr_buf: [std.heap.page_size_min]u8 = undefined;
+    var stdout = std.fs.File.stdout().writer(&stdout_buf);
+    var stderr = std.fs.File.stderr().writer(&stderr_buf);
 
     // We don't really care to store the thread. Just let the os clean it up
-    if (stderr.supportsAnsiEscapeCodes()) blk: {
+    if (stderr.file.supportsAnsiEscapeCodes()) blk: {
         const thread = std.Thread.spawn(.{}, renderThread, .{
-            stderr,
+            &stderr,
             progress,
             &io_lock,
         }) catch |err| {
-            std.log.warn("failed to spawn rendering thread: {}", .{err});
+            try stderr.interface.print("failed to spawn rendering thread: {}\n", .{err});
             break :blk;
         };
         thread.detach();
     }
 
-    defer {
-        io_lock.lock();
-        progress.cleanupTty(stderr) catch {};
-    }
-
-    mainFull(.{
+    const main_res = mainFull(.{
         .gpa = gpa,
         .args = args[1..],
         .io_lock = &io_lock,
-        .stderr = stderr,
-        .stdout = std.io.getStdOut(),
+        .stdout = &stdout,
+        .stderr = &stderr,
         .progress = progress,
-    }) catch |err| switch (err) {
-        Diagnostics.Error.DiagnosticsReported => return 1,
-        else => |e| {
+    });
+
+    const res: anyerror!u8 = if (main_res) 0 else |err| switch (err) {
+        Diagnostics.Error.DiagnosticsReported => 1,
+        else => |e| blk: {
             io_lock.lock();
             defer io_lock.unlock();
 
-            progress.cleanupTty(stderr) catch {};
+            try progress.cleanupTty(&stderr);
             if (builtin.mode == .Debug)
-                return e;
+                break :blk e;
 
-            std.log.err("{s}", .{@errorName(e)});
-            return 1;
+            try stderr.interface.print("{s}\n", .{@errorName(e)});
+            break :blk 1;
         },
     };
 
-    return 0;
+    io_lock.lock();
+    try progress.cleanupTty(&stderr);
+    try stdout.end();
+    try stderr.end();
+    return res;
 }
 
-fn renderThread(stderr: std.fs.File, progress: *Progress, io_lock: *std.Thread.Mutex) void {
+fn renderThread(stderr: *std.fs.File.Writer, progress: *Progress, io_lock: *std.Thread.Mutex) void {
     const fps = 15;
     const delay = std.time.ns_per_s / fps;
     const initial_delay = std.time.ns_per_s / 4;
 
-    std.time.sleep(initial_delay);
+    std.Thread.sleep(initial_delay);
     while (true) {
         io_lock.lock();
         progress.renderToTty(stderr) catch {};
+        stderr.interface.flush() catch {};
         io_lock.unlock();
-        std.time.sleep(delay);
+        std.Thread.sleep(delay);
     }
 }
 
@@ -72,8 +78,8 @@ pub const MainOptions = struct {
     args: []const []const u8,
 
     io_lock: *std.Thread.Mutex,
-    stdout: std.fs.File,
-    stderr: std.fs.File,
+    stdout: *std.fs.File.Writer,
+    stderr: *std.fs.File.Writer,
 
     forced_prefix: ?[]const u8 = null,
     forced_pkgs_uri: ?[]const u8 = null,
@@ -115,6 +121,7 @@ pub fn mainFull(options: MainOptions) !void {
 
     try prog.progress.cleanupTty(prog.stderr);
     try diag.reportToFile(prog.stderr);
+    try prog.stderr.end();
     if (diag.hasFailed())
         return Diagnostics.Error.DiagnosticsReported;
 
@@ -186,8 +193,8 @@ progress: *Progress,
 
 // Ensures that only one thread can write to stdout/stderr at a time
 io_lock: *std.Thread.Mutex,
-stdout: std.fs.File,
-stderr: std.fs.File,
+stdout: *std.fs.File.Writer,
+stderr: *std.fs.File.Writer,
 
 args: ArgParser,
 options: struct {
@@ -213,14 +220,14 @@ fn stdoutWriteAllLocked(prog: Program, str: []const u8) !void {
     prog.io_lock.lock();
     defer prog.io_lock.unlock();
 
-    return prog.stdout.writeAll(str);
+    return prog.stdout.interface.writeAll(str);
 }
 
 fn stderrWriteAllLocked(prog: Program, str: []const u8) !void {
     prog.io_lock.lock();
     defer prog.io_lock.unlock();
 
-    return prog.stderr.writeAll(str);
+    return prog.stderr.interface.writeAll(str);
 }
 
 const donate_usage =
@@ -308,8 +315,8 @@ const install_usage =
 ;
 
 fn installCommand(prog: *Program) !void {
-    var pkgs_to_install = std.ArrayList([]const u8).init(prog.arena);
-    try pkgs_to_install.ensureTotalCapacity(prog.args.args.len);
+    var pkgs_to_install = std.ArrayList([]const u8){};
+    try pkgs_to_install.ensureTotalCapacity(prog.arena, prog.args.args.len);
 
     while (prog.args.next()) {
         if (prog.args.flag(&.{ "-h", "--help" }))
@@ -344,8 +351,8 @@ const uninstall_usage =
 ;
 
 fn uninstallCommand(prog: *Program) !void {
-    var pkgs_to_uninstall = std.ArrayList([]const u8).init(prog.arena);
-    try pkgs_to_uninstall.ensureTotalCapacity(prog.args.args.len);
+    var pkgs_to_uninstall = std.ArrayList([]const u8){};
+    try pkgs_to_uninstall.ensureTotalCapacity(prog.arena, prog.args.args.len);
 
     while (prog.args.next()) {
         if (prog.args.flag(&.{ "-h", "--help" }))
@@ -385,8 +392,8 @@ const update_usage =
 
 fn updateCommand(prog: *Program) !void {
     var force_update = false;
-    var pkgs_to_update = std.ArrayList([]const u8).init(prog.arena);
-    try pkgs_to_update.ensureTotalCapacity(prog.args.args.len);
+    var pkgs_to_update = std.ArrayList([]const u8){};
+    try pkgs_to_update.ensureTotalCapacity(prog.arena, prog.args.args.len);
 
     while (prog.args.next()) {
         if (prog.args.flag(&.{ "-f", "--force" }))
@@ -473,15 +480,11 @@ fn listInstalledCommand(prog: *Program) !void {
     prog.io_lock.lock();
     defer prog.io_lock.unlock();
 
-    var stdout_buffered = std.io.bufferedWriter(prog.stdout.writer());
-    const writer = stdout_buffered.writer();
-
     for (installed.by_name.keys(), installed.by_name.values()) |name, pkg|
-        try writer.print("{s}\t{s}\n", .{
+        try prog.stdout.interface.print("{s}\t{s}\n", .{
             name.get(installed.strs),
             pkg.version.get(installed.strs),
         });
-    try stdout_buffered.flush();
 }
 
 const list_all_usage =
@@ -522,17 +525,12 @@ fn listAllCommand(prog: *Program) !void {
     prog.io_lock.lock();
     defer prog.io_lock.unlock();
 
-    var stdout_buffered = std.io.bufferedWriter(prog.stdout.writer());
-    const writer = stdout_buffered.writer();
-
     for (pkgs.by_name.keys(), pkgs.by_name.values()) |pkg_name, pkg| {
-        try writer.print("{s}\t{s}\n", .{
+        try prog.stdout.interface.print("{s}\t{s}\n", .{
             pkg_name.get(pkgs.strs),
             pkg.info.version.get(pkgs.strs),
         });
     }
-
-    try stdout_buffered.flush();
 }
 
 const pkgs_usage =
@@ -771,7 +769,7 @@ fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !vo
     });
 
     pkgs.sort();
-    try pkgs.writeToFileOverride(pkgs_ini_file);
+    try pkgs.writeToFile(pkgs_ini_file);
     try pkgs_ini_file.sync();
     if (options.commit) {
         const msg = try git.createCommitMessage(prog.arena, &pkgs, pkg, old_pkg, .{

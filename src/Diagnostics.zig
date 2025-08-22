@@ -67,23 +67,20 @@ pub fn deinit(diag: *Diagnostics) void {
     diag.* = undefined;
 }
 
-pub fn reportToFile(diag: *Diagnostics, file: std.fs.File) !void {
-    var buffered = std.io.bufferedWriter(file.writer());
-
-    const is_tty = file.supportsAnsiEscapeCodes();
+pub fn reportToFile(diag: *Diagnostics, writer: *std.fs.File.Writer) !void {
+    const is_tty = writer.file.supportsAnsiEscapeCodes();
     const escapes = if (is_tty) Escapes.ansi else Escapes.none;
-    try diag.report(buffered.writer(), .{
+
+    try diag.report(&writer.interface, .{
         .escapes = escapes,
     });
-
-    try buffered.flush();
 }
 
 pub const ReportOptions = struct {
     escapes: Escapes = Escapes.none,
 };
 
-pub fn report(diag: *Diagnostics, writer: anytype, opt: ReportOptions) !void {
+pub fn report(diag: *Diagnostics, writer: *std.io.Writer, opt: ReportOptions) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
 
@@ -216,7 +213,7 @@ pub fn genericError(diag: *Diagnostics, failure: GenericError) !void {
 pub const PackageAlreadyInstalled = struct {
     name: Strings.Index,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -229,7 +226,7 @@ pub const PackageAlreadyInstalled = struct {
 pub const PackageNotInstalled = struct {
     name: Strings.Index,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -242,7 +239,7 @@ pub const PackageNotInstalled = struct {
 pub const PackageNotFound = struct {
     name: Strings.Index,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -257,7 +254,7 @@ pub const PackageDonate = struct {
     version: Strings.Index,
     donate: Strings.Index,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s} {s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -272,7 +269,7 @@ pub const PackageInstall = struct {
     name: Strings.Index,
     version: Strings.Index,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s} {s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -286,7 +283,7 @@ pub const PackageUninstall = struct {
     name: Strings.Index,
     version: Strings.Index,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s} {s} -> ✗{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -300,7 +297,7 @@ pub const PackageUpToDate = struct {
     name: Strings.Index,
     version: Strings.Index,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s} {s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -316,7 +313,7 @@ pub const PackageFromTo = struct {
     from_version: Strings.Index,
     to_version: Strings.Index,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s} {s} -> {s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -331,7 +328,7 @@ pub const PackageError = struct {
     name: Strings.Index,
     err: anyerror,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -345,7 +342,7 @@ pub const PackageTarget = struct {
     name: Strings.Index,
     target: Target,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -364,7 +361,7 @@ pub const HashMismatch = struct {
     expected_hash: Strings.Index,
     actual_hash: Strings.Index,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s} {s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -383,7 +380,7 @@ pub const DownloadFailed = struct {
     url: Strings.Index,
     err: anyerror,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s} {s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -402,7 +399,7 @@ pub const DownloadFailedWithStatus = struct {
     url: Strings.Index,
     status: std.http.Status,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s} {s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -422,7 +419,7 @@ pub const PathAlreadyExists = struct {
     name: Strings.Index,
     path: Strings.Index,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
             this.name.get(strs),
@@ -437,7 +434,7 @@ pub const GenericError = struct {
     msg: Strings.Index,
     err: anyerror,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: anytype) !void {
+    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.io.Writer) !void {
         try writer.print("{s}{s}{s}\n", .{
             esc.bold,
             this.id.get(strs),

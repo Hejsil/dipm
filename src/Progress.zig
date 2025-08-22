@@ -24,75 +24,92 @@ pub const Node = enum(usize) {
     pub fn advance(node: Node, amount: u32) void {
         const state = node.unwrap() orelse return;
         state.lock.lock();
-        state.inner.curr += amount;
+        state.inner.curr +|= amount;
         state.lock.unlock();
     }
 
-    pub fn setMax(node: Node, max: u32) void {
+    pub fn set(node: Node, fields: struct {
+        name: ?[]const u8 = null,
+        curr: ?u32 = null,
+        max: ?u32 = null,
+    }) void {
         const state = node.unwrap() orelse return;
         state.lock.lock();
-        state.inner.max = max;
+        if (fields.name) |name|
+            state.inner.name = name;
+        if (fields.max) |max|
+            state.inner.max = max;
+        if (fields.curr) |curr|
+            state.inner.curr = curr;
         state.lock.unlock();
     }
 
-    pub fn setCurr(node: Node, curr: u32) void {
-        const state = node.unwrap() orelse return;
-        state.lock.lock();
-        state.inner.curr = curr;
-        state.lock.unlock();
+    // Wraps a file reader to provide progress
+    pub fn fileReader(node: Node, file: std.fs.File, buffer: []u8) Reader {
+        return .init(node, file.reader(buffer));
     }
 
-    pub fn writer(node: Node, child_writer: anytype) Writer(@TypeOf(child_writer)) {
-        return .{ .child = child_writer, .node = node };
-    }
+    pub const Reader = struct {
+        // Instead of implementing `Reader` and handling buffering ourself, override the
+        // `std.fs.File.Reader` vtable with wrappers that call the original vtable and then
+        // updates the node progress afterwards.
+        file: std.fs.File.Reader,
+        file_vtable: *const std.io.Reader.VTable,
+        node: Node,
 
-    pub fn Writer(comptime Child: type) type {
-        return struct {
-            child: Child,
-            node: Node,
-
-            pub const Error = Child.Error;
-            pub const Writer = std.io.Writer(*Self, Error, write);
-
-            const Self = @This();
-
-            pub fn writer(self: *Self) @This().Writer {
-                return .{ .context = self };
-            }
-
-            pub fn write(self: *Self, bytes: []const u8) Error!usize {
-                const res = try self.child.write(bytes);
-                self.node.advance(@min(res, std.math.maxInt(u32)));
-                return res;
-            }
+        const vtable = std.io.Reader.VTable{
+            .stream = stream,
+            .discard = discard,
+            .readVec = readVec,
         };
-    }
 
-    pub fn reader(node: Node, child_reader: anytype) Reader(@TypeOf(child_reader)) {
-        return .{ .child = child_reader, .node = node };
-    }
+        pub fn init(node: Node, file: std.fs.File.Reader) Reader {
+            var res = Reader{
+                .file = file,
+                .file_vtable = file.interface.vtable,
+                .node = node,
+            };
+            res.file.interface.vtable = &vtable;
+            res.node.set(.{
+                .curr = 0,
+                .max = if (res.file.getSize()) |s| @truncate(s) else |_| 0,
+            });
+            return res;
+        }
 
-    pub fn Reader(comptime Child: type) type {
-        return struct {
-            child: Child,
-            node: Node,
+        fn stream(io_reader: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) !usize {
+            const file_r: *std.fs.File.Reader = @alignCast(@fieldParentPtr("interface", io_reader));
+            const r: *Reader = @alignCast(@fieldParentPtr("file", file_r));
 
-            pub const Error = Child.Error;
-            pub const Reader = std.io.Reader(*Self, Error, read);
+            const res = try r.file_vtable.stream(io_reader, w, limit);
+            r.updateNode();
+            return res;
+        }
 
-            const Self = @This();
+        fn discard(io_reader: *std.Io.Reader, limit: std.Io.Limit) !usize {
+            const file_r: *std.fs.File.Reader = @alignCast(@fieldParentPtr("interface", io_reader));
+            const r: *Reader = @alignCast(@fieldParentPtr("file", file_r));
 
-            pub fn reader(self: *Self) Self.Reader {
-                return .{ .context = self };
-            }
+            const res = try r.file_vtable.discard(io_reader, limit);
+            r.updateNode();
+            return res;
+        }
 
-            pub fn read(self: *Self, buf: []u8) Error!usize {
-                const res = try self.child.read(buf);
-                self.node.advance(@min(res, std.math.maxInt(u32)));
-                return res;
-            }
-        };
-    }
+        fn readVec(io_reader: *std.Io.Reader, data: [][]u8) !usize {
+            const file_r: *std.fs.File.Reader = @alignCast(@fieldParentPtr("interface", io_reader));
+            const r: *Reader = @alignCast(@fieldParentPtr("file", file_r));
+
+            const res = try r.file_vtable.readVec(io_reader, data);
+            r.updateNode();
+            return res;
+        }
+
+        fn updateNode(r: *Reader) void {
+            const curr: u32 = @truncate(r.file.pos);
+            const max: u32 = @truncate(r.file.size orelse 0);
+            r.node.set(.{ .curr = curr, .max = max });
+        }
+    };
 };
 
 const NodeState = struct {
@@ -155,7 +172,7 @@ const finish_sync = "\x1b[?2026l";
 const start_sync = "\x1b[?2026h";
 const up_one_line = "\x1bM";
 
-pub fn renderToTty(progress: Progress, tty: std.fs.File) !void {
+pub fn renderToTty(progress: Progress, tty: *std.fs.File.Writer) !void {
     var winsize: std.posix.winsize = .{
         .row = 0,
         .col = 0,
@@ -163,7 +180,7 @@ pub fn renderToTty(progress: Progress, tty: std.fs.File) !void {
         .ypixel = 0,
     };
 
-    const err = std.posix.system.ioctl(tty.handle, std.posix.T.IOCGWINSZ, @intFromPtr(&winsize));
+    const err = std.posix.system.ioctl(tty.file.handle, std.posix.T.IOCGWINSZ, @intFromPtr(&winsize));
     if (std.posix.errno(err) != .SUCCESS)
         return;
 
@@ -172,30 +189,26 @@ pub fn renderToTty(progress: Progress, tty: std.fs.File) !void {
     // one more to account for the PS1
     const height = winsize.row -| 2;
 
-    var buffered_tty = std.io.bufferedWriter(tty.writer());
-    const writer = buffered_tty.writer();
-
-    try writer.writeAll(start_sync ++ clear);
-    const nodes_printed = try progress.render(writer, .{
+    try tty.interface.writeAll(start_sync ++ clear);
+    const nodes_printed = try progress.render(&tty.interface, .{
         .width = winsize.col,
         .height = height,
         .escapes = Escapes.ansi,
     });
 
     if (nodes_printed != 0) {
-        try writer.writeAll("\r");
-        try writer.writeBytesNTimes(up_one_line, nodes_printed);
+        try tty.interface.writeAll("\r");
+        try tty.interface.splatBytesAll(up_one_line, nodes_printed);
     }
 
-    try writer.writeAll(finish_sync);
-    return buffered_tty.flush();
+    try tty.interface.writeAll(finish_sync);
 }
 
-pub fn cleanupTty(progress: Progress, tty: std.fs.File) !void {
+pub fn cleanupTty(progress: Progress, tty: *std.fs.File.Writer) !void {
     _ = progress;
 
-    if (tty.supportsAnsiEscapeCodes())
-        try tty.writeAll(clear);
+    if (tty.file.supportsAnsiEscapeCodes())
+        try tty.interface.writeAll(clear);
 }
 
 pub const RenderOptions = struct {
@@ -204,7 +217,7 @@ pub const RenderOptions = struct {
     escapes: Escapes = Escapes.none,
 };
 
-pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usize {
+pub fn render(progress: Progress, writer: *std.io.Writer, options: RenderOptions) !usize {
     try writer.writeAll(options.escapes.bold);
 
     var nodes_printed: usize = 0;
@@ -217,16 +230,13 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
 
         nodes_printed += 1;
 
-        const bar_start = " [";
-        const bar_end = "]";
-
         const node_name_len = std.unicode.utf8CountCodepoints(node_name) catch continue;
         const codepoints_to_write = @min(node_name_len, options.width, progress.maximum_node_name_len);
 
         if (node_name_len == codepoints_to_write) {
             try writer.writeAll(node_name);
         } else switch (codepoints_to_write) {
-            0...3 => try writer.writeByteNTimes('.', codepoints_to_write),
+            0...3 => try writer.splatByteAll('.', codepoints_to_write),
             else => {
                 const view = std.unicode.Utf8View.init(node_name) catch continue;
                 var it = view.iterator();
@@ -246,12 +256,13 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
             try writer.writeAll("\n");
             continue;
         }
+
         if (remaining_width >= 4) {
-            const curr: u64 = node.curr;
             const max: u64 = @max(1, node.max);
+            const curr: u64 = @min(node.curr, max);
             const percent = (curr * 100) / max;
 
-            try writer.writeByteNTimes(' ', progress.maximum_node_name_len - codepoints_to_write);
+            try writer.splatByteAll(' ', progress.maximum_node_name_len - codepoints_to_write);
             try writer.print(" {d:>3}", .{percent});
             remaining_width -= 4;
         }
@@ -259,6 +270,9 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
             try writer.writeAll("%");
             remaining_width -= 1;
         }
+
+        const bar_start = " [";
+        const bar_end = "]";
         if (remaining_width >= bar_start.len + bar_end.len + 1) {
             remaining_width -= bar_start.len + bar_end.len;
 
@@ -267,8 +281,8 @@ pub fn render(progress: Progress, writer: anytype, options: RenderOptions) !usiz
             const filled = (curr * remaining_width) / max;
 
             try writer.writeAll(bar_start);
-            try writer.writeByteNTimes('=', @min(filled, remaining_width));
-            try writer.writeByteNTimes(' ', remaining_width -| filled);
+            try writer.splatByteAll('=', @min(filled, remaining_width));
+            try writer.splatByteAll(' ', remaining_width -| filled);
             try writer.writeAll(bar_end);
         }
 
@@ -294,11 +308,11 @@ fn expectRender(
     for (progress.nodes[0..nodes.len], nodes) |*out, in|
         try std.testing.expect(out.acquire(in));
 
-    var actual = std.ArrayList(u8).init(std.testing.allocator);
+    var actual = std.io.Writer.Allocating.init(std.testing.allocator);
     defer actual.deinit();
 
-    _ = try progress.render(actual.writer(), render_options);
-    try std.testing.expectEqualStrings(expected, actual.items);
+    _ = try progress.render(&actual.writer, render_options);
+    try std.testing.expectEqualStrings(expected, actual.written());
 }
 
 test "render" {
@@ -467,7 +481,7 @@ test "render: no room for name" {
 
 test "render: max greater than curr" {
     try expectRender(
-        \\node 0  200% [==========]
+        \\node 0  100% [==========]
         \\
     ,
         &.{.{ .name = "node 0", .curr = 20, .max = 10 }},

@@ -65,7 +65,10 @@ pub fn download(options: DownloadOptions) !Packages {
         const download_node = options.progress.start("↓ pkgs.ini", 1);
         defer options.progress.end(download_node);
 
-        const result = try @import("download.zig").download(pkgs_file.writer(), .{
+        var pkgs_file_buf: [std.heap.page_size_min]u8 = undefined;
+        var pkgs_file_writer = pkgs_file.writer(&pkgs_file_buf);
+        const result = try @import("download.zig").download(.{
+            .writer = &pkgs_file_writer.interface,
             .client = options.http_client,
             .uri_str = options.pkgs_uri,
             .progress = download_node,
@@ -74,7 +77,7 @@ pub fn download(options: DownloadOptions) !Packages {
         if (result.status != .ok)
             return error.DownloadGotNoneOkStatusCode; // TODO: Diagnostics
 
-        try pkgs_file.setEndPos(try pkgs_file.getPos());
+        try pkgs_file_writer.end();
         try pkgs_file.seekTo(0);
     }
 
@@ -323,19 +326,14 @@ fn splitScalar2(string: []const u8, char: u8) [2][]const u8 {
     return .{ it.first(), it.rest() };
 }
 
-pub fn writeToFileOverride(pkgs: Packages, file: std.fs.File) !void {
-    try file.seekTo(0);
-    try pkgs.writeToFile(file);
-    try file.setEndPos(try file.getPos());
-}
-
 pub fn writeToFile(pkgs: Packages, file: std.fs.File) !void {
-    var buffered_writer = std.io.bufferedWriter(file.writer());
-    try pkgs.write(buffered_writer.writer());
-    try buffered_writer.flush();
+    var file_writer_buf: [std.heap.page_size_min]u8 = undefined;
+    var file_writer = file.writer(&file_writer_buf);
+    try pkgs.write(&file_writer.interface);
+    try file_writer.end();
 }
 
-pub fn write(pkgs: Packages, writer: anytype) !void {
+pub fn write(pkgs: Packages, writer: *std.io.Writer) !void {
     for (pkgs.by_name.keys(), pkgs.by_name.values(), 0..) |pkg_name, pkg, i| {
         if (i != 0) try writer.writeAll("\n");
         try pkg.write(pkgs.strs, pkg_name.get(pkgs.strs), writer);
@@ -343,11 +341,11 @@ pub fn write(pkgs: Packages, writer: anytype) !void {
 }
 
 fn expectWrite(pkgs: *Packages, string: []const u8) !void {
-    var rendered = std.ArrayList(u8).init(std.testing.allocator);
+    var rendered = std.io.Writer.Allocating.init(std.testing.allocator);
     defer rendered.deinit();
 
-    try pkgs.write(rendered.writer());
-    try std.testing.expectEqualStrings(string, rendered.items);
+    try pkgs.write(&rendered.writer);
+    try std.testing.expectEqualStrings(string, rendered.written());
 }
 
 fn expectTransform(from: [:0]const u8, to: []const u8) !void {
@@ -431,13 +429,13 @@ fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
     const str_z = try gpa.dupeZ(u8, string);
     defer gpa.free(str_z);
 
-    var out = std.ArrayList(u8).init(gpa);
+    var out = std.io.Writer.Allocating.init(gpa);
     defer out.deinit();
 
     var pkgs = try parse(gpa, str_z);
     defer pkgs.deinit(gpa);
 
-    try pkgs.write(out.writer());
+    try pkgs.write(&out.writer);
     return out.toOwnedSlice();
 }
 

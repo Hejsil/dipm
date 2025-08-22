@@ -1,3 +1,22 @@
+test "dipm list all" {
+    var prefix = try setupPrefix(.{ .version = "0.1.0" });
+    defer prefix.deinit();
+
+    try prefix.run(&.{ "list", "all" });
+    try prefix.expectFile("stdout", "test-file\t0.1.0\n" ++
+        "test-xz\t0.1.0\n" ++
+        "test-gz\t0.1.0\n" ++
+        "test-zst\t0.1.0\n" ++
+        "wrong-hash\t0.1.0\n" ++
+        "fails-download\t0.1.0\n" ++
+        "dup-bin1\t0.1.0\n" ++
+        "dup-bin2\t0.1.0\n" ++
+        "dup-bin3\t0.1.0\n" ++
+        "dup-lib1\t0.1.0\n" ++
+        "dup-lib2\t0.1.0\n" ++
+        "dup-lib3\t0.1.0\n");
+}
+
 test "dipm install test-file" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
@@ -544,14 +563,15 @@ test "dipm install packages with shared files in lib/" {
 }
 
 fn fuzz(_: void, fuzz_input: []const u8) !void {
-    var args = std.ArrayList([]const u8).init(std.testing.allocator);
-    defer args.deinit();
+    const gpa = std.testing.allocator;
+    var args = std.ArrayList([]const u8){};
+    defer args.deinit(gpa);
 
     var args_it = try std.process.ArgIteratorGeneral(.{}).init(std.testing.allocator, fuzz_input);
     defer args_it.deinit();
 
     while (args_it.next()) |arg|
-        try args.append(arg);
+        try args.append(gpa, arg);
 
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
@@ -616,8 +636,9 @@ fn setupPrefix(options: struct {
     defer pkgs_ini_dir.close();
     defer pkgs_ini_file.close();
 
-    var buffered_pkg_ini_file = std.io.bufferedWriter(pkgs_ini_file.writer());
-    const pkgs_ini_writer = buffered_pkg_ini_file.writer();
+    var pkgs_ini_writer_buffer: [std.heap.page_size_min]u8 = undefined;
+    var pkgs_ini_file_writer = pkgs_ini_file.writer(&pkgs_ini_writer_buffer);
+    const pkgs_ini_writer = &pkgs_ini_file_writer.interface;
 
     for (pkgs, 0..) |pkg, i| {
         if (pkg.file.content) |content|
@@ -645,7 +666,7 @@ fn setupPrefix(options: struct {
         try pkgs_ini_writer.print("hash = {s}\n", .{pkg.file.hash});
     }
 
-    try buffered_pkg_ini_file.flush();
+    try pkgs_ini_writer.flush();
 
     const pkgs_uri = try std.fmt.allocPrint(options.gpa, "file://{s}", .{pkgs_ini_path});
     errdefer options.gpa.free(pkgs_uri);
@@ -675,22 +696,30 @@ const Prefix = struct {
         var dir = try std.fs.cwd().openDir(prefix.prefix, .{});
         defer dir.close();
 
+        var io_lock = std.Thread.Mutex{};
         var stdout = try dir.createFile("stdout", .{ .read = true });
         defer stdout.close();
 
         var stderr = try dir.createFile("stderr", .{ .read = true });
         defer stderr.close();
 
-        var io_lock = std.Thread.Mutex{};
+        var stdout_buf: [std.heap.page_size_min]u8 = undefined;
+        var stderr_buf: [std.heap.page_size_min]u8 = undefined;
+        var stdout_file_writer = stdout.writer(&stdout_buf);
+        var stderr_file_writer = stderr.writer(&stderr_buf);
+
         try main.mainFull(.{
             .gpa = prefix.gpa,
             .args = args,
             .io_lock = &io_lock,
-            .stdout = stdout,
-            .stderr = stderr,
+            .stdout = &stdout_file_writer,
+            .stderr = &stderr_file_writer,
             .forced_prefix = prefix.prefix,
             .forced_pkgs_uri = prefix.pkgs_uri,
         });
+
+        try stdout_file_writer.end();
+        try stderr_file_writer.end();
     }
 
     fn rm(prefix: Prefix, path: []const u8) !void {
