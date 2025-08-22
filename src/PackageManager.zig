@@ -134,10 +134,10 @@ fn packages(pm: *PackageManager) !*const Packages {
 }
 
 pub fn installMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
-    var pkgs_not_installed = std.ArrayList([]const u8).init(pm.gpa);
-    defer pkgs_not_installed.deinit();
+    var pkgs_not_installed = std.ArrayList([]const u8){};
+    defer pkgs_not_installed.deinit(pm.gpa);
 
-    try pkgs_not_installed.ensureTotalCapacity(pkg_names.len);
+    try pkgs_not_installed.ensureTotalCapacity(pm.gpa, pkg_names.len);
     for (pkg_names) |pkg| {
         if (pm.installed.isInstalled(pkg)) {
             try pm.diag.alreadyInstalled(.{ .name = try pm.diag.putStr(pkg) });
@@ -167,7 +167,7 @@ pub fn installMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
         .pkgs = pkgs,
         .pkgs_to_download = pkgs_to_install.values(),
     });
-    defer downloads.deinit();
+    defer downloads.deinit(pm.gpa);
 
     // Step 1: Download the packages that needs to be installed. Can be done multithreaded.
     try downloads.run(pm);
@@ -245,66 +245,68 @@ fn downloadAndExtractPackage(
     dir: std.fs.Dir,
     pkg: Package.Specific,
 ) !void {
+    var arena_state = std.heap.ArenaAllocator.init(pm.gpa);
+    const arena = arena_state.allocator();
+    defer arena_state.deinit();
+
+    const download_name = try std.fmt.allocPrint(arena, "↓ {s}", .{pkg.name});
+    const extract_name = try std.fmt.allocPrint(arena, "⎋ {s}", .{pkg.name});
+
+    const progress = pm.progress.start(download_name, 1);
+    defer pm.progress.end(progress);
+
     const downloaded_file_name = std.fs.path.basename(pkg.install.url.get(pkgs.strs));
     const downloaded_file = try dir.createFile(downloaded_file_name, .{ .read = true });
     defer downloaded_file.close();
 
+    var downloaded_file_buf: [std.heap.page_size_min]u8 = undefined;
+    var downloaded_file_writer = downloaded_file.writer(&downloaded_file_buf);
+
     // TODO: Get rid of this once we have support for bz2 compression
-    var download_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const downloaded_path = try dir.realpath(downloaded_file_name, &download_path_buf);
+    const downloaded_path = try dir.realpathAlloc(arena, downloaded_file_name);
 
-    {
-        const download_name = try std.fmt.allocPrint(pm.gpa, "↓ {s}", .{pkg.name});
-        defer pm.gpa.free(download_name);
-
-        const download_progress = pm.progress.start(download_name, 1);
-        defer pm.progress.end(download_progress);
-
-        const download_result = download.download(downloaded_file.writer(), .{
-            .client = &pm.http_client,
-            .uri_str = pkg.install.url.get(pkgs.strs),
-            .progress = download_progress,
-        }) catch |err| {
-            try pm.diag.downloadFailed(.{
-                .name = try pm.diag.putStr(pkg.name),
-                .version = try pm.diag.putStr(pkg.info.version.get(pkgs.strs)),
-                .url = try pm.diag.putStr(pkg.install.url.get(pkgs.strs)),
-                .err = err,
-            });
-            return Diagnostics.Error.DiagnosticsReported;
-        };
-        if (download_result.status != .ok) {
-            try pm.diag.downloadFailedWithStatus(.{
-                .name = try pm.diag.putStr(pkg.name),
-                .version = try pm.diag.putStr(pkg.info.version.get(pkgs.strs)),
-                .url = try pm.diag.putStr(pkg.install.url.get(pkgs.strs)),
-                .status = download_result.status,
-            });
-            return Diagnostics.Error.DiagnosticsReported;
-        }
-
-        const actual_hash = std.fmt.bytesToHex(download_result.hash, .lower);
-        if (!std.mem.eql(u8, pkg.install.hash.get(pkgs.strs), &actual_hash)) {
-            try pm.diag.hashMismatch(.{
-                .name = try pm.diag.putStr(pkg.name),
-                .version = try pm.diag.putStr(pkg.info.version.get(pkgs.strs)),
-                .expected_hash = try pm.diag.putStr(pkg.install.hash.get(pkgs.strs)),
-                .actual_hash = try pm.diag.putStr(&actual_hash),
-            });
-            return Diagnostics.Error.DiagnosticsReported;
-        }
+    const download_result = download.download(.{
+        .writer = &downloaded_file_writer.interface,
+        .client = &pm.http_client,
+        .uri_str = pkg.install.url.get(pkgs.strs),
+        .progress = progress,
+    }) catch |err| {
+        try pm.diag.downloadFailed(.{
+            .name = try pm.diag.putStr(pkg.name),
+            .version = try pm.diag.putStr(pkg.info.version.get(pkgs.strs)),
+            .url = try pm.diag.putStr(pkg.install.url.get(pkgs.strs)),
+            .err = err,
+        });
+        return Diagnostics.Error.DiagnosticsReported;
+    };
+    if (download_result.status != .ok) {
+        try pm.diag.downloadFailedWithStatus(.{
+            .name = try pm.diag.putStr(pkg.name),
+            .version = try pm.diag.putStr(pkg.info.version.get(pkgs.strs)),
+            .url = try pm.diag.putStr(pkg.install.url.get(pkgs.strs)),
+            .status = download_result.status,
+        });
+        return Diagnostics.Error.DiagnosticsReported;
     }
 
-    const extract_name = try std.fmt.allocPrint(pm.gpa, "⎋ {s}", .{pkg.name});
-    defer pm.gpa.free(extract_name);
+    const actual_hash = std.fmt.bytesToHex(download_result.hash, .lower);
+    if (!std.mem.eql(u8, pkg.install.hash.get(pkgs.strs), &actual_hash)) {
+        try pm.diag.hashMismatch(.{
+            .name = try pm.diag.putStr(pkg.name),
+            .version = try pm.diag.putStr(pkg.info.version.get(pkgs.strs)),
+            .expected_hash = try pm.diag.putStr(pkg.install.hash.get(pkgs.strs)),
+            .actual_hash = try pm.diag.putStr(&actual_hash),
+        });
+        return Diagnostics.Error.DiagnosticsReported;
+    }
 
-    const extract_progress = pm.progress.start(extract_name, 1);
-    defer pm.progress.end(extract_progress);
-
+    try downloaded_file_writer.end();
     try downloaded_file.seekTo(0);
+
+    progress.set(.{ .max = 0, .curr = 0, .name = extract_name });
     try fs.extract(.{
         .gpa = pm.gpa,
-        .node = extract_progress,
+        .node = progress,
         .input_name = downloaded_path,
         .input_file = downloaded_file,
         .output_dir = dir,
@@ -317,10 +319,10 @@ fn installExtractedPackage(
     from_dir: std.fs.Dir,
     pkg: Package.Specific,
 ) !void {
-    var locations = std.ArrayList(Strings.Index).init(pm.gpa);
-    defer locations.deinit();
+    var locations = std.ArrayList(Strings.Index){};
+    defer locations.deinit(pm.gpa);
 
-    try locations.ensureUnusedCapacity(pkg.install.install_bin.len +
+    try locations.ensureUnusedCapacity(pm.gpa, pkg.install.install_bin.len +
         pkg.install.install_lib.len +
         pkg.install.install_share.len);
 
@@ -333,7 +335,7 @@ fn installExtractedPackage(
     for (pkg.install.install_bin.get(pkgs.strs)) |install_field| {
         const the_install = Package.Install.fromString(install_field.get(pkgs.strs));
         const join_fmt = std.fs.path.fmtJoin(&.{ paths.bin_subpath, the_install.to });
-        const path = try pm.installed.strs.print(pm.gpa, "{}", .{join_fmt});
+        const path = try pm.installed.strs.print(pm.gpa, "{f}", .{join_fmt});
         installBin(the_install, from_dir, pm.bin_dir) catch |err| switch (err) {
             error.PathAlreadyExists => {
                 try pm.diag.pathAlreadyExists(.{
@@ -361,7 +363,7 @@ fn installExtractedPackage(
         for (install.installs.get(pkgs.strs)) |install_field| {
             const the_install = Package.Install.fromString(install_field.get(pkgs.strs));
             const join_fmt = std.fs.path.fmtJoin(&.{ install.path, the_install.to });
-            const path = try pm.installed.strs.print(pm.gpa, "{}", .{join_fmt});
+            const path = try pm.installed.strs.print(pm.gpa, "{f}", .{join_fmt});
             installGeneric(the_install, from_dir, install.dir) catch |err| switch (err) {
                 error.PathAlreadyExists => {
                     try pm.diag.pathAlreadyExists(.{
@@ -450,16 +452,15 @@ fn installFile(
     var from_file = try from_dir.openFile(the_install.from, .{});
     defer from_file.close();
 
-    var to_file = try child_to_dir.atomicFile(install_base_name, .{});
+    var to_file = try child_to_dir.atomicFile(install_base_name, .{ .write_buffer = &.{} });
     defer to_file.deinit();
 
-    _ = try from_file.copyRangeAll(0, to_file.file, 0, std.math.maxInt(u64));
+    _ = try from_file.copyRangeAll(0, to_file.file_writer.file, 0, std.math.maxInt(u64));
 
     if (options.executable) {
-        const metadata = try to_file.file.metadata();
-        var permissions = metadata.permissions();
-        permissions.inner.unixSet(.user, .{ .execute = true });
-        try to_file.file.setPermissions(permissions);
+        const executable = std.posix.S.IXUSR | std.posix.S.IXGRP | std.posix.S.IXOTH;
+        const mode = try to_file.file_writer.file.mode();
+        try to_file.file_writer.file.chmod(mode | executable);
     }
 
     if (fs.exists(child_to_dir, install_base_name))
@@ -528,8 +529,8 @@ pub fn updateAll(pm: *PackageManager, options: UpdateOptions) !void {
     defer arena_state.deinit();
 
     const installed = pm.installed.by_name.keys();
-    var pkgs_to_update = std.ArrayList([]const u8).init(arena);
-    try pkgs_to_update.ensureTotalCapacity(installed.len);
+    var pkgs_to_update = std.ArrayList([]const u8){};
+    try pkgs_to_update.ensureTotalCapacity(arena, installed.len);
 
     for (installed) |pkg_name_index| {
         const pkg_name = pkg_name_index.get(pm.installed.strs);
@@ -596,7 +597,7 @@ fn updatePackages(pm: *PackageManager, pkg_names: []const []const u8, options: s
         .pkgs = pkgs,
         .pkgs_to_download = pkgs_to_install.values(),
     });
-    defer downloads.deinit();
+    defer downloads.deinit(pm.gpa);
 
     // Step 1: Download the packages that needs updating. Can be done multithreaded.
     try downloads.run(pm);
@@ -638,7 +639,7 @@ fn updatePackages(pm: *PackageManager, pkg_names: []const []const u8, options: s
 }
 
 const DownloadAndExtractJobs = struct {
-    jobs: std.ArrayList(DownloadAndExtractJob),
+    jobs: std.ArrayList(DownloadAndExtractJob) = .{},
 
     fn init(options: struct {
         gpa: std.mem.Allocator,
@@ -647,12 +648,10 @@ const DownloadAndExtractJobs = struct {
         pkgs: *const Packages,
         pkgs_to_download: []const Package.Specific,
     }) !DownloadAndExtractJobs {
-        var res = DownloadAndExtractJobs{
-            .jobs = std.ArrayList(DownloadAndExtractJob).init(options.gpa),
-        };
-        errdefer res.deinit();
+        var res = DownloadAndExtractJobs{};
+        errdefer res.deinit(options.gpa);
 
-        try res.jobs.ensureTotalCapacity(options.pkgs_to_download.len);
+        try res.jobs.ensureTotalCapacity(options.gpa, options.pkgs_to_download.len);
         for (options.pkgs_to_download) |pkg| {
             var working_dir = try fs.tmpDir(options.dir, .{});
             errdefer working_dir.close();
@@ -678,10 +677,10 @@ const DownloadAndExtractJobs = struct {
             try thread_pool.spawn(DownloadAndExtractJob.run, .{ job, pm });
     }
 
-    fn deinit(jobs: DownloadAndExtractJobs) void {
+    fn deinit(jobs: *DownloadAndExtractJobs, gpa: std.mem.Allocator) void {
         for (jobs.jobs.items) |*job|
             job.working_dir.close();
-        jobs.jobs.deinit();
+        jobs.jobs.deinit(gpa);
     }
 };
 

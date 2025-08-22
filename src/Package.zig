@@ -73,7 +73,7 @@ pub fn specific(
     };
 }
 
-pub fn write(pkg: Package, strs: Strings, name: []const u8, writer: anytype) !void {
+pub fn write(pkg: Package, strs: Strings, name: []const u8, writer: *std.io.Writer) !void {
     try writer.print("[{s}.info]\n", .{name});
     try writer.print("version = {s}\n", .{pkg.info.version.get(strs)});
     if (pkg.info.description.get(strs)) |desc|
@@ -219,8 +219,9 @@ pub fn fromGithub(args: struct {
         digest: []const u8 = "",
     }) = .empty;
     if (args.download_uri) |download_uri| {
-        var content = std.ArrayList(u8).init(tmp_arena);
-        const pkg_download_result = try download.download(content.writer(), .{
+        var content = std.io.Writer.Allocating.init(tmp_arena);
+        const pkg_download_result = try download.download(.{
+            .writer = &content.writer,
             .client = args.http_client,
             .uri_str = download_uri,
             .progress = args.progress,
@@ -228,7 +229,7 @@ pub fn fromGithub(args: struct {
         if (pkg_download_result.status != .ok)
             return error.IndexDownloadFailed;
 
-        var it = UrlsIterator.init(content.items);
+        var it = UrlsIterator.init(content.written());
         while (it.next()) |download_url|
             try download_urls.append(tmp_arena, .{ .url = download_url });
     } else {
@@ -267,11 +268,15 @@ pub fn fromGithub(args: struct {
     const downloaded_file = try tmp_dir.dir.createFile(downloaded_file_name, .{ .read = true });
     defer downloaded_file.close();
 
-    const pkg_download_result = try download.download(downloaded_file.writer(), .{
+    var downloaded_file_buf: [std.heap.page_size_min]u8 = undefined;
+    var downloaded_file_writer = downloaded_file.writer(&downloaded_file_buf);
+    const pkg_download_result = try download.download(.{
+        .writer = &downloaded_file_writer.interface,
         .client = args.http_client,
         .uri_str = download_url.url,
         .progress = args.progress,
     });
+    try downloaded_file_writer.end();
     if (pkg_download_result.status != .ok)
         return error.FileDownloadFailed;
 
@@ -361,8 +366,9 @@ fn githubDownloadLatestRelease(options: struct {
         .{ github_api_uri_prefix, options.repo.user, options.repo.name },
     );
 
-    var latest_release_json = std.ArrayList(u8).init(options.arena);
-    const release_download_result = try download.download(latest_release_json.writer(), .{
+    var latest_release_json = std.io.Writer.Allocating.init(options.arena);
+    const release_download_result = try download.download(.{
+        .writer = &latest_release_json.writer,
         .client = options.http_client,
         .uri_str = latest_release_uri,
         .progress = options.progress,
@@ -373,7 +379,7 @@ fn githubDownloadLatestRelease(options: struct {
     const latest_release_value = try std.json.parseFromSlice(
         GithubLatestRelease,
         options.arena,
-        latest_release_json.items,
+        latest_release_json.written(),
         .{ .ignore_unknown_fields = true },
     );
     return latest_release_value.value;
@@ -396,8 +402,9 @@ fn githubDownloadRepository(options: struct {
         .{ github_api_uri_prefix, options.repo.user, options.repo.name },
     );
 
-    var repository_json = std.ArrayList(u8).init(options.arena);
-    const repository_result = try download.download(repository_json.writer(), .{
+    var repository_json = std.io.Writer.Allocating.init(options.arena);
+    const repository_result = try download.download(.{
+        .writer = &repository_json.writer,
         .client = options.http_client,
         .uri_str = repository_uri,
         .progress = options.progress,
@@ -408,7 +415,7 @@ fn githubDownloadRepository(options: struct {
     const latest_release_value = try std.json.parseFromSlice(
         GithubRepository,
         options.arena,
-        repository_json.items,
+        repository_json.written(),
         .{ .ignore_unknown_fields = true },
     );
     return latest_release_value.value;
@@ -433,8 +440,9 @@ fn githubDownloadSponsorUrls(args: struct {
         .{ github_funding_uri_prefix, args.repo.user, args.repo.name, args.ref },
     );
 
-    var funding_yml = std.ArrayList(u8).init(arena);
-    const repository_result = try download.download(funding_yml.writer(), .{
+    var funding_yml = std.io.Writer.Allocating.init(arena);
+    const repository_result = try download.download(.{
+        .writer = &funding_yml.writer,
         .client = args.http_client,
         .uri_str = funding_uri,
         .progress = args.progress,
@@ -442,7 +450,7 @@ fn githubDownloadSponsorUrls(args: struct {
     if (repository_result.status != .ok)
         return .empty;
 
-    return fundingYmlToUrls(args.gpa, args.strs, funding_yml.items);
+    return fundingYmlToUrls(args.gpa, args.strs, funding_yml.written());
 }
 
 // Very scuffed but working parser for FUNDING.yml. Didn't really wonna write something proper or
@@ -999,18 +1007,18 @@ fn testFromGithub(options: struct {
     try cwd.writeFile(.{
         .sub_path = latest_release_file_path,
         .data = blk: {
-            var out = std.ArrayList(u8).init(arena);
-            try out.appendSlice("{\"tag_name\": \"");
-            try out.appendSlice(options.tag_name);
-            try out.appendSlice("\",\"assets\": [{");
+            var out = std.ArrayList(u8){};
+            try out.appendSlice(arena, "{\"tag_name\": \"");
+            try out.appendSlice(arena, options.tag_name);
+            try out.appendSlice(arena, "\",\"assets\": [{");
             if (options.digest) |digest| {
-                try out.appendSlice("\"digest\": \"");
-                try out.appendSlice(digest);
-                try out.appendSlice("\",");
+                try out.appendSlice(arena, "\"digest\": \"");
+                try out.appendSlice(arena, digest);
+                try out.appendSlice(arena, "\",");
             }
-            try out.appendSlice("\"browser_download_url\": \"");
-            try out.appendSlice(static_binary_uri);
-            try out.appendSlice("\"}]}");
+            try out.appendSlice(arena, "\"browser_download_url\": \"");
+            try out.appendSlice(arena, static_binary_uri);
+            try out.appendSlice(arena, "\"}]}");
             break :blk out.items;
         },
     });
@@ -1086,14 +1094,14 @@ fn testFromGithub(options: struct {
         static_binary_uri,
     );
     for ([_]Package.Named{ pkg_from_latest_release, pkg_from_index }) |pkg| {
-        var actual = std.ArrayList(u8).init(arena);
-        try pkg.pkg.write(strs, pkg.name.get(strs), actual.writer());
+        var actual = std.io.Writer.Allocating.init(arena);
+        try pkg.pkg.write(strs, pkg.name.get(strs), &actual.writer);
 
         // Remove download field
         try std.testing.expectEqualStrings(expected, try std.mem.replaceOwned(
             u8,
             arena,
-            actual.items,
+            actual.written(),
             try std.fmt.allocPrint(arena, "download = {s}\n", .{download_file_uri}),
             "",
         ));

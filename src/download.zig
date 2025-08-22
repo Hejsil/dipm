@@ -3,48 +3,66 @@ pub const Result = struct {
     hash: [std.crypto.hash.sha2.Sha256.digest_length]u8,
 };
 
-pub fn download(writer: anytype, options: struct {
+pub fn download(options: struct {
     /// Client used to download files over the internet. If null then only `file://` schemes can
     /// be "downloaded"
     client: ?*std.http.Client = null,
     uri_str: []const u8,
+    writer: *std.io.Writer,
 
     progress: Progress.Node = .none,
 }) !Result {
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
-    var hashing_writer = std.compress.hashedWriter(writer, &hasher);
-    const out = hashing_writer.writer();
+
+    var hashing_writer_buf: [std.heap.page_size_min]u8 = undefined;
+    var hashing_writer = options.writer.hashed(&hasher, &hashing_writer_buf);
+    const out = &hashing_writer.writer;
 
     const uri = try std.Uri.parse(options.uri_str);
     const status = if (std.mem.eql(u8, uri.scheme, "file")) blk: {
         var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const path = try std.fmt.bufPrint(&path_buf, "{raw}", .{uri.path});
+        const path = try uri.path.toRaw(&path_buf);
         const file = try std.fs.cwd().openFile(path, .{});
-        try io.pipe(file.reader(), out);
+
+        var file_buf: [std.heap.page_size_min]u8 = undefined;
+        var file_reader = file.reader(&file_buf);
+        _ = try file_reader.interface.streamRemaining(out);
+        try out.flush();
         break :blk .ok;
     } else blk: {
         // No downloading using http from tests
         std.debug.assert(!builtin.is_test);
         const client = options.client.?;
 
-        var header_buffer: [1024 * 8]u8 = undefined;
-        var request = try client.open(.GET, uri, .{
-            .server_header_buffer = &header_buffer,
+        var request = try client.request(.GET, uri, .{
             .keep_alive = false,
         });
         defer request.deinit();
 
-        try request.send();
-        try request.finish();
-        try request.wait();
+        try request.sendBodiless();
 
-        if (request.response.content_length) |length|
-            options.progress.setMax(@min(length, std.math.maxInt(u32)));
+        var redirect_buffer: [std.heap.page_size_min]u8 = undefined;
+        var response = try request.receiveHead(&redirect_buffer);
+        if (response.head.content_length) |length|
+            options.progress.set(.{ .max = @truncate(length) });
 
-        var node_writer = options.progress.writer(out);
-        try io.pipe(request.reader(), node_writer.writer());
-        break :blk request.response.status;
+        var transfer_buffer: [std.heap.page_size_min]u8 = undefined;
+        var decompress_buffer: [std.compress.flate.max_window_len]u8 = undefined;
+        var decompress: std.http.Decompress = undefined;
+        const body_reader = response.readerDecompressing(&transfer_buffer, &decompress, &decompress_buffer);
+
+        while (true) {
+            const amount = body_reader.stream(out, .unlimited) catch |err| switch (err) {
+                error.EndOfStream => break,
+                else => |e| return e,
+            };
+            options.progress.advance(@truncate(amount));
+        }
+
+        break :blk response.head.status;
     };
+
+    try out.flush();
 
     var result = Result{
         .status = status,
@@ -56,13 +74,9 @@ pub fn download(writer: anytype, options: struct {
 
 test {
     _ = Progress;
-
-    _ = io;
 }
 
 const Progress = @import("Progress.zig");
-
-const io = @import("io.zig");
 
 const builtin = @import("builtin");
 const std = @import("std");

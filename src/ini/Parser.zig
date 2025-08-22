@@ -226,7 +226,7 @@ fn expectedParsed(string: [:0]const u8, expected: []const Result.Kind) !void {
     const without_leading_or_trailing_ws = try gpa.dupeZ(u8, std.mem.trim(u8, string, " \t\n"));
     defer gpa.free(without_leading_or_trailing_ws);
 
-    const with_trailing_nl = try std.fmt.allocPrintZ(std.testing.allocator, "{s}\n", .{string});
+    const with_trailing_nl = try std.fmt.allocPrintSentinel(std.testing.allocator, "{s}\n", .{string}, 0);
     defer std.testing.allocator.free(with_trailing_nl);
 
     try expectedParsedInner(without_leading_or_trailing_ws, expected);
@@ -429,8 +429,8 @@ fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
     const str_z = try gpa.dupeZ(u8, string);
     defer gpa.free(str_z);
 
-    var out = std.ArrayList(u8).init(gpa);
-    defer out.deinit();
+    var out = std.io.Writer.Allocating.init(gpa);
+    errdefer out.deinit();
 
     var parser = Parser.init(str_z);
     while (true) {
@@ -438,7 +438,7 @@ fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
         if (result.kind == .end)
             return out.toOwnedSlice();
 
-        try result.write(string, out.writer());
+        try result.write(string, &out.writer);
     }
 }
 
@@ -478,7 +478,7 @@ pub const Result = struct {
         return .{ .name = result.slice(string) };
     }
 
-    pub fn write(result: Result, string: []const u8, writer: anytype) !void {
+    pub fn write(result: Result, string: []const u8, writer: *std.io.Writer) !void {
         switch (result.kind) {
             .comment, .invalid => {
                 try writer.writeAll(result.slice(string));

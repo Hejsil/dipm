@@ -24,11 +24,11 @@ pub const ZigCacheTmpDir = struct {
 
 pub fn zigCacheTmpDir(open_dir_options: std.fs.Dir.OpenOptions) !ZigCacheTmpDir {
     const zig_cache_path = zigCachePath();
-    var zig_cache_dir = try std.fs.cwd().openDir(zig_cache_path, .{});
+    var zig_cache_dir = try std.fs.cwd().makeOpenPath(zig_cache_path, .{});
     defer zig_cache_dir.close();
 
     const tmp_subdir_name = "tmp";
-    var zig_cache_tmp_dir = try zig_cache_dir.openDir(tmp_subdir_name, .{});
+    var zig_cache_tmp_dir = try zig_cache_dir.makeOpenPath(tmp_subdir_name, .{});
     defer zig_cache_tmp_dir.close();
 
     var res = try tmpDir(zig_cache_tmp_dir, open_dir_options);
@@ -172,12 +172,10 @@ pub const ExtractOptions = struct {
 pub fn extract(options: ExtractOptions) !void {
     const tar_pipe_options = std.tar.PipeOptions{ .exclude_empty_directories = true };
 
-    var buffered_reader = std.io.bufferedReader(options.input_file.reader());
-    var node_reader_state = options.node.reader(buffered_reader.reader());
-    const node_reader = node_reader_state.reader();
-
-    options.node.setMax(@min(std.math.maxInt(u32), try options.input_file.getEndPos()));
-    options.node.setCurr(0);
+    var decomp_buf: [std.compress.flate.max_window_len]u8 = undefined;
+    var input_file_reader_buf: [std.heap.page_size_min]u8 = undefined;
+    var input_file_reader = options.node.fileReader(options.input_file, &input_file_reader_buf);
+    const reader = &input_file_reader.file.interface;
 
     switch (FileType.fromPath(options.input_name)) {
         .tar_bz2 => {
@@ -198,21 +196,21 @@ pub fn extract(options: ExtractOptions) !void {
             _ = try child.wait();
         },
         .tar_gz => {
-            var decomp = std.compress.gzip.decompressor(node_reader);
-            try std.tar.pipeToFileSystem(options.output_dir, decomp.reader(), tar_pipe_options);
+            var decomp = std.compress.flate.Decompress.init(reader, .gzip, &decomp_buf);
+            try std.tar.pipeToFileSystem(options.output_dir, &decomp.reader, tar_pipe_options);
         },
         .tar_zst => {
-            const window_len = std.compress.zstd.DecompressorOptions.default_window_buffer_len;
-            var window_buffer: [window_len]u8 = undefined;
-            var decomp = std.compress.zstd.decompressor(node_reader, .{
-                .window_buffer = &window_buffer,
-            });
-            try std.tar.pipeToFileSystem(options.output_dir, decomp.reader(), tar_pipe_options);
+            var buffer: [std.compress.zstd.default_window_len]u8 = undefined;
+            var decomp = std.compress.zstd.Decompress.init(reader, &buffer, .{});
+            try std.tar.pipeToFileSystem(options.output_dir, &decomp.reader, tar_pipe_options);
         },
         .tar_xz => {
-            var decomp = try std.compress.xz.decompress(options.gpa, node_reader);
+            // TODO: Remove `adaptToOldInterface`
+            var decomp = try std.compress.xz.decompress(options.gpa, reader.adaptToOldInterface());
             defer decomp.deinit();
-            try std.tar.pipeToFileSystem(options.output_dir, decomp.reader(), tar_pipe_options);
+
+            var adapter = decomp.reader().adaptToNewApi(&.{});
+            try std.tar.pipeToFileSystem(options.output_dir, &adapter.new_interface, tar_pipe_options);
         },
         .gz => {
             const file_base_name = std.fs.path.basename(options.input_name);
@@ -221,18 +219,19 @@ pub fn extract(options: ExtractOptions) !void {
             const out_file = try options.output_dir.createFile(file_base_name_no_ext, .{});
             defer out_file.close();
 
-            var decomp = std.compress.gzip.decompressor(node_reader);
-            try io.pipe(decomp.reader(), out_file.writer());
+            var out_file_writer = out_file.writer(&.{});
+            var decomp = std.compress.flate.Decompress.init(reader, .gzip, &decomp_buf);
+            _ = try decomp.reader.stream(&out_file_writer.interface, .unlimited);
         },
         .tar => {
             try std.tar.pipeToFileSystem(
                 options.output_dir,
-                node_reader,
+                reader,
                 tar_pipe_options,
             );
         },
         .zip => {
-            try std.zip.extract(options.output_dir, options.input_file.seekableStream(), .{});
+            try std.zip.extract(options.output_dir, &input_file_reader.file, .{});
         },
         .binary => {},
     }
@@ -316,12 +315,9 @@ pub fn exists(dir: std.fs.Dir, path: []const u8) bool {
 
 test {
     _ = Progress;
-
-    _ = io;
 }
 
 const Progress = @import("Progress.zig");
 
 const builtin = @import("builtin");
-const io = @import("io.zig");
 const std = @import("std");

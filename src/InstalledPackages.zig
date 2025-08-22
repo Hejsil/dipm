@@ -128,14 +128,13 @@ pub fn flush(pkgs: InstalledPackages) !void {
 
     try file.seekTo(0);
 
-    var buffered_writer = std.io.bufferedWriter(file.writer());
-    try pkgs.writeTo(buffered_writer.writer());
-    try buffered_writer.flush();
-
-    try file.setEndPos(try file.getPos());
+    var file_buf: [std.heap.page_size_min]u8 = undefined;
+    var file_writer = file.writer(&file_buf);
+    try pkgs.writeTo(&file_writer.interface);
+    try file_writer.end();
 }
 
-pub fn writeTo(pkgs: InstalledPackages, writer: anytype) !void {
+pub fn writeTo(pkgs: InstalledPackages, writer: *std.io.Writer) !void {
     for (pkgs.by_name.keys(), pkgs.by_name.values(), 0..) |pkg_name, pkg, i| {
         if (i != 0)
             try writer.writeAll("\n");
@@ -149,11 +148,11 @@ fn expectTransform(from: [:0]const u8, to: []const u8) !void {
     var pkgs = try parse(gpa, from);
     defer pkgs.deinit(gpa);
 
-    var rendered = std.ArrayList(u8).init(gpa);
+    var rendered = std.io.Writer.Allocating.init(gpa);
     defer rendered.deinit();
 
-    try pkgs.writeTo(rendered.writer());
-    try std.testing.expectEqualStrings(to, rendered.items);
+    try pkgs.writeTo(&rendered.writer);
+    try std.testing.expectEqualStrings(to, rendered.written());
 }
 
 fn expectCanonical(string: [:0]const u8) !void {
