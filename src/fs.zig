@@ -200,7 +200,9 @@ pub fn extract(options: ExtractOptions) !void {
             try std.tar.pipeToFileSystem(options.output_dir, &decomp.reader, tar_pipe_options);
         },
         .tar_zst => {
-            var buffer: [std.compress.zstd.default_window_len]u8 = undefined;
+            const buffer_size = std.compress.zstd.default_window_len +
+                std.compress.zstd.block_size_max;
+            var buffer: [buffer_size]u8 = undefined;
             var decomp = std.compress.zstd.Decompress.init(reader, &buffer, .{});
             try std.tar.pipeToFileSystem(options.output_dir, &decomp.reader, tar_pipe_options);
         },
@@ -209,7 +211,8 @@ pub fn extract(options: ExtractOptions) !void {
             var decomp = try std.compress.xz.decompress(options.gpa, reader.adaptToOldInterface());
             defer decomp.deinit();
 
-            var adapter = decomp.reader().adaptToNewApi(&.{});
+            var adapter_buf: [std.heap.page_size_min]u8 = undefined;
+            var adapter = decomp.reader().adaptToNewApi(&adapter_buf);
             try std.tar.pipeToFileSystem(options.output_dir, &adapter.new_interface, tar_pipe_options);
         },
         .gz => {
@@ -219,9 +222,11 @@ pub fn extract(options: ExtractOptions) !void {
             const out_file = try options.output_dir.createFile(file_base_name_no_ext, .{});
             defer out_file.close();
 
-            var out_file_writer = out_file.writer(&.{});
+            var out_file_writer_buf: [std.heap.page_size_min]u8 = undefined;
+            var out_file_writer = out_file.writer(&out_file_writer_buf);
             var decomp = std.compress.flate.Decompress.init(reader, .gzip, &decomp_buf);
-            _ = try decomp.reader.stream(&out_file_writer.interface, .unlimited);
+            _ = try decomp.reader.streamRemaining(&out_file_writer.interface);
+            try out_file_writer.end();
         },
         .tar => {
             try std.tar.pipeToFileSystem(
@@ -236,6 +241,122 @@ pub fn extract(options: ExtractOptions) !void {
         .binary => {},
     }
 }
+
+fn testOneExtract(file_type: FileType, files: []const std.fs.Dir.WriteFileOptions) !void {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    const arena = arena_state.allocator();
+    defer arena_state.deinit();
+
+    const compressed_file_name = switch (file_type) {
+        .zip => "compressed.zip",
+        .tar_xz => "compressed.tar.xz",
+        .tar_bz2 => "compressed.tar.bz2",
+        .tar_gz => "compressed.tar.gz",
+        .tar_zst => "compressed.tar.zst",
+        .tar => "compressed.tar",
+        .gz => blk: {
+            if (files.len != 1) return error.SkipZigTest;
+            break :blk try std.fmt.allocPrint(arena, "{s}.gz", .{files[0].sub_path});
+        },
+        .binary => blk: {
+            if (files.len != 1) return error.SkipZigTest;
+            break :blk files[0].sub_path;
+        },
+    };
+
+    var tmp_dir = try zigCacheTmpDir(.{});
+    defer tmp_dir.deleteAndClose();
+
+    var args = std.ArrayList([]const u8){};
+    try args.ensureTotalCapacity(arena, 4 + files.len);
+
+    for (files) |file| {
+        try tmp_dir.dir.writeFile(file);
+        args.appendAssumeCapacity(file.sub_path);
+    }
+
+    switch (file_type) {
+        .gz => try args.insertSlice(arena, 0, &.{"gzip"}),
+        .zip => try args.insertSlice(arena, 0, &.{ "zip", compressed_file_name }),
+        .tar_xz => try args.insertSlice(arena, 0, &.{ "tar", "-cJf", compressed_file_name }),
+        .tar_bz2 => try args.insertSlice(arena, 0, &.{ "tar", "-cjf", compressed_file_name }),
+        .tar_gz => try args.insertSlice(arena, 0, &.{ "tar", "-czf", compressed_file_name }),
+        .tar_zst => try args.insertSlice(arena, 0, &.{ "tar", "--zstd", "-cf", compressed_file_name }),
+        .tar => try args.insertSlice(arena, 0, &.{ "tar", "-cf", compressed_file_name }),
+        .binary => {},
+    }
+    const res = switch (file_type) {
+        .gz, .zip, .tar_xz, .tar_bz2, .tar_gz, .tar_zst, .tar => std.process.Child.run(.{
+            .allocator = arena,
+            .argv = args.items,
+            .cwd_dir = tmp_dir.dir,
+        }),
+        .binary => std.process.Child.RunResult{
+            .term = .{ .Exited = 0 },
+            .stdout = &.{},
+            .stderr = &.{},
+        },
+    } catch |err| switch (err) {
+        error.FileNotFound => return error.SkipZigTest,
+        else => |e| return e,
+    };
+    switch (res.term) {
+        .Exited => |e| if (e != 0) return error.SkipZigTest,
+        else => return error.SkipZigTest,
+    }
+
+    switch (file_type) {
+        .gz, .binary => {},
+        else => {
+            for (files) |file| {
+                try tmp_dir.dir.deleteFile(file.sub_path);
+            }
+        },
+    }
+
+    // TODO: Remove realpath once bz2 decomp is not outsourced to `tar` command
+    const compressed_file_path = try tmp_dir.dir.realpathAlloc(arena, compressed_file_name);
+    const compressed_file = try tmp_dir.dir.openFile(compressed_file_path, .{});
+    defer compressed_file.close();
+
+    try extract(.{
+        .gpa = std.testing.allocator,
+        .input_file = compressed_file,
+        .input_name = compressed_file_path,
+        .output_dir = tmp_dir.dir,
+    });
+
+    for (files) |file| {
+        const uncompressed = try tmp_dir.dir.readFileAlloc(arena, file.sub_path, std.math.maxInt(usize));
+        try std.testing.expectEqualSlices(u8, file.data, uncompressed);
+    }
+}
+
+fn testExtract(file_type: FileType) !void {
+    const bytes: [1024 * 1024 * 8]u8 = @splat(0);
+    try testOneExtract(file_type, &.{.{ .sub_path = "binary1", .data = bytes[0..0] }});
+    try testOneExtract(file_type, &.{.{ .sub_path = "binary1", .data = bytes[0..124] }});
+    try testOneExtract(file_type, &.{.{ .sub_path = "binary1", .data = bytes[0..] }});
+    try testOneExtract(file_type, &.{
+        .{ .sub_path = "binary1", .data = bytes[0..] },
+        .{ .sub_path = "binary2", .data = bytes[0..] },
+        .{ .sub_path = "binary3", .data = bytes[0..] },
+        .{ .sub_path = "binary4", .data = bytes[0..] },
+        .{ .sub_path = "binary5", .data = bytes[0..] },
+        .{ .sub_path = "binary6", .data = bytes[0..] },
+    });
+}
+
+// zig fmt: off
+test "extract.tar_bz2" { try testExtract(.tar_bz2); }
+test "extract.tar_gz"  { try testExtract(.tar_gz);  }
+test "extract.tar_xz"  { try testExtract(.tar_xz);  }
+test "extract.tar_zst" { try testExtract(.tar_zst); }
+test "extract.gz"      { try testExtract(.gz);      }
+test "extract.tar"     { try testExtract(.tar);     }
+test "extract.zip"     { try testExtract(.zip);     }
+test "extract.binary"  { try testExtract(.binary);  }
+// zig fmt: on
 
 pub fn openDirAndFile(
     dir: std.fs.Dir,
