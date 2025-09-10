@@ -429,7 +429,7 @@ fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
     const str_z = try gpa.dupeZ(u8, string);
     defer gpa.free(str_z);
 
-    var out = std.io.Writer.Allocating.init(gpa);
+    var out = std.Io.Writer.Allocating.init(gpa);
     errdefer out.deinit();
 
     var parser = Parser.init(str_z);
@@ -478,7 +478,7 @@ pub const Result = struct {
         return .{ .name = result.slice(string) };
     }
 
-    pub fn write(result: Result, string: []const u8, writer: *std.io.Writer) !void {
+    pub fn write(result: Result, string: []const u8, writer: *std.Io.Writer) !void {
         switch (result.kind) {
             .comment, .invalid => {
                 try writer.writeAll(result.slice(string));

@@ -735,9 +735,9 @@ const Prefix = struct {
 
     fn expectFile(prefix: Prefix, file: []const u8, content: []const u8) !void {
         const actual = try prefix.prefix_dir.readFileAlloc(
-            std.testing.allocator,
             file,
-            std.math.maxInt(usize),
+            std.testing.allocator,
+            .unlimited,
         );
         defer std.testing.allocator.free(actual);
         try std.testing.expectEqualStrings(actual, content);
@@ -745,9 +745,9 @@ const Prefix = struct {
 
     fn expectFileStartsWith(prefix: Prefix, file: []const u8, content: []const u8) !void {
         const actual = try prefix.prefix_dir.readFileAlloc(
-            std.testing.allocator,
             file,
-            std.math.maxInt(usize),
+            std.testing.allocator,
+            .unlimited,
         );
         defer std.testing.allocator.free(actual);
         try std.testing.expectStringStartsWith(actual, content);

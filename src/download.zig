@@ -8,7 +8,7 @@ pub fn download(options: struct {
     /// be "downloaded"
     client: ?*std.http.Client = null,
     uri_str: []const u8,
-    writer: *std.io.Writer,
+    writer: *std.Io.Writer,
 
     progress: Progress.Node = .none,
 }) !Result {

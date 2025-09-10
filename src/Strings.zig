@@ -245,7 +245,11 @@ fn printAssumeCapacityNoLock(strings: *Strings, comptime format: []const u8, arg
     strings.pointer_stability.assertLocked();
     var fba = std.heap.FixedBufferAllocator.init("");
     const index: u32 = @intCast(strings.data.items.len);
-    strings.data.writer(fba.allocator()).print(format, args) catch unreachable;
+
+    var writer = std.Io.Writer.Allocating.fromArrayList(fba.allocator(), &strings.data);
+    writer.writer.print(format, args) catch unreachable;
+    strings.data = writer.toArrayList();
+
     strings.data.appendAssumeCapacity(0);
     return @enumFromInt(index);
 }
