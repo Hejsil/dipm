@@ -14,7 +14,7 @@ pub fn open(gpa: std.mem.Allocator, prefix: []const u8) !InstalledPackages {
     const file = try own_data_dir.createFile(paths.installed_file_name, .{ .read = true, .truncate = false });
     errdefer file.close();
 
-    return parseFromFile(gpa, file);
+    return parseFile(gpa, file);
 }
 
 pub fn deinit(pkgs: *InstalledPackages, gpa: std.mem.Allocator) void {
@@ -30,15 +30,20 @@ pub fn isInstalled(pkgs: *const InstalledPackages, pkg_name: []const u8) bool {
     return pkgs.by_name.containsAdapted(pkg_name, pkgs.strs.adapter());
 }
 
-pub fn parseFromFile(gpa: std.mem.Allocator, file: std.fs.File) !InstalledPackages {
-    const data_str = try file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, .@"1", 0);
-    defer gpa.free(data_str);
-
-    var res = try parse(gpa, data_str);
+pub fn parseFile(gpa: std.mem.Allocator, file: std.fs.File) !InstalledPackages {
+    var reader = file.reader(&.{});
+    var res = try parseReader(gpa, &reader.interface);
     errdefer res.deinit();
 
     res.file = file;
     return res;
+}
+
+pub fn parseReader(gpa: std.mem.Allocator, reader: *std.Io.Reader) !InstalledPackages {
+    const data_str = try reader.allocRemainingAlignedSentinel(gpa, .unlimited, .of(u8), 0);
+    defer gpa.free(data_str);
+
+    return parse(gpa, data_str);
 }
 
 pub fn parse(gpa: std.mem.Allocator, string: [:0]const u8) !InstalledPackages {
@@ -134,7 +139,7 @@ pub fn flush(pkgs: InstalledPackages) !void {
     try file_writer.end();
 }
 
-pub fn writeTo(pkgs: InstalledPackages, writer: *std.io.Writer) !void {
+pub fn writeTo(pkgs: InstalledPackages, writer: *std.Io.Writer) !void {
     for (pkgs.by_name.keys(), pkgs.by_name.values(), 0..) |pkg_name, pkg, i| {
         if (i != 0)
             try writer.writeAll("\n");
@@ -148,7 +153,7 @@ fn expectTransform(from: [:0]const u8, to: []const u8) !void {
     var pkgs = try parse(gpa, from);
     defer pkgs.deinit(gpa);
 
-    var rendered = std.io.Writer.Allocating.init(gpa);
+    var rendered = std.Io.Writer.Allocating.init(gpa);
     defer rendered.deinit();
 
     try pkgs.writeTo(&rendered.writer);

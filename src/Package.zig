@@ -73,7 +73,7 @@ pub fn specific(
     };
 }
 
-pub fn write(pkg: Package, strs: Strings, name: []const u8, writer: *std.io.Writer) !void {
+pub fn write(pkg: Package, strs: Strings, name: []const u8, writer: *std.Io.Writer) !void {
     try writer.print("[{s}.info]\n", .{name});
     try writer.print("version = {s}\n", .{pkg.info.version.get(strs)});
     if (pkg.info.description.get(strs)) |desc|
@@ -219,7 +219,7 @@ pub fn fromGithub(args: struct {
         digest: []const u8 = "",
     }) = .empty;
     if (args.download_uri) |download_uri| {
-        var content = std.io.Writer.Allocating.init(tmp_arena);
+        var content = std.Io.Writer.Allocating.init(tmp_arena);
         const pkg_download_result = try download.download(.{
             .writer = &content.writer,
             .client = args.http_client,
@@ -366,7 +366,7 @@ fn githubDownloadLatestRelease(options: struct {
         .{ github_api_uri_prefix, options.repo.user, options.repo.name },
     );
 
-    var latest_release_json = std.io.Writer.Allocating.init(options.arena);
+    var latest_release_json = std.Io.Writer.Allocating.init(options.arena);
     const release_download_result = try download.download(.{
         .writer = &latest_release_json.writer,
         .client = options.http_client,
@@ -402,7 +402,7 @@ fn githubDownloadRepository(options: struct {
         .{ github_api_uri_prefix, options.repo.user, options.repo.name },
     );
 
-    var repository_json = std.io.Writer.Allocating.init(options.arena);
+    var repository_json = std.Io.Writer.Allocating.init(options.arena);
     const repository_result = try download.download(.{
         .writer = &repository_json.writer,
         .client = options.http_client,
@@ -440,7 +440,7 @@ fn githubDownloadSponsorUrls(args: struct {
         .{ github_funding_uri_prefix, args.repo.user, args.repo.name, args.ref },
     );
 
-    var funding_yml = std.io.Writer.Allocating.init(arena);
+    var funding_yml = std.Io.Writer.Allocating.init(arena);
     const repository_result = try download.download(.{
         .writer = &funding_yml.writer,
         .client = args.http_client,
@@ -1094,7 +1094,7 @@ fn testFromGithub(options: struct {
         static_binary_uri,
     );
     for ([_]Package.Named{ pkg_from_latest_release, pkg_from_index }) |pkg| {
-        var actual = std.io.Writer.Allocating.init(arena);
+        var actual = std.Io.Writer.Allocating.init(arena);
         try pkg.pkg.write(strs, pkg.name.get(strs), &actual.writer);
 
         // Remove download field

@@ -81,7 +81,8 @@ pub fn download(options: DownloadOptions) !Packages {
         try pkgs_file.seekTo(0);
     }
 
-    const string = try pkgs_file.readToEndAllocOptions(options.gpa, std.math.maxInt(usize), null, .@"1", 0);
+    var pkgs_file_reader = pkgs_file.reader(&.{});
+    const string = try pkgs_file_reader.interface.allocRemainingAlignedSentinel(options.gpa, .unlimited, .of(u8), 0);
     defer options.gpa.free(string);
 
     try pkgs.parseInto(options.gpa, string);
@@ -100,7 +101,12 @@ pub fn parseFromPath(
 }
 
 pub fn parseFile(gpa: std.mem.Allocator, file: std.fs.File) !Packages {
-    const string = try file.readToEndAllocOptions(gpa, std.math.maxInt(usize), null, .@"1", 0);
+    var reader = file.reader(&.{});
+    return parseReader(gpa, &reader.interface);
+}
+
+pub fn parseReader(gpa: std.mem.Allocator, reader: *std.Io.Reader) !Packages {
+    const string = try reader.allocRemainingAlignedSentinel(gpa, .unlimited, .of(u8), 0);
     defer gpa.free(string);
 
     return parse(gpa, string);
@@ -333,7 +339,7 @@ pub fn writeToFile(pkgs: Packages, file: std.fs.File) !void {
     try file_writer.end();
 }
 
-pub fn write(pkgs: Packages, writer: *std.io.Writer) !void {
+pub fn write(pkgs: Packages, writer: *std.Io.Writer) !void {
     for (pkgs.by_name.keys(), pkgs.by_name.values(), 0..) |pkg_name, pkg, i| {
         if (i != 0) try writer.writeAll("\n");
         try pkg.write(pkgs.strs, pkg_name.get(pkgs.strs), writer);
@@ -341,7 +347,7 @@ pub fn write(pkgs: Packages, writer: *std.io.Writer) !void {
 }
 
 fn expectWrite(pkgs: *Packages, string: []const u8) !void {
-    var rendered = std.io.Writer.Allocating.init(std.testing.allocator);
+    var rendered = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer rendered.deinit();
 
     try pkgs.write(&rendered.writer);
@@ -429,7 +435,7 @@ fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
     const str_z = try gpa.dupeZ(u8, string);
     defer gpa.free(str_z);
 
-    var out = std.io.Writer.Allocating.init(gpa);
+    var out = std.Io.Writer.Allocating.init(gpa);
     defer out.deinit();
 
     var pkgs = try parse(gpa, str_z);

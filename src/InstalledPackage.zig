@@ -1,7 +1,7 @@
 version: Strings.Index,
 location: Strings.Indices,
 
-pub fn write(pkg: Package, strs: Strings, name: []const u8, writer: *std.io.Writer) !void {
+pub fn write(pkg: Package, strs: Strings, name: []const u8, writer: *std.Io.Writer) !void {
     try writer.print("[{s}]\n", .{name});
     try writer.print("version = {s}\n", .{pkg.version.get(strs)});
     for (pkg.location.get(strs)) |install|

@@ -54,10 +54,10 @@ pub const Node = enum(usize) {
         // `std.fs.File.Reader` vtable with wrappers that call the original vtable and then
         // updates the node progress afterwards.
         file: std.fs.File.Reader,
-        file_vtable: *const std.io.Reader.VTable,
+        file_vtable: *const std.Io.Reader.VTable,
         node: Node,
 
-        const vtable = std.io.Reader.VTable{
+        const vtable = std.Io.Reader.VTable{
             .stream = stream,
             .discard = discard,
             .readVec = readVec,
@@ -217,7 +217,7 @@ pub const RenderOptions = struct {
     escapes: Escapes = Escapes.none,
 };
 
-pub fn render(progress: Progress, writer: *std.io.Writer, options: RenderOptions) !usize {
+pub fn render(progress: Progress, writer: *std.Io.Writer, options: RenderOptions) !usize {
     try writer.writeAll(options.escapes.bold);
 
     var nodes_printed: usize = 0;
@@ -308,7 +308,7 @@ fn expectRender(
     for (progress.nodes[0..nodes.len], nodes) |*out, in|
         try std.testing.expect(out.acquire(in));
 
-    var actual = std.io.Writer.Allocating.init(std.testing.allocator);
+    var actual = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer actual.deinit();
 
     _ = try progress.render(&actual.writer, render_options);

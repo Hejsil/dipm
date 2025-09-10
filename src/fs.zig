@@ -207,13 +207,10 @@ pub fn extract(options: ExtractOptions) !void {
             try std.tar.pipeToFileSystem(options.output_dir, &decomp.reader, tar_pipe_options);
         },
         .tar_xz => {
-            // TODO: Remove `adaptToOldInterface`
-            var decomp = try std.compress.xz.decompress(options.gpa, reader.adaptToOldInterface());
+            var decomp = try std.compress.xz.Decompress.init(reader, options.gpa, &.{});
             defer decomp.deinit();
 
-            var adapter_buf: [std.heap.page_size_min]u8 = undefined;
-            var adapter = decomp.reader().adaptToNewApi(&adapter_buf);
-            try std.tar.pipeToFileSystem(options.output_dir, &adapter.new_interface, tar_pipe_options);
+            try std.tar.pipeToFileSystem(options.output_dir, &decomp.reader, tar_pipe_options);
         },
         .gz => {
             const file_base_name = std.fs.path.basename(options.input_name);
@@ -327,7 +324,7 @@ fn testOneExtract(file_type: FileType, files: []const std.fs.Dir.WriteFileOption
     });
 
     for (files) |file| {
-        const uncompressed = try tmp_dir.dir.readFileAlloc(arena, file.sub_path, std.math.maxInt(usize));
+        const uncompressed = try tmp_dir.dir.readFileAlloc(file.sub_path, arena, .unlimited);
         try std.testing.expectEqualSlices(u8, file.data, uncompressed);
     }
 }
