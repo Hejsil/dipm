@@ -3,9 +3,10 @@ indices: std.ArrayListUnmanaged(Index),
 pointer_stability: std.debug.SafetyLock,
 
 pub const Index = enum(u32) {
+    empty = std.math.maxInt(u32),
     _,
 
-    pub fn get(i: Index, strings: Strings) [:0]u8 {
+    pub fn get(i: Index, strings: Strings) [:0]const u8 {
         return strings.getStr(i);
     }
 
@@ -24,7 +25,7 @@ pub const Index = enum(u32) {
             return @enumFromInt(@intFromEnum(opt));
         }
 
-        pub fn get(opt: Optional, strings: Strings) ?[:0]u8 {
+        pub fn get(opt: Optional, strings: Strings) ?[:0]const u8 {
             return (opt.unwrap() orelse return null).get(strings);
         }
     };
@@ -271,13 +272,15 @@ pub fn eql(strings: Strings, a: Index, b: Index) bool {
     return std.mem.eql(u8, a.get(strings), b.get(strings));
 }
 
-fn getPtr(strings: Strings, index: Index) [*:0]u8 {
+fn getPtr(strings: Strings, index: Index) [*:0]const u8 {
     strings.pointer_stability.assertUnlocked();
     const i = @intFromEnum(index);
     return strings.data.items[i .. strings.data.items.len - 1 :0];
 }
 
-fn getStr(strings: Strings, index: Index) [:0]u8 {
+fn getStr(strings: Strings, index: Index) [:0]const u8 {
+    if (index == .empty) return "";
+
     strings.pointer_stability.assertUnlocked();
     const ptr = strings.getPtr(index);
     return std.mem.span(ptr);
