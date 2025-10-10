@@ -1,21 +1,21 @@
-info: Info,
+info: Info = .{},
 update: Update = .{},
-linux_x86_64: Arch,
+linux_x86_64: Arch = .{},
 
 pub const Info = struct {
-    version: Strings.Index,
-    description: Strings.Index.Optional = .null,
+    version: Strings.Index = .empty,
+    description: Strings.Index = .empty,
     donate: Strings.Indices = .empty,
 };
 
 pub const Update = struct {
-    version: Strings.Index.Optional = .null,
-    download: Strings.Index.Optional = .null,
+    version: Strings.Index = .empty,
+    download: Strings.Index = .empty,
 };
 
 pub const Arch = struct {
-    url: Strings.Index,
-    hash: Strings.Index,
+    url: Strings.Index = .empty,
+    hash: Strings.Index = .empty,
     install_bin: Strings.Indices = .empty,
     install_lib: Strings.Indices = .empty,
     install_share: Strings.Indices = .empty,
@@ -76,18 +76,18 @@ pub fn specific(
 pub fn write(pkg: Package, strs: Strings, name: []const u8, writer: *std.Io.Writer) !void {
     try writer.print("[{s}.info]\n", .{name});
     try writer.print("version = {s}\n", .{pkg.info.version.get(strs)});
-    if (pkg.info.description.get(strs)) |desc|
-        try writer.print("description = {s}\n", .{desc});
+    if (pkg.info.description != .empty)
+        try writer.print("description = {s}\n", .{pkg.info.description.get(strs)});
 
     for (pkg.info.donate.get(strs)) |donate|
         try writer.print("donate = {s}\n", .{donate.get(strs)});
     try writer.writeAll("\n");
 
     try writer.print("[{s}.update]\n", .{name});
-    if (pkg.update.version.get(strs)) |version|
-        try writer.print("version = {s}\n", .{version});
-    if (pkg.update.download.get(strs)) |down|
-        try writer.print("download = {s}\n", .{down});
+    if (pkg.update.version != .empty)
+        try writer.print("version = {s}\n", .{pkg.update.version.get(strs)});
+    if (pkg.update.download != .empty)
+        try writer.print("download = {s}\n", .{pkg.update.download.get(strs)});
     try writer.writeAll("\n");
 
     try writer.print("[{s}.linux_x86_64]\n", .{name});
@@ -325,12 +325,12 @@ pub fn fromGithub(args: struct {
         .pkg = .{
             .info = .{
                 .version = try args.strs.putStr(args.gpa, version),
-                .description = .some(try args.strs.putStr(args.gpa, description)),
+                .description = try args.strs.putStr(args.gpa, description),
                 .donate = donate,
             },
             .update = .{
-                .version = .some(version_uri),
-                .download = if (args.download_uri) |d| .some(try args.strs.putStr(args.gpa, d)) else .null,
+                .version = version_uri,
+                .download = if (args.download_uri) |d| try args.strs.putStr(args.gpa, d) else .empty,
             },
             .linux_x86_64 = .{
                 .url = try args.strs.putStr(args.gpa, download_url.url),

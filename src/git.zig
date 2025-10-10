@@ -43,9 +43,7 @@ pub fn createCommitMessage(
     if (!pkgs.strs.eql(new.pkg.linux_x86_64.hash, old.linux_x86_64.hash))
         return std.fmt.allocPrint(gpa, "{s}: Update hash", .{name});
     if (options.description) {
-        const new_desc = new.pkg.info.description.get(pkgs.strs) orelse "";
-        const old_desc = old.info.description.get(pkgs.strs) orelse "";
-        if (!std.mem.eql(u8, new_desc, old_desc))
+        if (!pkgs.strs.eql(new.pkg.info.description, old.info.description))
             return std.fmt.allocPrint(gpa, "{s}: Update description", .{name});
     }
     if (new.pkg.info.donate.len != old.info.donate.len)
@@ -86,7 +84,7 @@ test createCommitMessage {
             .pkg = .{
                 .info = .{
                     .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = .some(try pkgs.strs.putStr(gpa, "Description 1")),
+                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
@@ -105,7 +103,7 @@ test createCommitMessage {
             .pkg = .{
                 .info = .{
                     .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = .some(try pkgs.strs.putStr(gpa, "Description 1")),
+                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
@@ -117,7 +115,7 @@ test createCommitMessage {
         .{
             .info = .{
                 .version = try pkgs.strs.putStr(gpa, "0.2.0"),
-                .description = .some(try pkgs.strs.putStr(gpa, "Description 2")),
+                .description = try pkgs.strs.putStr(gpa, "Description 2"),
             },
             .update = .{},
             .linux_x86_64 = .{
@@ -134,7 +132,7 @@ test createCommitMessage {
             .pkg = .{
                 .info = .{
                     .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = .some(try pkgs.strs.putStr(gpa, "Description 1")),
+                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
@@ -146,7 +144,7 @@ test createCommitMessage {
         .{
             .info = .{
                 .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                .description = .some(try pkgs.strs.putStr(gpa, "Description 2")),
+                .description = try pkgs.strs.putStr(gpa, "Description 2"),
             },
             .update = .{},
             .linux_x86_64 = .{
@@ -163,7 +161,7 @@ test createCommitMessage {
             .pkg = .{
                 .info = .{
                     .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = .some(try pkgs.strs.putStr(gpa, "Description 1")),
+                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
@@ -175,7 +173,7 @@ test createCommitMessage {
         .{
             .info = .{
                 .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                .description = .some(try pkgs.strs.putStr(gpa, "Description 2")),
+                .description = try pkgs.strs.putStr(gpa, "Description 2"),
             },
             .update = .{},
             .linux_x86_64 = .{
@@ -192,7 +190,7 @@ test createCommitMessage {
             .pkg = .{
                 .info = .{
                     .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = .some(try pkgs.strs.putStr(gpa, "Description 1")),
+                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
@@ -204,7 +202,7 @@ test createCommitMessage {
         .{
             .info = .{
                 .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                .description = .some(try pkgs.strs.putStr(gpa, "Description 2")),
+                .description = try pkgs.strs.putStr(gpa, "Description 2"),
             },
             .update = .{},
             .linux_x86_64 = .{
@@ -221,7 +219,7 @@ test createCommitMessage {
             .pkg = .{
                 .info = .{
                     .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = .some(try pkgs.strs.putStr(gpa, "Description 1")),
+                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
                     .donate = .empty,
                 },
                 .update = .{},
@@ -234,7 +232,7 @@ test createCommitMessage {
         .{
             .info = .{
                 .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                .description = .some(try pkgs.strs.putStr(gpa, "Description 1")),
+                .description = try pkgs.strs.putStr(gpa, "Description 1"),
                 .donate = try pkgs.strs.putStrs(gpa, &.{"a"}),
             },
             .update = .{},
@@ -252,7 +250,7 @@ test createCommitMessage {
             .pkg = .{
                 .info = .{
                     .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = .some(try pkgs.strs.putStr(gpa, "Description 1")),
+                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
                     .donate = try pkgs.strs.putStrs(gpa, &.{"a"}),
                 },
                 .update = .{},
@@ -265,7 +263,7 @@ test createCommitMessage {
         .{
             .info = .{
                 .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                .description = .some(try pkgs.strs.putStr(gpa, "Description 1")),
+                .description = try pkgs.strs.putStr(gpa, "Description 1"),
                 .donate = try pkgs.strs.putStrs(gpa, &.{"b"}),
             },
             .update = .{},

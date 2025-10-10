@@ -9,26 +9,6 @@ pub const Index = enum(u32) {
     pub fn get(i: Index, strings: Strings) [:0]const u8 {
         return strings.getStr(i);
     }
-
-    pub const Optional = enum(u32) {
-        null = std.math.maxInt(u32),
-        _,
-
-        pub fn some(v: Index) Optional {
-            const int = @intFromEnum(v);
-            std.debug.assert(int != @intFromEnum(Optional.null));
-            return @enumFromInt(int);
-        }
-
-        pub fn unwrap(opt: Optional) ?Index {
-            if (opt == .null) return null;
-            return @enumFromInt(@intFromEnum(opt));
-        }
-
-        pub fn get(opt: Optional, strings: Strings) ?[:0]const u8 {
-            return (opt.unwrap() orelse return null).get(strings);
-        }
-    };
 };
 
 pub const Indices = struct {

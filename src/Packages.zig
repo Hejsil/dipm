@@ -211,8 +211,8 @@ fn parseInfo(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !stru
     var parsed = parser.next();
 
     const off = pkgs.strs.putIndicesBegin();
-    var version: Strings.Index.Optional = .null;
-    var desc: Strings.Index.Optional = .null;
+    var version: Strings.Index = .empty;
+    var desc: Strings.Index = .empty;
 
     while (true) : (parsed = parser.next()) switch (parsed.kind) {
         .comment => {},
@@ -222,8 +222,8 @@ fn parseInfo(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !stru
             const prop = parsed.property(parser.string).?;
             const InfoField = std.meta.FieldEnum(Package.Info);
             switch (std.meta.stringToEnum(InfoField, prop.name) orelse continue) {
-                .version => version = .some(try pkgs.strs.putStr(gpa, prop.value)),
-                .description => desc = .some(try pkgs.strs.putStr(gpa, prop.value)),
+                .version => version = try pkgs.strs.putStr(gpa, prop.value),
+                .description => desc = try pkgs.strs.putStr(gpa, prop.value),
                 .donate => _ = try pkgs.strs.putStrs(gpa, &.{prop.value}),
             }
         },
@@ -231,7 +231,7 @@ fn parseInfo(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !stru
 
     const donate = pkgs.strs.putIndicesEnd(off);
     return .{ parsed, .{
-        .version = version.unwrap() orelse return error.InvalidPackagesIni,
+        .version = if (version != .empty) version else return error.InvalidPackagesIni,
         .description = desc,
         .donate = donate,
     } };
@@ -252,8 +252,8 @@ fn parseUpdate(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !st
             const prop = parsed.property(parser.string).?;
             const UpdateField = std.meta.FieldEnum(Package.Update);
             switch (std.meta.stringToEnum(UpdateField, prop.name) orelse continue) {
-                .version => res.version = .some(try pkgs.strs.putStr(gpa, prop.value)),
-                .download => res.download = .some(try pkgs.strs.putStr(gpa, prop.value)),
+                .version => res.version = try pkgs.strs.putStr(gpa, prop.value),
+                .download => res.download = try pkgs.strs.putStr(gpa, prop.value),
             }
         },
     };
@@ -473,7 +473,7 @@ test sort {
         .name = try pkgs.strs.putStr(gpa, "btest"),
         .pkg = .{
             .info = .{ .version = try pkgs.strs.putStr(gpa, "0.2.0") },
-            .update = .{ .version = .some(try pkgs.strs.putStr(gpa, "https://github.com/test/test")) },
+            .update = .{ .version = try pkgs.strs.putStr(gpa, "https://github.com/test/test") },
             .linux_x86_64 = .{
                 .hash = try pkgs.strs.putStr(gpa, "test_hash"),
                 .url = try pkgs.strs.putStr(gpa, "test_url"),
@@ -484,7 +484,7 @@ test sort {
         .name = try pkgs.strs.putStr(gpa, "atest"),
         .pkg = .{
             .info = .{ .version = try pkgs.strs.putStr(gpa, "0.2.0") },
-            .update = .{ .version = .some(try pkgs.strs.putStr(gpa, "https://github.com/test/test")) },
+            .update = .{ .version = try pkgs.strs.putStr(gpa, "https://github.com/test/test") },
             .linux_x86_64 = .{
                 .hash = try pkgs.strs.putStr(gpa, "test_hash"),
                 .url = try pkgs.strs.putStr(gpa, "test_url"),
@@ -666,10 +666,10 @@ test update {
         .pkg = .{
             .info = .{
                 .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                .description = .some(try pkgs.strs.putStr(gpa, "Test package")),
+                .description = try pkgs.strs.putStr(gpa, "Test package"),
                 .donate = try pkgs.strs.putStrs(gpa, &.{ "donate-link", "donate-link" }),
             },
-            .update = .{ .version = .some(try pkgs.strs.putStr(gpa, "https://github.com/test/test")) },
+            .update = .{ .version = try pkgs.strs.putStr(gpa, "https://github.com/test/test") },
             .linux_x86_64 = .{
                 .hash = try pkgs.strs.putStr(gpa, "test_hash1"),
                 .url = try pkgs.strs.putStr(gpa, "test_url1"),
@@ -703,8 +703,8 @@ test update {
         .pkg = .{
             .info = .{ .version = try pkgs.strs.putStr(gpa, "0.2.0") },
             .update = .{
-                .version = .some(try pkgs.strs.putStr(gpa, "https://github.com/test/test")),
-                .download = .some(try pkgs.strs.putStr(gpa, "https://download.com")),
+                .version = try pkgs.strs.putStr(gpa, "https://github.com/test/test"),
+                .download = try pkgs.strs.putStr(gpa, "https://download.com"),
             },
             .linux_x86_64 = .{
                 .hash = try pkgs.strs.putStr(gpa, "test_hash2"),

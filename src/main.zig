@@ -639,7 +639,7 @@ fn pkgsUpdateCommand(prog: *Program) !void {
 
             try prog.pkgsAdd(.{
                 .name = pkg_name.get(pkgs.strs),
-                .version = pkg.update.version.get(pkgs.strs) orelse "",
+                .version = pkg.update.version.get(pkgs.strs),
                 .download = pkg.update.download.get(pkgs.strs),
             }, options);
         }
@@ -656,7 +656,7 @@ fn pkgsUpdateCommand(prog: *Program) !void {
 
             try prog.pkgsAdd(.{
                 .name = pkg_name,
-                .version = pkg.update.version.get(pkgs.strs) orelse "",
+                .version = pkg.update.version.get(pkgs.strs),
                 .download = pkg.update.download.get(pkgs.strs),
             }, options);
         }
