@@ -124,23 +124,14 @@ pub fn fromUrl(options: struct {
 
     target: Target,
 }) !Named {
-    const github_url = "https://github.com/";
-    if (std.mem.startsWith(u8, options.version_uri, github_url)) {
-        const repo = options.version_uri[github_url.len..];
-        var repo_split = std.mem.splitScalar(u8, repo, '/');
-
-        const repo_user = repo_split.first();
-        const repo_name = repo_split.next() orelse "";
+    if (GithubRepo.fromUri(options.version_uri)) |repo| {
         return fromGithub(.{
             .gpa = options.gpa,
             .strs = options.strs,
+            .repo = repo,
             .http_client = options.http_client,
             .progress = options.progress,
             .name = options.name,
-            .repo = .{
-                .user = repo_user,
-                .name = repo_name,
-            },
             .download_uri = options.download_uri,
             .target = options.target,
         });
@@ -149,9 +140,24 @@ pub fn fromUrl(options: struct {
     }
 }
 
-pub const GithubRepo = struct {
+const GithubRepo = struct {
     user: []const u8,
     name: []const u8,
+
+    fn fromUri(uri: []const u8) ?GithubRepo {
+        const github_uri = "https://github.com/";
+        if (std.mem.startsWith(u8, uri, github_uri))
+            return null;
+
+        const repo = uri[github_uri.len..];
+        var repo_split = std.mem.splitScalar(u8, repo, '/');
+
+        const user = repo_split.first();
+        const name = repo_split.next() orelse "";
+
+        var name_split = std.mem.splitScalar(u8, name, '?');
+        return .{ .user = user, .name = name_split.first() };
+    }
 };
 
 /// Creates a package a Github repository. Will query the github API to figure out the
