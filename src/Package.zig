@@ -1386,10 +1386,18 @@ fn findManPages(args: struct {
             continue;
         if (!isManPage(entry.basename))
             continue;
-        _ = try args.strs.putStrs(args.gpa, &.{entry.path});
-    }
 
-    const res = args.strs.putIndicesEnd(off);
+        var name_split = std.mem.splitScalar(u8, entry.path, '.');
+        _ = name_split.first();
+        const man_section = name_split.next() orelse continue;
+
+        const install = try args.strs.print(args.gpa, "man/man{s}/{s}:{s}", .{
+            man_section,
+            std.fs.path.basename(entry.path),
+            entry.path,
+        });
+        _ = try args.strs.putIndices(args.gpa, &.{install});
+    }
 
     const SortContext = struct {
         strs: *Strings,
@@ -1398,13 +1406,14 @@ fn findManPages(args: struct {
             return std.mem.lessThan(u8, a.get(ctx.strs.*), b.get(ctx.strs.*));
         }
     };
+
+    const res = args.strs.putIndicesEnd(off);
     std.mem.sort(
         Strings.Index,
         res.get(args.strs.*),
         SortContext{ .strs = args.strs },
         SortContext.lessThan,
     );
-
     return res;
 }
 
@@ -1496,14 +1505,14 @@ test findManPages {
             .{ .sub_path = "subdir/text-0.2.0", .data = "" },
         },
         .expected = &.{
-            "subdir/text.1",
-            "subdir/text.1.gz",
-            "subdir/text.10",
-            "subdir/text.10.gz",
-            "text.1",
-            "text.1.gz",
-            "text.10",
-            "text.10.gz",
+            "man/man1/text.1.gz:subdir/text.1.gz",
+            "man/man1/text.1.gz:text.1.gz",
+            "man/man1/text.1:subdir/text.1",
+            "man/man1/text.1:text.1",
+            "man/man10/text.10.gz:subdir/text.10.gz",
+            "man/man10/text.10.gz:text.10.gz",
+            "man/man10/text.10:subdir/text.10",
+            "man/man10/text.10:text.10",
         },
     });
 }
