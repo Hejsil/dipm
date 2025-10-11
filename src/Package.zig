@@ -263,59 +263,32 @@ pub fn fromGithub(args: struct {
         .urls = download_urls.items(.url),
     });
     const download_url = download_urls.get(download_url_idx);
-
-    var global_tmp_dir = try std.fs.cwd().makeOpenPath("/tmp/dipm/", .{});
-    defer global_tmp_dir.close();
-
-    var tmp_dir = try fs.tmpDir(global_tmp_dir, .{ .iterate = true });
-    defer tmp_dir.deleteAndClose();
-
-    const downloaded_file_name = std.fs.path.basename(download_url.url);
-    const downloaded_file = try tmp_dir.dir.createFile(downloaded_file_name, .{ .read = true });
-    defer downloaded_file.close();
-
-    var downloaded_file_buf: [std.heap.page_size_min]u8 = undefined;
-    var downloaded_file_writer = downloaded_file.writer(&downloaded_file_buf);
-    const pkg_download_result = try download.download(.{
-        .writer = &downloaded_file_writer.interface,
-        .client = args.http_client,
-        .uri_str = download_url.url,
-        .progress = args.progress,
-    });
-    try downloaded_file_writer.end();
-    if (pkg_download_result.status != .ok)
-        return error.FileDownloadFailed;
-
-    // TODO: Get rid of this once we have support for bz2 compression
-    var download_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const downloaded_path = try tmp_dir.dir.realpath(downloaded_file_name, &download_path_buf);
-
-    try downloaded_file.seekTo(0);
-    try fs.extract(.{
-        .gpa = tmp_arena,
-        .input_name = downloaded_path,
-        .input_file = downloaded_file,
-        .output_dir = tmp_dir.dir,
-    });
+    var downloaded = try downloadAndExtractToTmp(
+        tmp_arena,
+        args.http_client,
+        args.progress,
+        download_url.url,
+    );
+    defer downloaded.dir.deleteAndClose();
 
     const shares = try findShare(.{
         .gpa = args.gpa,
         .strs = args.strs,
-        .dir = tmp_dir.dir,
+        .dir = downloaded.dir.dir,
     });
     const man_pages = try findManPages(.{
         .gpa = args.gpa,
         .strs = args.strs,
-        .dir = tmp_dir.dir,
+        .dir = downloaded.dir.dir,
     });
     const binaries = try findStaticallyLinkedBinaries(.{
         .gpa = args.gpa,
         .strs = args.strs,
         .arch = args.target.arch,
-        .dir = tmp_dir.dir,
+        .dir = downloaded.dir.dir,
     });
 
-    const hash = std.fmt.bytesToHex(pkg_download_result.hash, .lower);
+    const hash = std.fmt.bytesToHex(downloaded.result.hash, .lower);
     const version_uri = try args.strs.print(args.gpa, "https://github.com/{s}/{s}", .{
         args.repo.user,
         args.repo.name,
@@ -346,6 +319,54 @@ pub fn fromGithub(args: struct {
             },
         },
     };
+}
+
+const Downloaded = struct {
+    dir: fs.TmpDir,
+    result: download.Result,
+};
+
+fn downloadAndExtractToTmp(
+    gpa: std.mem.Allocator,
+    http_client: *std.http.Client,
+    progress: Progress.Node,
+    download_url: []const u8,
+) !Downloaded {
+    var global_tmp_dir = try std.fs.cwd().makeOpenPath("/tmp/dipm/", .{});
+    defer global_tmp_dir.close();
+
+    var res = try fs.tmpDir(global_tmp_dir, .{ .iterate = true });
+    errdefer res.deleteAndClose();
+
+    const downloaded_file_name = std.fs.path.basename(download_url);
+    const downloaded_file = try res.dir.createFile(downloaded_file_name, .{ .read = true });
+    defer downloaded_file.close();
+
+    var buf: [std.heap.page_size_min]u8 = undefined;
+    var writer = downloaded_file.writer(&buf);
+    const result = try download.download(.{
+        .writer = &writer.interface,
+        .client = http_client,
+        .uri_str = download_url,
+        .progress = progress,
+    });
+    try writer.end();
+    if (result.status != .ok)
+        return error.FileDownloadFailed;
+
+    // TODO: Get rid of this once we have support for bz2 compression
+    var download_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const downloaded_path = try res.dir.realpath(downloaded_file_name, &download_path_buf);
+
+    try downloaded_file.seekTo(0);
+    try fs.extract(.{
+        .gpa = gpa,
+        .input_name = downloaded_path,
+        .input_file = downloaded_file,
+        .output_dir = res.dir,
+    });
+
+    return .{ .dir = res, .result = result };
 }
 
 const github_api_uri_prefix = "https://api.github.com/";
