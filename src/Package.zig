@@ -146,7 +146,7 @@ const GithubRepo = struct {
 
     fn fromUri(uri: []const u8) ?GithubRepo {
         const github_uri = "https://github.com/";
-        if (std.mem.startsWith(u8, uri, github_uri))
+        if (!std.mem.startsWith(u8, uri, github_uri))
             return null;
 
         const repo = uri[github_uri.len..];
