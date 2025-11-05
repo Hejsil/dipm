@@ -9,6 +9,12 @@ pub const Index = enum(u32) {
     pub fn get(i: Index, strings: Strings) [:0]const u8 {
         return strings.getStr(i);
     }
+
+    pub fn getNullIfEmpty(i: Index, strings: Strings) ?[:0]const u8 {
+        const res = i.get(strings);
+        if (res.len == 0) return null;
+        return res;
+    }
 };
 
 pub const Indices = struct {
