@@ -1315,16 +1315,18 @@ fn findShare(args: struct {
 
         var dir = try args.dir.openDir(entry.path, .{ .iterate = true });
         var it = dir.iterate();
-        while (try it.next()) |share_dir_entry| {
+        share_dir_loop: while (try it.next()) |share_dir_entry| {
             // Some of the folders we don't want to install
-            if (std.mem.eql(u8, share_dir_entry.name, "man"))
-                continue;
-            if (std.mem.eql(u8, share_dir_entry.name, "doc"))
-                continue;
-            if (std.mem.eql(u8, share_dir_entry.name, "applications"))
-                continue;
             if (std.mem.indexOf(u8, share_dir_entry.name, "completion") != null)
                 continue;
+
+            const names_to_ignore = [_][]const u8{
+                "man", "doc", "applications", "zsh", "fish",
+            };
+            for (names_to_ignore) |name_to_ignore| {
+                if (std.mem.eql(u8, share_dir_entry.name, name_to_ignore))
+                    continue :share_dir_loop;
+            }
 
             const path = try args.strs.print(args.gpa, "{s}/{s}", .{ entry.path, share_dir_entry.name });
             _ = try args.strs.putIndices(args.gpa, &.{path});
@@ -1389,6 +1391,8 @@ test findShare {
             .{ .sub_path = "share/bash-completion/test.txt", .data = "" },
             .{ .sub_path = "share/doc/test.txt", .data = "" },
             .{ .sub_path = "share/man/test.txt", .data = "" },
+            .{ .sub_path = "share/zsh/test.txt", .data = "" },
+            .{ .sub_path = "share/fish/test.txt", .data = "" },
         },
         .expected = &.{
             "share/a",
