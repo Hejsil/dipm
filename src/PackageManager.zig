@@ -123,7 +123,6 @@ fn packages(pm: *PackageManager) !*const Packages {
 
     pm.cache.pkgs = try Packages.download(.{
         .gpa = pm.gpa,
-        .http_client = &pm.http_client,
         .diagnostics = pm.diag,
         .progress = pm.progress,
         .prefix = pm.prefix,

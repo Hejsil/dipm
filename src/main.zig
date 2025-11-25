@@ -253,12 +253,8 @@ fn donateCommand(prog: *Program) !void {
             pkgs_to_show_hm.putAssumeCapacity(name, {});
     }
 
-    var http_client = std.http.Client{ .allocator = prog.gpa };
-    defer http_client.deinit();
-
     var pkgs = try Packages.download(.{
         .gpa = prog.gpa,
-        .http_client = &http_client,
         .diagnostics = prog.diag,
         .progress = prog.progress,
         .prefix = prog.prefix(),
@@ -508,12 +504,8 @@ fn listAllCommand(prog: *Program) !void {
         }
     }
 
-    var http_client = std.http.Client{ .allocator = prog.gpa };
-    defer http_client.deinit();
-
     var pkgs = try Packages.download(.{
         .gpa = prog.gpa,
-        .http_client = &http_client,
         .diagnostics = prog.diag,
         .progress = prog.progress,
         .prefix = prog.prefix(),

@@ -23,8 +23,6 @@ pub const Download = enum {
 const DownloadOptions = struct {
     gpa: std.mem.Allocator,
 
-    http_client: ?*std.http.Client = null,
-
     /// Successes and failures are reported to the diagnostics. Set this for more details
     /// about failures.
     diagnostics: *Diagnostics,
@@ -65,11 +63,14 @@ pub fn download(options: DownloadOptions) !Packages {
         const download_node = options.progress.start("↓ pkgs.ini", 1);
         defer options.progress.end(download_node);
 
+        var http_client = std.http.Client{ .allocator = options.gpa };
+        defer http_client.deinit();
+
         var pkgs_file_buf: [std.heap.page_size_min]u8 = undefined;
         var pkgs_file_writer = pkgs_file.writer(&pkgs_file_buf);
         const result = try @import("download.zig").download(.{
             .writer = &pkgs_file_writer.interface,
-            .client = options.http_client,
+            .client = &http_client,
             .uri_str = options.pkgs_uri,
             .progress = download_node,
         });
