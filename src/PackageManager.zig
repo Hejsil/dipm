@@ -14,12 +14,6 @@ pkgs_download_method: Packages.Download,
 lock: std.fs.File,
 
 prefix_dir: std.fs.Dir,
-bin_dir: std.fs.Dir,
-lib_dir: std.fs.Dir,
-share_dir: std.fs.Dir,
-
-own_data_dir: std.fs.Dir,
-own_tmp_dir: std.fs.Dir,
 
 cache: struct {
     pkgs: ?Packages = null,
@@ -30,22 +24,8 @@ pub fn init(options: Options) !PackageManager {
     var prefix_dir = try cwd.makeOpenPath(options.prefix, .{});
     errdefer prefix_dir.close();
 
-    var bin_dir = try prefix_dir.makeOpenPath(paths.bin_subpath, .{});
-    errdefer bin_dir.close();
-
-    var lib_dir = try prefix_dir.makeOpenPath(paths.lib_subpath, .{});
-    errdefer lib_dir.close();
-
-    var share_dir = try prefix_dir.makeOpenPath(paths.share_subpath, .{});
-    errdefer share_dir.close();
-
     var own_data_dir = try prefix_dir.makeOpenPath(paths.own_data_subpath, .{});
-    errdefer own_data_dir.close();
-
-    var own_tmp_dir = try prefix_dir.makeOpenPath(paths.own_tmp_subpath, .{
-        .iterate = true,
-    });
-    errdefer own_tmp_dir.close();
+    defer own_data_dir.close();
 
     var lock = try own_data_dir.createFile("lock", .{ .lock = .exclusive });
     errdefer lock.close();
@@ -67,11 +47,6 @@ pub fn init(options: Options) !PackageManager {
         .pkgs_download_method = options.download,
         .lock = lock,
         .prefix_dir = prefix_dir,
-        .bin_dir = bin_dir,
-        .lib_dir = lib_dir,
-        .share_dir = share_dir,
-        .own_data_dir = own_data_dir,
-        .own_tmp_dir = own_tmp_dir,
         .installed = installed,
     };
 }
@@ -98,9 +73,7 @@ pub const Options = struct {
 };
 
 pub fn cleanup(pm: PackageManager) !void {
-    var iter = pm.own_tmp_dir.iterate();
-    while (try iter.next()) |entry|
-        try pm.own_tmp_dir.deleteTree(entry.name);
+    try pm.prefix_dir.deleteTree(paths.own_tmp_subpath);
 }
 
 pub fn deinit(pm: *PackageManager) void {
@@ -110,11 +83,6 @@ pub fn deinit(pm: *PackageManager) void {
     pm.installed.deinit(pm.gpa);
     pm.lock.close();
     pm.prefix_dir.close();
-    pm.bin_dir.close();
-    pm.lib_dir.close();
-    pm.share_dir.close();
-    pm.own_data_dir.close();
-    pm.own_tmp_dir.close();
 }
 
 fn packages(pm: *PackageManager) !*const Packages {
@@ -158,10 +126,13 @@ pub fn installMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
     };
     defer pm.progress.end(global_progress);
 
+    var tmp_dir = try pm.prefix_dir.makeOpenPath(paths.own_tmp_subpath, .{});
+    defer tmp_dir.close();
+
     const pkgs = try pm.packages();
     var downloads = try DownloadAndExtractJobs.init(.{
         .gpa = pm.gpa,
-        .dir = pm.own_tmp_dir,
+        .dir = tmp_dir,
         .progress = global_progress,
         .pkgs = pkgs,
         .pkgs_to_download = pkgs_to_install.values(),
@@ -331,11 +302,14 @@ fn installExtractedPackage(
             pm.prefix_dir.deleteTree(location.get(pm.installed.strs)) catch {};
     }
 
+    var bin_dir = try pm.prefix_dir.makeOpenPath(paths.bin_subpath, .{});
+    defer bin_dir.close();
+
     for (pkg.install.install_bin.get(pkgs.strs)) |install_field| {
         const the_install = Package.Install.fromString(install_field.get(pkgs.strs));
         const join_fmt = std.fs.path.fmtJoin(&.{ paths.bin_subpath, the_install.to });
         const path = try pm.installed.strs.print(pm.gpa, "{f}", .{join_fmt});
-        installBin(the_install, from_dir, pm.bin_dir) catch |err| switch (err) {
+        installBin(the_install, from_dir, bin_dir) catch |err| switch (err) {
             error.PathAlreadyExists => {
                 try pm.diag.pathAlreadyExists(.{
                     .name = try pm.diag.putStr(pkg.name),
@@ -348,6 +322,12 @@ fn installExtractedPackage(
         locations.appendAssumeCapacity(path);
     }
 
+    var lib_dir = try pm.prefix_dir.makeOpenPath(paths.lib_subpath, .{});
+    defer lib_dir.close();
+
+    var share_dir = try pm.prefix_dir.makeOpenPath(paths.share_subpath, .{});
+    defer share_dir.close();
+
     const GenericInstall = struct {
         dir: std.fs.Dir,
         path: []const u8,
@@ -355,8 +335,8 @@ fn installExtractedPackage(
     };
 
     const generic_installs = [_]GenericInstall{
-        .{ .dir = pm.lib_dir, .path = paths.lib_subpath, .installs = pkg.install.install_lib },
-        .{ .dir = pm.share_dir, .path = paths.share_subpath, .installs = pkg.install.install_share },
+        .{ .dir = lib_dir, .path = paths.lib_subpath, .installs = pkg.install.install_lib },
+        .{ .dir = share_dir, .path = paths.share_subpath, .installs = pkg.install.install_share },
     };
     for (generic_installs) |install| {
         for (install.installs.get(pkgs.strs)) |install_field| {
@@ -589,9 +569,12 @@ fn updatePackages(pm: *PackageManager, pkg_names: []const []const u8, options: s
     };
     defer pm.progress.end(global_progress);
 
+    var tmp_dir = try pm.prefix_dir.makeOpenPath(paths.own_tmp_subpath, .{});
+    defer tmp_dir.close();
+
     var downloads = try DownloadAndExtractJobs.init(.{
         .gpa = pm.gpa,
-        .dir = pm.own_tmp_dir,
+        .dir = tmp_dir,
         .progress = global_progress,
         .pkgs = pkgs,
         .pkgs_to_download = pkgs_to_install.values(),
