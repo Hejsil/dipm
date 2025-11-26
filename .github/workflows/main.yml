@@ -3,7 +3,7 @@ on:
   push:
   pull_request:
   schedule:
-    - cron: '0 0 * * 0'
+    - cron: "0 0 * * 0"
 
 jobs:
   test:
@@ -17,7 +17,6 @@ jobs:
           submodules: recursive
       - uses: mlugg/setup-zig@v2
         with:
-          version: master
           cache-key: ${{ matrix.optimize }}
       - run: zig build test -Doptimize=${{ matrix.optimize }}
   build:
@@ -27,14 +26,10 @@ jobs:
         with:
           submodules: recursive
       - uses: mlugg/setup-zig@v2
-        with:
-          version: master
       - run: zig build install
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: mlugg/setup-zig@v2
-        with:
-          version: master
       - run: zig fmt --check .
