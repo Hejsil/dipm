@@ -3,6 +3,10 @@ pub fn main() !u8 {
     const gpa = gpa_state.allocator();
     defer _ = gpa_state.deinit();
 
+    var io_threaded = std.Io.Threaded.init(gpa);
+    const io = io_threaded.io();
+    defer io_threaded.deinit();
+
     const args = std.process.argsAlloc(gpa) catch @panic("OOM");
     defer std.process.argsFree(gpa, args);
 
@@ -17,6 +21,7 @@ pub fn main() !u8 {
     // We don't really care to store the thread. Just let the os clean it up
     if (stderr.file.supportsAnsiEscapeCodes()) blk: {
         const thread = std.Thread.spawn(.{}, renderThread, .{
+            io,
             &stderr,
             progress,
             &io_lock,
@@ -28,6 +33,7 @@ pub fn main() !u8 {
     }
 
     const main_res = mainFull(.{
+        .io = io,
         .gpa = gpa,
         .args = args[1..],
         .io_lock = &io_lock,
@@ -58,22 +64,28 @@ pub fn main() !u8 {
     return res;
 }
 
-fn renderThread(stderr: *std.fs.File.Writer, progress: *Progress, io_lock: *std.Thread.Mutex) void {
+fn renderThread(
+    io: std.Io,
+    stderr: *std.fs.File.Writer,
+    progress: *Progress,
+    io_lock: *std.Thread.Mutex,
+) void {
     const fps = 15;
-    const delay = std.time.ns_per_s / fps;
-    const initial_delay = std.time.ns_per_s / 4;
+    const delay = std.Io.Duration.fromNanoseconds(std.time.ns_per_s / fps);
+    const initial_delay = std.Io.Duration.fromNanoseconds(std.time.ns_per_s / 4);
 
-    std.Thread.sleep(initial_delay);
+    io.sleep(initial_delay, .awake) catch {};
     while (true) {
         io_lock.lock();
         progress.renderToTty(stderr) catch {};
         stderr.interface.flush() catch {};
         io_lock.unlock();
-        std.Thread.sleep(delay);
+        io.sleep(delay, .awake) catch {};
     }
 }
 
 pub const MainOptions = struct {
+    io: std.Io,
     gpa: std.mem.Allocator,
     args: []const []const u8,
 
@@ -98,6 +110,7 @@ pub fn mainFull(options: MainOptions) !void {
     defer diag.deinit();
 
     var prog = Program{
+        .io = options.io,
         .gpa = options.gpa,
         .arena = arena,
         .diag = &diag,
@@ -186,6 +199,7 @@ pub fn mainCommand(prog: *Program) !void {
 
 const Program = @This();
 
+io: std.Io,
 gpa: std.mem.Allocator,
 arena: std.mem.Allocator,
 diag: *Diagnostics,
@@ -254,6 +268,7 @@ fn donateCommand(prog: *Program) !void {
     }
 
     var pkgs = try Packages.download(.{
+        .io = prog.io,
         .gpa = prog.gpa,
         .diagnostics = prog.diag,
         .progress = prog.progress,
@@ -280,7 +295,7 @@ fn donateCommand(prog: *Program) !void {
     if (pkgs_to_show.len != 0)
         return;
 
-    var installed_pkgs = try InstalledPackages.open(prog.gpa, prog.prefix());
+    var installed_pkgs = try InstalledPackages.open(prog.gpa, prog.io, prog.prefix());
     defer installed_pkgs.deinit(prog.gpa);
 
     for (installed_pkgs.by_name.keys()) |pkg_name_index| {
@@ -322,6 +337,7 @@ fn installCommand(prog: *Program) !void {
     }
 
     var pm = try PackageManager.init(.{
+        .io = prog.io,
         .gpa = prog.gpa,
         .diag = prog.diag,
         .progress = prog.progress,
@@ -358,6 +374,7 @@ fn uninstallCommand(prog: *Program) !void {
     }
 
     var pm = try PackageManager.init(.{
+        .io = prog.io,
         .gpa = prog.gpa,
         .diag = prog.diag,
         .progress = prog.progress,
@@ -401,6 +418,7 @@ fn updateCommand(prog: *Program) !void {
     }
 
     var pm = try PackageManager.init(.{
+        .io = prog.io,
         .gpa = prog.gpa,
         .diag = prog.diag,
         .progress = prog.progress,
@@ -470,7 +488,7 @@ fn listInstalledCommand(prog: *Program) !void {
         }
     }
 
-    var installed = try InstalledPackages.open(prog.gpa, prog.prefix());
+    var installed = try InstalledPackages.open(prog.gpa, prog.io, prog.prefix());
     defer installed.deinit(prog.gpa);
 
     prog.io_lock.lock();
@@ -506,6 +524,7 @@ fn listAllCommand(prog: *Program) !void {
 
     var pkgs = try Packages.download(.{
         .gpa = prog.gpa,
+        .io = prog.io,
         .diagnostics = prog.diag,
         .progress = prog.progress,
         .prefix = prog.prefix(),
@@ -591,7 +610,7 @@ const pkgs_update_usage =
 
 fn pkgsUpdateCommand(prog: *Program) !void {
     var pkgs_to_update = std.StringArrayHashMap(void).init(prog.arena);
-    var delay: u64 = 0;
+    var delay = std.Io.Duration.fromSeconds(0);
     var options = PackagesAddOptions{
         .update_description = false,
     };
@@ -612,7 +631,7 @@ fn pkgsUpdateCommand(prog: *Program) !void {
     }
 
     const cwd = std.fs.cwd();
-    var pkgs = try Packages.parseFromPath(prog.gpa, cwd, options.pkgs_ini_path);
+    var pkgs = try Packages.parseFromPath(prog.gpa, prog.io, cwd, options.pkgs_ini_path);
     defer pkgs.deinit(prog.gpa);
 
     const update_all = pkgs_to_update.count() == 0;
@@ -626,8 +645,8 @@ fn pkgsUpdateCommand(prog: *Program) !void {
     if (update_all) {
         for (pkgs.by_name.keys(), pkgs.by_name.values(), 0..) |pkg_name, pkg, i| {
             defer progress.advance(1);
-            if (i != 0 and delay != 0)
-                std.Thread.sleep(delay);
+            if (i != 0 and delay.nanoseconds != 0)
+                try prog.io.sleep(delay, .awake);
 
             try prog.pkgsAdd(.{
                 .name = pkg_name.get(pkgs.strs),
@@ -638,8 +657,8 @@ fn pkgsUpdateCommand(prog: *Program) !void {
     } else {
         for (pkgs_to_update.keys(), 0..) |pkg_name, i| {
             defer progress.advance(1);
-            if (i != 0 and delay != 0)
-                std.Thread.sleep(delay);
+            if (i != 0 and delay.nanoseconds != 0)
+                try prog.io.sleep(delay, .awake);
 
             const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
                 try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
@@ -721,7 +740,10 @@ const AddPackage = struct {
 };
 
 fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !void {
-    var http_client = std.http.Client{ .allocator = prog.gpa };
+    var http_client = std.http.Client{
+        .io = prog.io,
+        .allocator = prog.gpa,
+    };
     defer http_client.deinit();
 
     const cwd = std.fs.cwd();
@@ -733,13 +755,14 @@ fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !vo
     defer pkgs_ini_dir.close();
     defer pkgs_ini_file.close();
 
-    var pkgs = try Packages.parseFile(prog.gpa, pkgs_ini_file);
+    var pkgs = try Packages.parseFile(prog.gpa, prog.io, pkgs_ini_file);
     defer pkgs.deinit(prog.gpa);
 
     const progress = prog.progress.start(add_pkg.name orelse add_pkg.version, 1);
     defer prog.progress.end(progress);
 
     const pkg = Package.fromUrl(.{
+        .io = prog.io,
         .gpa = prog.gpa,
         .strs = &pkgs.strs,
         .http_client = &http_client,

@@ -8,6 +8,8 @@ pub fn download(options: struct {
     /// be "downloaded"
     client: ?*std.http.Client = null,
     uri_str: []const u8,
+
+    io: std.Io,
     writer: *std.Io.Writer,
 
     progress: Progress.Node = .none,
@@ -25,7 +27,7 @@ pub fn download(options: struct {
         const file = try std.fs.cwd().openFile(path, .{});
 
         var file_buf: [std.heap.page_size_min]u8 = undefined;
-        var file_reader = file.reader(&file_buf);
+        var file_reader = file.reader(options.io, &file_buf);
         _ = try file_reader.interface.streamRemaining(out);
         try out.flush();
         break :blk .ok;

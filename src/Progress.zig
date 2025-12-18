@@ -45,8 +45,8 @@ pub const Node = enum(usize) {
     }
 
     // Wraps a file reader to provide progress
-    pub fn fileReader(node: Node, file: std.fs.File, buffer: []u8) Reader {
-        return .init(node, file.reader(buffer));
+    pub fn fileReader(node: Node, file: std.fs.File, io: std.Io, buffer: []u8) Reader {
+        return .init(node, file.reader(io, buffer));
     }
 
     pub const Reader = struct {

@@ -3,7 +3,7 @@ by_name: std.ArrayHashMapUnmanaged(Strings.Index, InstalledPackage, void, true),
 
 file: ?std.fs.File,
 
-pub fn open(gpa: std.mem.Allocator, prefix: []const u8) !InstalledPackages {
+pub fn open(gpa: std.mem.Allocator, io: std.Io, prefix: []const u8) !InstalledPackages {
     const cwd = std.fs.cwd();
     var prefix_dir = try cwd.makeOpenPath(prefix, .{});
     defer prefix_dir.close();
@@ -14,7 +14,7 @@ pub fn open(gpa: std.mem.Allocator, prefix: []const u8) !InstalledPackages {
     const file = try own_data_dir.createFile(paths.installed_file_name, .{ .read = true, .truncate = false });
     errdefer file.close();
 
-    return parseFile(gpa, file);
+    return parseFile(gpa, io, file);
 }
 
 pub fn deinit(pkgs: *InstalledPackages, gpa: std.mem.Allocator) void {
@@ -30,8 +30,8 @@ pub fn isInstalled(pkgs: *const InstalledPackages, pkg_name: []const u8) bool {
     return pkgs.by_name.containsAdapted(pkg_name, pkgs.strs.adapter());
 }
 
-pub fn parseFile(gpa: std.mem.Allocator, file: std.fs.File) !InstalledPackages {
-    var reader = file.reader(&.{});
+pub fn parseFile(gpa: std.mem.Allocator, io: std.Io, file: std.fs.File) !InstalledPackages {
+    var reader = file.reader(io, &.{});
     var res = try parseReader(gpa, &reader.interface);
     errdefer res.deinit();
 

@@ -160,6 +160,7 @@ pub const FileType = enum {
 
 pub const ExtractOptions = struct {
     gpa: std.mem.Allocator,
+    io: std.Io,
 
     input_name: []const u8,
     input_file: std.fs.File,
@@ -174,7 +175,7 @@ pub fn extract(options: ExtractOptions) !void {
 
     var decomp_buf: [std.compress.flate.max_window_len]u8 = undefined;
     var input_file_reader_buf: [std.heap.page_size_min]u8 = undefined;
-    var input_file_reader = options.node.fileReader(options.input_file, &input_file_reader_buf);
+    var input_file_reader = options.node.fileReader(options.input_file, options.io, &input_file_reader_buf);
     const reader = &input_file_reader.file.interface;
 
     switch (FileType.fromPath(options.input_name)) {
@@ -318,6 +319,7 @@ fn testOneExtract(file_type: FileType, files: []const std.fs.Dir.WriteFileOption
 
     try extract(.{
         .gpa = std.testing.allocator,
+        .io = std.testing.io,
         .input_file = compressed_file,
         .input_name = compressed_file_path,
         .output_dir = tmp_dir.dir,
