@@ -1,7 +1,7 @@
-pub fn parseDuration(str: []const u8) !u64 {
+pub fn parseDuration(str: []const u8) !std.Io.Duration {
     const Suffix = struct {
         str: []const u8,
-        mult: u64,
+        mult: i96,
     };
 
     const suffixes = [_]Suffix{
@@ -16,15 +16,16 @@ pub fn parseDuration(str: []const u8) !u64 {
         }
     } else .{ str, std.time.ns_per_s };
 
-    return (try std.fmt.parseUnsigned(u8, trimmed, 10)) * mult;
+    const base = try std.fmt.parseUnsigned(u32, trimmed, 10);
+    return .fromNanoseconds(base * mult);
 }
 
 test parseDuration {
-    try std.testing.expectEqual(@as(u64, 2 * std.time.ns_per_s), try parseDuration("2"));
-    try std.testing.expectEqual(@as(u64, 4 * std.time.ns_per_s), try parseDuration("4s"));
-    try std.testing.expectEqual(@as(u64, 6 * std.time.ns_per_min), try parseDuration("6m"));
-    try std.testing.expectEqual(@as(u64, 8 * std.time.ns_per_hour), try parseDuration("8h"));
-    try std.testing.expectEqual(@as(u64, 10 * std.time.ns_per_day), try parseDuration("10d"));
+    try std.testing.expectEqual(std.Io.Duration.fromSeconds(2), try parseDuration("2"));
+    try std.testing.expectEqual(std.Io.Duration.fromSeconds(4), try parseDuration("4s"));
+    try std.testing.expectEqual(std.Io.Duration.fromSeconds(6 * 60), try parseDuration("6m"));
+    try std.testing.expectEqual(std.Io.Duration.fromSeconds(8 * 60 * 60), try parseDuration("8h"));
+    try std.testing.expectEqual(std.Io.Duration.fromSeconds(10 * 60 * 60 * 24), try parseDuration("10d"));
 }
 
 test {}

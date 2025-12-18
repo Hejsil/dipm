@@ -106,6 +106,7 @@ pub fn write(pkg: Package, strs: Strings, name: []const u8, writer: *std.Io.Writ
 /// package based on the domain. See:
 /// * fromGithub
 pub fn fromUrl(options: struct {
+    io: std.Io,
     gpa: std.mem.Allocator,
     strs: *Strings,
 
@@ -126,6 +127,7 @@ pub fn fromUrl(options: struct {
 }) !Named {
     if (GithubRepo.fromUri(options.version_uri)) |repo| {
         return fromGithub(.{
+            .io = options.io,
             .gpa = options.gpa,
             .strs = options.strs,
             .repo = repo,
@@ -163,6 +165,7 @@ const GithubRepo = struct {
 /// Creates a package a Github repository. Will query the github API to figure out the
 /// latest release of the repository and look for suitable download links for that release.
 pub fn fromGithub(args: struct {
+    io: std.Io,
     gpa: std.mem.Allocator,
     strs: *Strings,
 
@@ -196,18 +199,21 @@ pub fn fromGithub(args: struct {
     defer tmp_arena_state.deinit();
 
     const repository = try githubDownloadRepository(.{
+        .io = args.io,
         .arena = tmp_arena,
         .http_client = args.http_client,
         .repo = args.repo,
         .repository_uri = args.repository_uri,
     });
     const latest_release = try githubDownloadLatestRelease(.{
+        .io = args.io,
         .arena = tmp_arena,
         .http_client = args.http_client,
         .repo = args.repo,
         .latest_release_uri = args.latest_release_uri,
     });
     const donate = try githubDownloadSponsorUrls(.{
+        .io = args.io,
         .gpa = args.gpa,
         .strs = args.strs,
         .http_client = args.http_client,
@@ -227,6 +233,7 @@ pub fn fromGithub(args: struct {
     if (args.download_uri) |download_uri| {
         var content = std.Io.Writer.Allocating.init(tmp_arena);
         const pkg_download_result = try download.download(.{
+            .io = args.io,
             .writer = &content.writer,
             .client = args.http_client,
             .uri_str = download_uri,
@@ -264,6 +271,7 @@ pub fn fromGithub(args: struct {
     });
     const download_url = download_urls.get(download_url_idx);
     var downloaded = try downloadAndExtractToTmp(
+        args.io,
         tmp_arena,
         args.http_client,
         args.progress,
@@ -327,6 +335,7 @@ const Downloaded = struct {
 };
 
 fn downloadAndExtractToTmp(
+    io: std.Io,
     gpa: std.mem.Allocator,
     http_client: *std.http.Client,
     progress: Progress.Node,
@@ -345,6 +354,7 @@ fn downloadAndExtractToTmp(
     var buf: [std.heap.page_size_min]u8 = undefined;
     var writer = downloaded_file.writer(&buf);
     const result = try download.download(.{
+        .io = io,
         .writer = &writer.interface,
         .client = http_client,
         .uri_str = download_url,
@@ -360,6 +370,7 @@ fn downloadAndExtractToTmp(
 
     try downloaded_file.seekTo(0);
     try fs.extract(.{
+        .io = io,
         .gpa = gpa,
         .input_name = downloaded_path,
         .input_file = downloaded_file,
@@ -381,6 +392,7 @@ const GithubLatestRelease = struct {
 };
 
 fn githubDownloadLatestRelease(options: struct {
+    io: std.Io,
     arena: std.mem.Allocator,
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
@@ -395,6 +407,7 @@ fn githubDownloadLatestRelease(options: struct {
 
     var latest_release_json = std.Io.Writer.Allocating.init(options.arena);
     const release_download_result = try download.download(.{
+        .io = options.io,
         .writer = &latest_release_json.writer,
         .client = options.http_client,
         .uri_str = latest_release_uri,
@@ -417,6 +430,7 @@ const GithubRepository = struct {
 };
 
 fn githubDownloadRepository(options: struct {
+    io: std.Io,
     arena: std.mem.Allocator,
     http_client: *std.http.Client,
     progress: Progress.Node = .none,
@@ -431,6 +445,7 @@ fn githubDownloadRepository(options: struct {
 
     var repository_json = std.Io.Writer.Allocating.init(options.arena);
     const repository_result = try download.download(.{
+        .io = options.io,
         .writer = &repository_json.writer,
         .client = options.http_client,
         .uri_str = repository_uri,
@@ -449,6 +464,7 @@ fn githubDownloadRepository(options: struct {
 }
 
 fn githubDownloadSponsorUrls(args: struct {
+    io: std.Io,
     gpa: std.mem.Allocator,
     strs: *Strings,
     http_client: *std.http.Client,
@@ -469,6 +485,7 @@ fn githubDownloadSponsorUrls(args: struct {
 
     var funding_yml = std.Io.Writer.Allocating.init(arena);
     const repository_result = try download.download(.{
+        .io = args.io,
         .writer = &funding_yml.writer,
         .client = args.http_client,
         .uri_str = funding_uri,
@@ -991,6 +1008,8 @@ fn testFromGithub(options: struct {
     target: Target,
     expect: []const u8,
 }) !void {
+    const io = std.testing.io;
+
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     const arena = arena_state.allocator();
     defer arena_state.deinit();
@@ -1092,6 +1111,7 @@ fn testFromGithub(options: struct {
 
     var strs = Strings.empty;
     const pkg_from_latest_release = try fromGithub(.{
+        .io = io,
         .gpa = arena,
         .strs = &strs,
         .http_client = undefined, // Not used when downloading from file:// uris
@@ -1102,6 +1122,7 @@ fn testFromGithub(options: struct {
         .target = options.target,
     });
     const pkg_from_index = try fromGithub(.{
+        .io = io,
         .gpa = arena,
         .strs = &strs,
         .http_client = undefined, // Not used when downloading from file:// uris

@@ -22,6 +22,7 @@ pub const Download = enum {
 
 const DownloadOptions = struct {
     gpa: std.mem.Allocator,
+    io: std.Io,
 
     /// Successes and failures are reported to the diagnostics. Set this for more details
     /// about failures.
@@ -63,12 +64,16 @@ pub fn download(options: DownloadOptions) !Packages {
         const download_node = options.progress.start("↓ pkgs.ini", 1);
         defer options.progress.end(download_node);
 
-        var http_client = std.http.Client{ .allocator = options.gpa };
+        var http_client = std.http.Client{
+            .allocator = options.gpa,
+            .io = options.io,
+        };
         defer http_client.deinit();
 
         var pkgs_file_buf: [std.heap.page_size_min]u8 = undefined;
         var pkgs_file_writer = pkgs_file.writer(&pkgs_file_buf);
         const result = try @import("download.zig").download(.{
+            .io = options.io,
             .writer = &pkgs_file_writer.interface,
             .client = &http_client,
             .uri_str = options.pkgs_uri,
@@ -82,7 +87,7 @@ pub fn download(options: DownloadOptions) !Packages {
         try pkgs_file.seekTo(0);
     }
 
-    var pkgs_file_reader = pkgs_file.reader(&.{});
+    var pkgs_file_reader = pkgs_file.reader(options.io, &.{});
     const string = try pkgs_file_reader.interface.allocRemainingAlignedSentinel(options.gpa, .unlimited, .of(u8), 0);
     defer options.gpa.free(string);
 
@@ -92,17 +97,18 @@ pub fn download(options: DownloadOptions) !Packages {
 
 pub fn parseFromPath(
     gpa: std.mem.Allocator,
+    io: std.Io,
     dir: std.fs.Dir,
     sub_path: []const u8,
 ) !Packages {
     const file = try dir.openFile(sub_path, .{});
     defer file.close();
 
-    return parseFile(gpa, file);
+    return parseFile(gpa, io, file);
 }
 
-pub fn parseFile(gpa: std.mem.Allocator, file: std.fs.File) !Packages {
-    var reader = file.reader(&.{});
+pub fn parseFile(gpa: std.mem.Allocator, io: std.Io, file: std.fs.File) !Packages {
+    var reader = file.reader(io, &.{});
     return parseReader(gpa, &reader.interface);
 }
 

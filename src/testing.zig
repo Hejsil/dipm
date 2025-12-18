@@ -588,6 +588,7 @@ test "fuzz" {
 }
 
 fn setupPrefix(options: struct {
+    io: std.Io = std.testing.io,
     gpa: std.mem.Allocator = std.testing.allocator,
     version: []const u8,
 
@@ -672,6 +673,7 @@ fn setupPrefix(options: struct {
     errdefer options.gpa.free(pkgs_uri);
 
     return .{
+        .io = options.io,
         .gpa = options.gpa,
         .pkgs_uri = pkgs_uri,
         .prefix = prefix_path,
@@ -680,6 +682,7 @@ fn setupPrefix(options: struct {
 }
 
 const Prefix = struct {
+    io: std.Io,
     gpa: std.mem.Allocator,
     pkgs_uri: []const u8,
     prefix: []const u8,
@@ -709,6 +712,7 @@ const Prefix = struct {
         var stderr_file_writer = stderr.writer(&stderr_buf);
 
         try main.mainFull(.{
+            .io = prefix.io,
             .gpa = prefix.gpa,
             .args = args,
             .io_lock = &io_lock,

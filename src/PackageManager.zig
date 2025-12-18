@@ -1,3 +1,4 @@
+io: std.Io,
 gpa: std.mem.Allocator,
 
 http_client: std.http.Client,
@@ -30,13 +31,17 @@ pub fn init(options: Options) !PackageManager {
     var lock = try own_data_dir.createFile("lock", .{ .lock = .exclusive });
     errdefer lock.close();
 
-    var http_client = std.http.Client{ .allocator = options.gpa };
+    var http_client = std.http.Client{
+        .io = options.io,
+        .allocator = options.gpa,
+    };
     errdefer http_client.deinit();
 
-    var installed = try InstalledPackages.open(options.gpa, options.prefix);
+    var installed = try InstalledPackages.open(options.gpa, options.io, options.prefix);
     errdefer installed.deinit(options.gpa);
 
     return PackageManager{
+        .io = options.io,
         .gpa = options.gpa,
         .http_client = http_client,
         .diag = options.diag,
@@ -52,6 +57,7 @@ pub fn init(options: Options) !PackageManager {
 }
 
 pub const Options = struct {
+    io: std.Io,
     gpa: std.mem.Allocator,
 
     /// Successes and failures are reported to the diag. Set this for more details
@@ -90,6 +96,7 @@ fn packages(pm: *PackageManager) !*const Packages {
         return res;
 
     pm.cache.pkgs = try Packages.download(.{
+        .io = pm.io,
         .gpa = pm.gpa,
         .diagnostics = pm.diag,
         .progress = pm.progress,
@@ -236,6 +243,7 @@ fn downloadAndExtractPackage(
     const downloaded_path = try dir.realpathAlloc(arena, downloaded_file_name);
 
     const download_result = download.download(.{
+        .io = pm.io,
         .writer = &downloaded_file_writer.interface,
         .client = &pm.http_client,
         .uri_str = pkg.install.url.get(pkgs.strs),
@@ -275,6 +283,7 @@ fn downloadAndExtractPackage(
 
     progress.set(.{ .max = 0, .curr = 0, .name = extract_name });
     try fs.extract(.{
+        .io = pm.io,
         .gpa = pm.gpa,
         .node = progress,
         .input_name = downloaded_path,
