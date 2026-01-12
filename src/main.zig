@@ -1,27 +1,16 @@
-pub fn main() !u8 {
-    var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
-    const gpa = gpa_state.allocator();
-    defer _ = gpa_state.deinit();
-
-    var io_threaded = std.Io.Threaded.init(gpa);
-    const io = io_threaded.io();
-    defer io_threaded.deinit();
-
-    const args = std.process.argsAlloc(gpa) catch @panic("OOM");
-    defer std.process.argsFree(gpa, args);
-
+pub fn main(init: std.process.Init) !u8 {
     var io_lock = std.Thread.Mutex{};
     const progress = &Progress.global;
 
     var stdout_buf: [std.heap.page_size_min]u8 = undefined;
     var stderr_buf: [std.heap.page_size_min]u8 = undefined;
-    var stdout = std.fs.File.stdout().writer(&stdout_buf);
-    var stderr = std.fs.File.stderr().writer(&stderr_buf);
+    var stdout = std.Io.File.stdout().writer(init.io, &stdout_buf);
+    var stderr = std.Io.File.stderr().writer(init.io, &stderr_buf);
 
     // We don't really care to store the thread. Just let the os clean it up
-    if (stderr.file.supportsAnsiEscapeCodes()) blk: {
+    if (try stderr.file.supportsAnsiEscapeCodes(init.io)) blk: {
         const thread = std.Thread.spawn(.{}, renderThread, .{
-            io,
+            init.io,
             &stderr,
             progress,
             &io_lock,
@@ -32,41 +21,27 @@ pub fn main() !u8 {
         thread.detach();
     }
 
-    const main_res = mainFull(.{
-        .io = io,
-        .gpa = gpa,
-        .args = args[1..],
+    const res = mainFull(init, .{
         .io_lock = &io_lock,
         .stdout = &stdout,
         .stderr = &stderr,
         .progress = progress,
     });
 
-    const res: anyerror!u8 = if (main_res) 0 else |err| switch (err) {
-        Diagnostics.Error.DiagnosticsReported => 1,
-        else => |e| blk: {
-            io_lock.lock();
-            defer io_lock.unlock();
-
-            try progress.cleanupTty(&stderr);
-            if (builtin.mode == .Debug)
-                break :blk e;
-
-            try stderr.interface.print("{s}\n", .{@errorName(e)});
-            break :blk 1;
-        },
-    };
-
     io_lock.lock();
-    try progress.cleanupTty(&stderr);
+    try progress.cleanupTty(init.io, &stderr);
     try stdout.end();
     try stderr.end();
-    return res;
+
+    return if (res) |_| 0 else |err| switch (err) {
+        Diagnostics.Error.DiagnosticsReported => 1,
+        else => |e| e,
+    };
 }
 
 fn renderThread(
     io: std.Io,
-    stderr: *std.fs.File.Writer,
+    stderr: *std.Io.File.Writer,
     progress: *Progress,
     io_lock: *std.Thread.Mutex,
 ) void {
@@ -85,41 +60,32 @@ fn renderThread(
 }
 
 pub const MainOptions = struct {
-    io: std.Io,
-    gpa: std.mem.Allocator,
-    args: []const []const u8,
-
     io_lock: *std.Thread.Mutex,
-    stdout: *std.fs.File.Writer,
-    stderr: *std.fs.File.Writer,
+    stdout: *std.Io.File.Writer,
+    stderr: *std.Io.File.Writer,
 
     forced_prefix: ?[]const u8 = null,
     forced_pkgs_uri: ?[]const u8 = null,
     progress: *Progress = &Progress.dummy,
 };
 
-pub fn mainFull(options: MainOptions) !void {
-    var arena_state = std.heap.ArenaAllocator.init(options.gpa);
-    const arena = arena_state.allocator();
-    defer arena_state.deinit();
+pub fn mainFull(init: std.process.Init, options: MainOptions) !void {
+    const home_path = init.environ_map.get("HOME") orelse "/";
+    const local_home_path = try std.fs.path.join(init.arena.allocator(), &.{ home_path, ".local" });
 
-    const home_path = std.process.getEnvVarOwned(arena, "HOME") catch "/";
-    const local_home_path = try std.fs.path.join(arena, &.{ home_path, ".local" });
-
-    var diag = Diagnostics.init(options.gpa);
+    var diag = Diagnostics.init(init.gpa);
     defer diag.deinit();
 
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
     var prog = Program{
-        .io = options.io,
-        .gpa = options.gpa,
-        .arena = arena,
+        .init = init,
         .diag = &diag,
         .progress = options.progress,
         .io_lock = options.io_lock,
         .stdout = options.stdout,
         .stderr = options.stderr,
 
-        .args = .{ .args = options.args },
+        .args = .{ .args = args[1..] },
         .options = .{
             .forced_prefix = options.forced_prefix,
             .prefix = local_home_path,
@@ -132,7 +98,7 @@ pub fn mainFull(options: MainOptions) !void {
     prog.io_lock.lock();
     defer prog.io_lock.unlock();
 
-    try prog.progress.cleanupTty(prog.stderr);
+    try prog.progress.cleanupTty(init.io, prog.stderr);
     try diag.reportToFile(prog.stderr);
     try prog.stderr.end();
     if (diag.hasFailed())
@@ -199,16 +165,14 @@ pub fn mainCommand(prog: *Program) !void {
 
 const Program = @This();
 
-io: std.Io,
-gpa: std.mem.Allocator,
-arena: std.mem.Allocator,
+init: std.process.Init,
 diag: *Diagnostics,
 progress: *Progress,
 
 // Ensures that only one thread can write to stdout/stderr at a time
 io_lock: *std.Thread.Mutex,
-stdout: *std.fs.File.Writer,
-stderr: *std.fs.File.Writer,
+stdout: *std.Io.File.Writer,
+stderr: *std.Io.File.Writer,
 
 args: ArgParser,
 options: struct {
@@ -257,7 +221,7 @@ const donate_usage =
 ;
 
 fn donateCommand(prog: *Program) !void {
-    var pkgs_to_show_hm = std.StringArrayHashMap(void).init(prog.arena);
+    var pkgs_to_show_hm = std.StringArrayHashMap(void).init(prog.init.arena.allocator());
     try pkgs_to_show_hm.ensureTotalCapacity(prog.args.args.len);
 
     while (prog.args.next()) {
@@ -268,15 +232,15 @@ fn donateCommand(prog: *Program) !void {
     }
 
     var pkgs = try Packages.download(.{
-        .io = prog.io,
-        .gpa = prog.gpa,
+        .io = prog.init.io,
+        .gpa = prog.init.gpa,
         .diagnostics = prog.diag,
         .progress = prog.progress,
         .prefix = prog.prefix(),
         .pkgs_uri = prog.pkgsUri(),
         .download = .only_if_required,
     });
-    defer pkgs.deinit(prog.gpa);
+    defer pkgs.deinit(prog.init.gpa);
 
     const pkgs_to_show = pkgs_to_show_hm.keys();
     for (pkgs_to_show) |pkg_name| {
@@ -295,8 +259,8 @@ fn donateCommand(prog: *Program) !void {
     if (pkgs_to_show.len != 0)
         return;
 
-    var installed_pkgs = try InstalledPackages.open(prog.gpa, prog.io, prog.prefix());
-    defer installed_pkgs.deinit(prog.gpa);
+    var installed_pkgs = try InstalledPackages.open(prog.init.io, prog.init.gpa, prog.prefix());
+    defer installed_pkgs.deinit(prog.init.io, prog.init.gpa);
 
     for (installed_pkgs.by_name.keys()) |pkg_name_index| {
         const pkg_name = pkg_name_index.get(installed_pkgs.strs);
@@ -327,7 +291,7 @@ const install_usage =
 
 fn installCommand(prog: *Program) !void {
     var pkgs_to_install = std.ArrayList([]const u8){};
-    try pkgs_to_install.ensureTotalCapacity(prog.arena, prog.args.args.len);
+    try pkgs_to_install.ensureTotalCapacity(prog.init.arena.allocator(), prog.args.args.len);
 
     while (prog.args.next()) {
         if (prog.args.flag(&.{ "-h", "--help" }))
@@ -337,8 +301,8 @@ fn installCommand(prog: *Program) !void {
     }
 
     var pm = try PackageManager.init(.{
-        .io = prog.io,
-        .gpa = prog.gpa,
+        .io = prog.init.io,
+        .gpa = prog.init.gpa,
         .diag = prog.diag,
         .progress = prog.progress,
         .prefix = prog.prefix(),
@@ -364,7 +328,7 @@ const uninstall_usage =
 
 fn uninstallCommand(prog: *Program) !void {
     var pkgs_to_uninstall = std.ArrayList([]const u8){};
-    try pkgs_to_uninstall.ensureTotalCapacity(prog.arena, prog.args.args.len);
+    try pkgs_to_uninstall.ensureTotalCapacity(prog.init.arena.allocator(), prog.args.args.len);
 
     while (prog.args.next()) {
         if (prog.args.flag(&.{ "-h", "--help" }))
@@ -374,8 +338,8 @@ fn uninstallCommand(prog: *Program) !void {
     }
 
     var pm = try PackageManager.init(.{
-        .io = prog.io,
-        .gpa = prog.gpa,
+        .io = prog.init.io,
+        .gpa = prog.init.gpa,
         .diag = prog.diag,
         .progress = prog.progress,
         .prefix = prog.prefix(),
@@ -406,7 +370,7 @@ const update_usage =
 fn updateCommand(prog: *Program) !void {
     var force_update = false;
     var pkgs_to_update = std.ArrayList([]const u8){};
-    try pkgs_to_update.ensureTotalCapacity(prog.arena, prog.args.args.len);
+    try pkgs_to_update.ensureTotalCapacity(prog.init.arena.allocator(), prog.args.args.len);
 
     while (prog.args.next()) {
         if (prog.args.flag(&.{ "-f", "--force" }))
@@ -418,8 +382,8 @@ fn updateCommand(prog: *Program) !void {
     }
 
     var pm = try PackageManager.init(.{
-        .io = prog.io,
-        .gpa = prog.gpa,
+        .io = prog.init.io,
+        .gpa = prog.init.gpa,
         .diag = prog.diag,
         .progress = prog.progress,
         .prefix = prog.prefix(),
@@ -488,8 +452,8 @@ fn listInstalledCommand(prog: *Program) !void {
         }
     }
 
-    var installed = try InstalledPackages.open(prog.gpa, prog.io, prog.prefix());
-    defer installed.deinit(prog.gpa);
+    var installed = try InstalledPackages.open(prog.init.io, prog.init.gpa, prog.prefix());
+    defer installed.deinit(prog.init.io, prog.init.gpa);
 
     prog.io_lock.lock();
     defer prog.io_lock.unlock();
@@ -523,15 +487,15 @@ fn listAllCommand(prog: *Program) !void {
     }
 
     var pkgs = try Packages.download(.{
-        .gpa = prog.gpa,
-        .io = prog.io,
+        .gpa = prog.init.gpa,
+        .io = prog.init.io,
         .diagnostics = prog.diag,
         .progress = prog.progress,
         .prefix = prog.prefix(),
         .pkgs_uri = prog.pkgsUri(),
         .download = .only_if_required,
     });
-    defer pkgs.deinit(prog.gpa);
+    defer pkgs.deinit(prog.init.gpa);
 
     prog.io_lock.lock();
     defer prog.io_lock.unlock();
@@ -609,7 +573,7 @@ const pkgs_update_usage =
 ;
 
 fn pkgsUpdateCommand(prog: *Program) !void {
-    var pkgs_to_update = std.StringArrayHashMap(void).init(prog.arena);
+    var pkgs_to_update = std.StringArrayHashMap(void).init(prog.init.arena.allocator());
     var delay = std.Io.Duration.fromSeconds(0);
     var options = PackagesAddOptions{
         .update_description = false,
@@ -630,9 +594,9 @@ fn pkgsUpdateCommand(prog: *Program) !void {
             try pkgs_to_update.put(url, {});
     }
 
-    const cwd = std.fs.cwd();
-    var pkgs = try Packages.parseFromPath(prog.gpa, prog.io, cwd, options.pkgs_ini_path);
-    defer pkgs.deinit(prog.gpa);
+    const cwd = std.Io.Dir.cwd();
+    var pkgs = try Packages.parseFromPath(prog.init.gpa, prog.init.io, cwd, options.pkgs_ini_path);
+    defer pkgs.deinit(prog.init.gpa);
 
     const update_all = pkgs_to_update.count() == 0;
     const num = if (update_all) pkgs.by_name.count() else pkgs_to_update.count();
@@ -646,7 +610,7 @@ fn pkgsUpdateCommand(prog: *Program) !void {
         for (pkgs.by_name.keys(), pkgs.by_name.values(), 0..) |pkg_name, pkg, i| {
             defer progress.advance(1);
             if (i != 0 and delay.nanoseconds != 0)
-                try prog.io.sleep(delay, .awake);
+                try prog.init.io.sleep(delay, .awake);
 
             try prog.pkgsAdd(.{
                 .name = pkg_name.get(pkgs.strs),
@@ -658,7 +622,7 @@ fn pkgsUpdateCommand(prog: *Program) !void {
         for (pkgs_to_update.keys(), 0..) |pkg_name, i| {
             defer progress.advance(1);
             if (i != 0 and delay.nanoseconds != 0)
-                try prog.io.sleep(delay, .awake);
+                try prog.init.io.sleep(delay, .awake);
 
             const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
                 try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
@@ -740,30 +704,31 @@ const AddPackage = struct {
 };
 
 fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !void {
+    const io = prog.init.io;
     var http_client = std.http.Client{
-        .io = prog.io,
-        .allocator = prog.gpa,
+        .io = prog.init.io,
+        .allocator = prog.init.gpa,
     };
     defer http_client.deinit();
 
-    const cwd = std.fs.cwd();
+    const cwd = std.Io.Dir.cwd();
     const pkgs_ini_base_name = std.fs.path.basename(options.pkgs_ini_path);
 
-    var pkgs_ini_dir, const pkgs_ini_file = try fs.openDirAndFile(cwd, options.pkgs_ini_path, .{
+    var pkgs_ini_dir, const pkgs_ini_file = try fs.openDirAndFile(io, cwd, options.pkgs_ini_path, .{
         .file = .{ .mode = .read_write },
     });
-    defer pkgs_ini_dir.close();
-    defer pkgs_ini_file.close();
+    defer pkgs_ini_dir.close(io);
+    defer pkgs_ini_file.close(io);
 
-    var pkgs = try Packages.parseFile(prog.gpa, prog.io, pkgs_ini_file);
-    defer pkgs.deinit(prog.gpa);
+    var pkgs = try Packages.parseFile(prog.init.io, prog.init.gpa, pkgs_ini_file);
+    defer pkgs.deinit(prog.init.gpa);
 
     const progress = prog.progress.start(add_pkg.name orelse add_pkg.version, 1);
     defer prog.progress.end(progress);
 
     const pkg = Package.fromUrl(.{
-        .io = prog.io,
-        .gpa = prog.gpa,
+        .io = prog.init.io,
+        .gpa = prog.init.gpa,
         .strs = &pkgs.strs,
         .http_client = &http_client,
         .name = add_pkg.name,
@@ -779,18 +744,18 @@ fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !vo
         return;
     };
 
-    const old_pkg = try pkgs.update(prog.gpa, pkg, .{
+    const old_pkg = try pkgs.update(prog.init.gpa, pkg, .{
         .description = options.update_description,
     });
 
     pkgs.sort();
-    try pkgs.writeToFile(pkgs_ini_file);
-    try pkgs_ini_file.sync();
+    try pkgs.writeToFile(io, pkgs_ini_file);
+    try pkgs_ini_file.sync(io);
     if (options.commit) {
-        const msg = try git.createCommitMessage(prog.arena, &pkgs, pkg, old_pkg, .{
+        const msg = try git.createCommitMessage(prog.init.arena.allocator(), &pkgs, pkg, old_pkg, .{
             .description = options.update_description,
         });
-        try git.commitFile(prog.gpa, pkgs_ini_dir, pkgs_ini_base_name, msg);
+        try git.commitFile(prog.init.io, pkgs_ini_dir, pkgs_ini_base_name, msg);
     }
 }
 

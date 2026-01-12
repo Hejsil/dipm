@@ -14,6 +14,7 @@ pub fn download(options: struct {
 
     progress: Progress.Node = .none,
 }) !Result {
+    const io = options.io;
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
 
     var hashing_writer_buf: [std.heap.page_size_min]u8 = undefined;
@@ -24,10 +25,10 @@ pub fn download(options: struct {
     const status = if (std.mem.eql(u8, uri.scheme, "file")) blk: {
         var path_buf: [std.fs.max_path_bytes]u8 = undefined;
         const path = try uri.path.toRaw(&path_buf);
-        const file = try std.fs.cwd().openFile(path, .{});
+        const file = try std.Io.Dir.cwd().openFile(io, path, .{});
 
         var file_buf: [std.heap.page_size_min]u8 = undefined;
-        var file_reader = file.reader(options.io, &file_buf);
+        var file_reader = file.reader(io, &file_buf);
         _ = try file_reader.interface.streamRemaining(out);
         try out.flush();
         break :blk .ok;

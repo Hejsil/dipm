@@ -1,25 +1,25 @@
 strs: Strings,
 by_name: std.ArrayHashMapUnmanaged(Strings.Index, InstalledPackage, void, true),
 
-file: ?std.fs.File,
+file: ?std.Io.File,
 
-pub fn open(gpa: std.mem.Allocator, io: std.Io, prefix: []const u8) !InstalledPackages {
-    const cwd = std.fs.cwd();
-    var prefix_dir = try cwd.makeOpenPath(prefix, .{});
-    defer prefix_dir.close();
+pub fn open(io: std.Io, gpa: std.mem.Allocator, prefix: []const u8) !InstalledPackages {
+    const cwd = std.Io.Dir.cwd();
+    var prefix_dir = try cwd.createDirPathOpen(io, prefix, .{});
+    defer prefix_dir.close(io);
 
-    var own_data_dir = try prefix_dir.makeOpenPath(paths.own_data_subpath, .{});
-    defer own_data_dir.close();
+    var own_data_dir = try prefix_dir.createDirPathOpen(io, paths.own_data_subpath, .{});
+    defer own_data_dir.close(io);
 
-    const file = try own_data_dir.createFile(paths.installed_file_name, .{ .read = true, .truncate = false });
-    errdefer file.close();
+    const file = try own_data_dir.createFile(io, paths.installed_file_name, .{ .read = true, .truncate = false });
+    errdefer file.close(io);
 
-    return parseFile(gpa, io, file);
+    return parseFile(io, gpa, file);
 }
 
-pub fn deinit(pkgs: *InstalledPackages, gpa: std.mem.Allocator) void {
+pub fn deinit(pkgs: *InstalledPackages, io: std.Io, gpa: std.mem.Allocator) void {
     if (pkgs.file) |f|
-        f.close();
+        f.close(io);
 
     pkgs.strs.deinit(gpa);
     pkgs.by_name.deinit(gpa);
@@ -30,29 +30,29 @@ pub fn isInstalled(pkgs: *const InstalledPackages, pkg_name: []const u8) bool {
     return pkgs.by_name.containsAdapted(pkg_name, pkgs.strs.adapter());
 }
 
-pub fn parseFile(gpa: std.mem.Allocator, io: std.Io, file: std.fs.File) !InstalledPackages {
+pub fn parseFile(io: std.Io, gpa: std.mem.Allocator, file: std.Io.File) !InstalledPackages {
     var reader = file.reader(io, &.{});
-    var res = try parseReader(gpa, &reader.interface);
+    var res = try parseReader(io, gpa, &reader.interface);
     errdefer res.deinit();
 
     res.file = file;
     return res;
 }
 
-pub fn parseReader(gpa: std.mem.Allocator, reader: *std.Io.Reader) !InstalledPackages {
+pub fn parseReader(io: std.Io, gpa: std.mem.Allocator, reader: *std.Io.Reader) !InstalledPackages {
     const data_str = try reader.allocRemainingAlignedSentinel(gpa, .unlimited, .of(u8), 0);
     defer gpa.free(data_str);
 
-    return parse(gpa, data_str);
+    return parse(io, gpa, data_str);
 }
 
-pub fn parse(gpa: std.mem.Allocator, string: [:0]const u8) !InstalledPackages {
+pub fn parse(io: std.Io, gpa: std.mem.Allocator, string: [:0]const u8) !InstalledPackages {
     var pkgs = InstalledPackages{
         .strs = .empty,
         .by_name = .{},
         .file = null,
     };
-    errdefer pkgs.deinit(gpa);
+    errdefer pkgs.deinit(io, gpa);
 
     try pkgs.parseInto(gpa, string);
     return pkgs;
@@ -128,13 +128,11 @@ fn parsePackage(pkgs: *InstalledPackages, gpa: std.mem.Allocator, parser: *ini.P
     } };
 }
 
-pub fn flush(pkgs: InstalledPackages) !void {
+pub fn flush(pkgs: InstalledPackages, io: std.Io) !void {
     const file = pkgs.file orelse return;
 
-    try file.seekTo(0);
-
     var file_buf: [std.heap.page_size_min]u8 = undefined;
-    var file_writer = file.writer(&file_buf);
+    var file_writer = file.writer(io, &file_buf);
     try pkgs.writeTo(&file_writer.interface);
     try file_writer.end();
 }
@@ -149,9 +147,10 @@ pub fn writeTo(pkgs: InstalledPackages, writer: *std.Io.Writer) !void {
 }
 
 fn expectTransform(from: [:0]const u8, to: []const u8) !void {
+    const io = std.testing.io;
     const gpa = std.testing.allocator;
-    var pkgs = try parse(gpa, from);
-    defer pkgs.deinit(gpa);
+    var pkgs = try parse(io, gpa, from);
+    defer pkgs.deinit(io, gpa);
 
     var rendered = std.Io.Writer.Allocating.init(gpa);
     defer rendered.deinit();
