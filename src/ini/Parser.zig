@@ -468,8 +468,8 @@ pub const Result = struct {
             .value = content[0..0],
         };
 
-        const name = std.mem.trimRight(u8, content[0..equal_index], " \t");
-        const value = std.mem.trimLeft(u8, content[equal_index + 1 ..], " \t");
+        const name = std.mem.trimEnd(u8, content[0..equal_index], " \t");
+        const value = std.mem.trimStart(u8, content[equal_index + 1 ..], " \t");
         return .{ .name = name, .value = value };
     }
 

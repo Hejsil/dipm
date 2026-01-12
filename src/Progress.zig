@@ -45,15 +45,15 @@ pub const Node = enum(usize) {
     }
 
     // Wraps a file reader to provide progress
-    pub fn fileReader(node: Node, file: std.fs.File, io: std.Io, buffer: []u8) Reader {
+    pub fn fileReader(node: Node, file: std.Io.File, io: std.Io, buffer: []u8) Reader {
         return .init(node, file.reader(io, buffer));
     }
 
     pub const Reader = struct {
         // Instead of implementing `Reader` and handling buffering ourself, override the
-        // `std.fs.File.Reader` vtable with wrappers that call the original vtable and then
+        // `std.Io.File.Reader` vtable with wrappers that call the original vtable and then
         // updates the node progress afterwards.
-        file: std.fs.File.Reader,
+        file: std.Io.File.Reader,
         file_vtable: *const std.Io.Reader.VTable,
         node: Node,
 
@@ -63,7 +63,7 @@ pub const Node = enum(usize) {
             .readVec = readVec,
         };
 
-        pub fn init(node: Node, file: std.fs.File.Reader) Reader {
+        pub fn init(node: Node, file: std.Io.File.Reader) Reader {
             var res = Reader{
                 .file = file,
                 .file_vtable = file.interface.vtable,
@@ -78,7 +78,7 @@ pub const Node = enum(usize) {
         }
 
         fn stream(io_reader: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) !usize {
-            const file_r: *std.fs.File.Reader = @alignCast(@fieldParentPtr("interface", io_reader));
+            const file_r: *std.Io.File.Reader = @alignCast(@fieldParentPtr("interface", io_reader));
             const r: *Reader = @alignCast(@fieldParentPtr("file", file_r));
 
             const res = try r.file_vtable.stream(io_reader, w, limit);
@@ -87,7 +87,7 @@ pub const Node = enum(usize) {
         }
 
         fn discard(io_reader: *std.Io.Reader, limit: std.Io.Limit) !usize {
-            const file_r: *std.fs.File.Reader = @alignCast(@fieldParentPtr("interface", io_reader));
+            const file_r: *std.Io.File.Reader = @alignCast(@fieldParentPtr("interface", io_reader));
             const r: *Reader = @alignCast(@fieldParentPtr("file", file_r));
 
             const res = try r.file_vtable.discard(io_reader, limit);
@@ -96,7 +96,7 @@ pub const Node = enum(usize) {
         }
 
         fn readVec(io_reader: *std.Io.Reader, data: [][]u8) !usize {
-            const file_r: *std.fs.File.Reader = @alignCast(@fieldParentPtr("interface", io_reader));
+            const file_r: *std.Io.File.Reader = @alignCast(@fieldParentPtr("interface", io_reader));
             const r: *Reader = @alignCast(@fieldParentPtr("file", file_r));
 
             const res = try r.file_vtable.readVec(io_reader, data);
@@ -172,7 +172,7 @@ const finish_sync = "\x1b[?2026l";
 const start_sync = "\x1b[?2026h";
 const up_one_line = "\x1bM";
 
-pub fn renderToTty(progress: Progress, tty: *std.fs.File.Writer) !void {
+pub fn renderToTty(progress: Progress, tty: *std.Io.File.Writer) !void {
     var winsize: std.posix.winsize = .{
         .row = 0,
         .col = 0,
@@ -204,10 +204,10 @@ pub fn renderToTty(progress: Progress, tty: *std.fs.File.Writer) !void {
     try tty.interface.writeAll(finish_sync);
 }
 
-pub fn cleanupTty(progress: Progress, tty: *std.fs.File.Writer) !void {
+pub fn cleanupTty(progress: Progress, io: std.Io, tty: *std.Io.File.Writer) !void {
     _ = progress;
 
-    if (tty.file.supportsAnsiEscapeCodes())
+    if (try tty.file.supportsAnsiEscapeCodes(io))
         try tty.interface.writeAll(clear);
 }
 

@@ -1,15 +1,17 @@
-pub fn commitFile(gpa: std.mem.Allocator, dir: std.fs.Dir, file: []const u8, msg: []const u8) !void {
-    var child = std.process.Child.init(
-        &.{ "git", "commit", "-i", file, "-m", msg },
-        gpa,
-    );
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
-    child.cwd_dir = dir;
-
-    try child.spawn();
-    _ = try child.wait();
+pub fn commitFile(io: std.Io, dir: std.Io.Dir, file: []const u8, msg: []const u8) !void {
+    var child = try std.process.spawn(io, .{
+        .argv = &.{ "git", "commit", "-i", file, "-m", msg },
+        .stdin = .ignore,
+        .stdout = .pipe,
+        .stderr = .pipe,
+        .cwd_dir = dir,
+    });
+    const failed = switch (try child.wait(io)) {
+        .exited => |code| code != 0,
+        else => true,
+    };
+    if (failed)
+        return error.GitCommitFailed;
 }
 
 pub const MessageOptions = struct {

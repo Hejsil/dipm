@@ -277,19 +277,22 @@ pub fn fromGithub(args: struct {
         args.progress,
         download_url.url,
     );
-    defer downloaded.dir.deleteAndClose();
+    defer downloaded.dir.deleteAndClose(args.io);
 
     const shares = try findShare(.{
+        .io = args.io,
         .gpa = args.gpa,
         .strs = args.strs,
         .dir = downloaded.dir.dir,
     });
     const man_pages = try findManPages(.{
+        .io = args.io,
         .gpa = args.gpa,
         .strs = args.strs,
         .dir = downloaded.dir.dir,
     });
     const binaries = try findStaticallyLinkedBinaries(.{
+        .io = args.io,
         .gpa = args.gpa,
         .strs = args.strs,
         .arch = args.target.arch,
@@ -341,18 +344,18 @@ fn downloadAndExtractToTmp(
     progress: Progress.Node,
     download_url: []const u8,
 ) !Downloaded {
-    var global_tmp_dir = try std.fs.cwd().makeOpenPath("/tmp/dipm/", .{});
-    defer global_tmp_dir.close();
+    var global_tmp_dir = try std.Io.Dir.cwd().createDirPathOpen(io, "/tmp/dipm/", .{});
+    defer global_tmp_dir.close(io);
 
-    var res = try fs.tmpDir(global_tmp_dir, .{ .iterate = true });
-    errdefer res.deleteAndClose();
+    var res = try fs.tmpDir(io, global_tmp_dir, .{ .iterate = true });
+    errdefer res.deleteAndClose(io);
 
     const downloaded_file_name = std.fs.path.basename(download_url);
-    const downloaded_file = try res.dir.createFile(downloaded_file_name, .{ .read = true });
-    defer downloaded_file.close();
+    const downloaded_file = try res.dir.createFile(io, downloaded_file_name, .{ .read = true });
+    defer downloaded_file.close(io);
 
     var buf: [std.heap.page_size_min]u8 = undefined;
-    var writer = downloaded_file.writer(&buf);
+    var writer = downloaded_file.writer(io, &buf);
     const result = try download.download(.{
         .io = io,
         .writer = &writer.interface,
@@ -361,18 +364,18 @@ fn downloadAndExtractToTmp(
         .progress = progress,
     });
     try writer.end();
+
     if (result.status != .ok)
         return error.FileDownloadFailed;
 
     // TODO: Get rid of this once we have support for bz2 compression
     var download_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const downloaded_path = try res.dir.realpath(downloaded_file_name, &download_path_buf);
+    const download_path_len = try res.dir.realPathFile(io, downloaded_file_name, &download_path_buf);
 
-    try downloaded_file.seekTo(0);
     try fs.extract(.{
         .io = io,
         .gpa = gpa,
-        .input_name = downloaded_path,
+        .input_name = download_path_buf[0..download_path_len],
         .input_file = downloaded_file,
         .output_dir = res.dir,
     });
@@ -505,7 +508,7 @@ fn fundingYmlToUrls(gpa: std.mem.Allocator, strs: *Strings, string: []const u8) 
         str: []const u8,
 
         pub fn next(tok: *@This()) []const u8 {
-            tok.str = std.mem.trimLeft(u8, tok.str, "\t ");
+            tok.str = std.mem.trimStart(u8, tok.str, "\t ");
             if (tok.str.len == 0)
                 return tok.str;
 
@@ -546,7 +549,7 @@ fn fundingYmlToUrls(gpa: std.mem.Allocator, strs: *Strings, string: []const u8) 
         }
 
         pub fn nextValue(tok: *@This()) []const u8 {
-            tok.str = std.mem.trimLeft(u8, tok.str, "\t ");
+            tok.str = std.mem.trimStart(u8, tok.str, "\t ");
             if (tok.str.len == 0)
                 return tok.str;
 
@@ -577,7 +580,7 @@ fn fundingYmlToUrls(gpa: std.mem.Allocator, strs: *Strings, string: []const u8) 
     });
 
     var tok = Tokenizer{ .str = blk: {
-        var res = std.mem.trimLeft(u8, string, "");
+        var res = std.mem.trimStart(u8, string, "");
         if (std.mem.startsWith(u8, res, "---"))
             res = res[3..];
         break :blk res;
@@ -1014,8 +1017,8 @@ fn testFromGithub(options: struct {
     const arena = arena_state.allocator();
     defer arena_state.deinit();
 
-    var tmp_dir = try fs.zigCacheTmpDir(.{});
-    defer tmp_dir.deleteAndClose();
+    var tmp_dir = try fs.zigCacheTmpDir(io, .{});
+    defer tmp_dir.deleteAndClose(io);
 
     const tmp_dir_path = try tmp_dir.path(arena);
     const static_binary_name = try std.fmt.allocPrint(arena, "{s}-{s}-{s}", .{
@@ -1028,8 +1031,8 @@ fn testFromGithub(options: struct {
         static_binary_name,
     });
 
-    const cwd = std.fs.cwd();
-    try cwd.writeFile(.{
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{
         .sub_path = static_binary_path,
         .data = switch (options.target.arch) {
             .x86_64 => &testing_static_x86_64_binary,
@@ -1050,7 +1053,7 @@ fn testFromGithub(options: struct {
     const latest_release_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{
         latest_release_file_path,
     });
-    try cwd.writeFile(.{
+    try cwd.writeFile(io, .{
         .sub_path = latest_release_file_path,
         .data = blk: {
             var out = std.ArrayList(u8){};
@@ -1071,7 +1074,7 @@ fn testFromGithub(options: struct {
 
     const download_file_path = try std.fs.path.join(arena, &.{ tmp_dir_path, "index" });
     const download_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{download_file_path});
-    try cwd.writeFile(.{
+    try cwd.writeFile(io, .{
         .sub_path = download_file_path,
         .data = try std.fmt.allocPrint(arena,
             \\{s}
@@ -1083,7 +1086,7 @@ fn testFromGithub(options: struct {
     const funding_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{
         funding_file_path,
     });
-    try cwd.writeFile(.{
+    try cwd.writeFile(io, .{
         .sub_path = funding_file_path,
         .data = try std.fmt.allocPrint(arena,
             \\github: {s}
@@ -1099,7 +1102,7 @@ fn testFromGithub(options: struct {
     const repository_file_uri = try std.fmt.allocPrint(arena, "file://{s}", .{
         repository_file_path,
     });
-    try cwd.writeFile(.{
+    try cwd.writeFile(io, .{
         .sub_path = repository_file_path,
         .data = try std.fmt.allocPrint(arena,
             \\{{
@@ -1213,11 +1216,14 @@ test fromGithub {
 }
 
 fn findStaticallyLinkedBinaries(args: struct {
+    io: std.Io,
     gpa: std.mem.Allocator,
     strs: *Strings,
     arch: std.Target.Cpu.Arch,
-    dir: std.fs.Dir,
+    dir: std.Io.Dir,
 }) !Strings.Indices {
+    const io = args.io;
+
     var arena_state = std.heap.ArenaAllocator.init(args.gpa);
     const arena = arena_state.allocator();
     defer arena_state.deinit();
@@ -1239,8 +1245,7 @@ fn findStaticallyLinkedBinaries(args: struct {
         .{arch_str},
     );
 
-    const static_files_result = try std.process.Child.run(.{
-        .allocator = arena,
+    const static_files_result = try std.process.run(arena, io, .{
         .argv = &.{ "sh", "-c", shell_script },
         .cwd_dir = args.dir,
     });
@@ -1258,22 +1263,25 @@ fn findStaticallyLinkedBinaries(args: struct {
 
 fn testFindStaticallyLinkedBinaries(options: struct {
     arch: std.Target.Cpu.Arch,
-    files: []const std.fs.Dir.WriteFileOptions,
+    files: []const std.Io.Dir.WriteFileOptions,
     expected: []const []const u8,
 }) !void {
-    var tmp_dir = try fs.zigCacheTmpDir(.{});
-    defer tmp_dir.deleteAndClose();
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var tmp_dir = try fs.zigCacheTmpDir(io, .{});
+    defer tmp_dir.deleteAndClose(io);
 
     for (options.files) |file_options| {
-        try tmp_dir.dir.makePath(std.fs.path.dirname(file_options.sub_path) orelse ".");
-        try tmp_dir.dir.writeFile(file_options);
+        try tmp_dir.dir.createDirPath(io, std.fs.path.dirname(file_options.sub_path) orelse ".");
+        try tmp_dir.dir.writeFile(io, file_options);
     }
 
-    const gpa = std.testing.allocator;
     var strs = Strings.empty;
     defer strs.deinit(gpa);
 
     const result = try findStaticallyLinkedBinaries(.{
+        .io = io,
         .gpa = gpa,
         .strs = &strs,
         .arch = options.arch,
@@ -1320,23 +1328,27 @@ test findStaticallyLinkedBinaries {
 }
 
 fn findShare(args: struct {
+    io: std.Io,
     gpa: std.mem.Allocator,
     strs: *Strings,
-    dir: std.fs.Dir,
+    dir: std.Io.Dir,
 }) !Strings.Indices {
-    var walker = try args.dir.walk(args.gpa);
+    const io = args.io;
+    const gpa = args.gpa;
+
+    var walker = try args.dir.walk(gpa);
     defer walker.deinit();
 
     const off = args.strs.putIndicesBegin();
-    while (try walker.next()) |entry| {
+    while (try walker.next(io)) |entry| {
         if (entry.kind != .directory)
             continue;
         if (!std.mem.eql(u8, entry.basename, "share"))
             continue;
 
-        var dir = try args.dir.openDir(entry.path, .{ .iterate = true });
+        var dir = try args.dir.openDir(io, entry.path, .{ .iterate = true });
         var it = dir.iterate();
-        share_dir_loop: while (try it.next()) |share_dir_entry| {
+        share_dir_loop: while (try it.next(io)) |share_dir_entry| {
             // Some of the folders we don't want to install
             if (std.mem.indexOf(u8, share_dir_entry.name, "completion") != null)
                 continue;
@@ -1349,8 +1361,8 @@ fn findShare(args: struct {
                     continue :share_dir_loop;
             }
 
-            const path = try args.strs.print(args.gpa, "{s}/{s}", .{ entry.path, share_dir_entry.name });
-            _ = try args.strs.putIndices(args.gpa, &.{path});
+            const path = try args.strs.print(gpa, "{s}/{s}", .{ entry.path, share_dir_entry.name });
+            _ = try args.strs.putIndices(gpa, &.{path});
         }
         break;
     }
@@ -1375,15 +1387,17 @@ fn findShare(args: struct {
 }
 
 fn testFindShare(options: struct {
-    files: []const std.fs.Dir.WriteFileOptions,
+    files: []const std.Io.Dir.WriteFileOptions,
     expected: []const []const u8,
 }) !void {
-    var tmp_dir = try fs.zigCacheTmpDir(.{ .iterate = true });
-    defer tmp_dir.deleteAndClose();
+    const io = std.testing.io;
+
+    var tmp_dir = try fs.zigCacheTmpDir(io, .{ .iterate = true });
+    defer tmp_dir.deleteAndClose(io);
 
     for (options.files) |file_options| {
-        try tmp_dir.dir.makePath(std.fs.path.dirname(file_options.sub_path) orelse ".");
-        try tmp_dir.dir.writeFile(file_options);
+        try tmp_dir.dir.createDirPath(io, std.fs.path.dirname(file_options.sub_path) orelse ".");
+        try tmp_dir.dir.writeFile(io, file_options);
     }
 
     const gpa = std.testing.allocator;
@@ -1391,6 +1405,7 @@ fn testFindShare(options: struct {
     defer strs.deinit(gpa);
 
     const result = try findShare(.{
+        .io = io,
         .gpa = gpa,
         .strs = &strs,
         .dir = tmp_dir.dir,
@@ -1423,15 +1438,19 @@ test findShare {
 }
 
 fn findManPages(args: struct {
+    io: std.Io,
     gpa: std.mem.Allocator,
     strs: *Strings,
-    dir: std.fs.Dir,
+    dir: std.Io.Dir,
 }) !Strings.Indices {
-    var walker = try args.dir.walk(args.gpa);
+    const io = args.io;
+    const gpa = args.gpa;
+
+    var walker = try args.dir.walk(gpa);
     defer walker.deinit();
 
     const off = args.strs.putIndicesBegin();
-    while (try walker.next()) |entry| {
+    while (try walker.next(io)) |entry| {
         if (entry.kind != .file)
             continue;
         if (std.mem.startsWith(u8, entry.basename, "."))
@@ -1443,12 +1462,12 @@ fn findManPages(args: struct {
         _ = name_split.first();
         const man_section = name_split.next() orelse continue;
 
-        const install = try args.strs.print(args.gpa, "man/man{s}/{s}:{s}", .{
+        const install = try args.strs.print(gpa, "man/man{s}/{s}:{s}", .{
             man_section,
             std.fs.path.basename(entry.path),
             entry.path,
         });
-        _ = try args.strs.putIndices(args.gpa, &.{install});
+        _ = try args.strs.putIndices(gpa, &.{install});
     }
 
     const SortContext = struct {
@@ -1505,15 +1524,17 @@ fn isManPage(filename: []const u8) bool {
 }
 
 fn testfindManPages(options: struct {
-    files: []const std.fs.Dir.WriteFileOptions,
+    files: []const std.Io.Dir.WriteFileOptions,
     expected: []const []const u8,
 }) !void {
-    var tmp_dir = try fs.zigCacheTmpDir(.{ .iterate = true });
-    defer tmp_dir.deleteAndClose();
+    const io = std.testing.io;
+
+    var tmp_dir = try fs.zigCacheTmpDir(io, .{ .iterate = true });
+    defer tmp_dir.deleteAndClose(io);
 
     for (options.files) |file_options| {
-        try tmp_dir.dir.makePath(std.fs.path.dirname(file_options.sub_path) orelse ".");
-        try tmp_dir.dir.writeFile(file_options);
+        try tmp_dir.dir.createDirPath(io, std.fs.path.dirname(file_options.sub_path) orelse ".");
+        try tmp_dir.dir.writeFile(io, file_options);
     }
 
     const gpa = std.testing.allocator;
@@ -1521,6 +1542,7 @@ fn testfindManPages(options: struct {
     defer strs.deinit(gpa);
 
     const result = try findManPages(.{
+        .io = io,
         .gpa = gpa,
         .strs = &strs,
         .dir = tmp_dir.dir,

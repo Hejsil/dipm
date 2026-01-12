@@ -67,8 +67,8 @@ pub fn deinit(diag: *Diagnostics) void {
     diag.* = undefined;
 }
 
-pub fn reportToFile(diag: *Diagnostics, writer: *std.fs.File.Writer) !void {
-    const is_tty = writer.file.supportsAnsiEscapeCodes();
+pub fn reportToFile(diag: *Diagnostics, writer: *std.Io.File.Writer) !void {
+    const is_tty = try writer.file.supportsAnsiEscapeCodes(writer.io);
     const escapes = if (is_tty) Escapes.ansi else Escapes.none;
 
     try diag.report(&writer.interface, .{

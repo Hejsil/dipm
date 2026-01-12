@@ -40,25 +40,27 @@ const DownloadOptions = struct {
 };
 
 pub fn download(options: DownloadOptions) !Packages {
+    const io = options.io;
+
     var pkgs = Packages.init;
     errdefer pkgs.deinit(options.gpa);
 
-    const cwd = std.fs.cwd();
-    var prefix_dir = try cwd.makeOpenPath(options.prefix, .{});
-    defer prefix_dir.close();
+    const cwd = std.Io.Dir.cwd();
+    var prefix_dir = try cwd.createDirPathOpen(io, options.prefix, .{});
+    defer prefix_dir.close(io);
 
-    var own_data_dir = try prefix_dir.makeOpenPath(paths.own_data_subpath, .{});
-    defer own_data_dir.close();
+    var own_data_dir = try prefix_dir.createDirPathOpen(io, paths.own_data_subpath, .{});
+    defer own_data_dir.close(io);
 
-    const pkgs_file = try own_data_dir.createFile(paths.pkgs_file_name, .{
+    const pkgs_file = try own_data_dir.createFile(io, paths.pkgs_file_name, .{
         .read = true,
         .truncate = false,
     });
-    defer pkgs_file.close();
+    defer pkgs_file.close(io);
 
     const needs_download = switch (options.download) {
         .always => true,
-        .only_if_required => (try pkgs_file.getEndPos()) == 0,
+        .only_if_required => (try pkgs_file.length(io)) == 0,
     };
     if (needs_download) {
         const download_node = options.progress.start("↓ pkgs.ini", 1);
@@ -71,7 +73,7 @@ pub fn download(options: DownloadOptions) !Packages {
         defer http_client.deinit();
 
         var pkgs_file_buf: [std.heap.page_size_min]u8 = undefined;
-        var pkgs_file_writer = pkgs_file.writer(&pkgs_file_buf);
+        var pkgs_file_writer = pkgs_file.writer(io, &pkgs_file_buf);
         const result = try @import("download.zig").download(.{
             .io = options.io,
             .writer = &pkgs_file_writer.interface,
@@ -84,7 +86,6 @@ pub fn download(options: DownloadOptions) !Packages {
             return error.DownloadGotNoneOkStatusCode; // TODO: Diagnostics
 
         try pkgs_file_writer.end();
-        try pkgs_file.seekTo(0);
     }
 
     var pkgs_file_reader = pkgs_file.reader(options.io, &.{});
@@ -98,16 +99,16 @@ pub fn download(options: DownloadOptions) !Packages {
 pub fn parseFromPath(
     gpa: std.mem.Allocator,
     io: std.Io,
-    dir: std.fs.Dir,
+    dir: std.Io.Dir,
     sub_path: []const u8,
 ) !Packages {
-    const file = try dir.openFile(sub_path, .{});
-    defer file.close();
+    const file = try dir.openFile(io, sub_path, .{});
+    defer file.close(io);
 
-    return parseFile(gpa, io, file);
+    return parseFile(io, gpa, file);
 }
 
-pub fn parseFile(gpa: std.mem.Allocator, io: std.Io, file: std.fs.File) !Packages {
+pub fn parseFile(io: std.Io, gpa: std.mem.Allocator, file: std.Io.File) !Packages {
     var reader = file.reader(io, &.{});
     return parseReader(gpa, &reader.interface);
 }
@@ -339,9 +340,9 @@ fn splitScalar2(string: []const u8, char: u8) [2][]const u8 {
     return .{ it.first(), it.rest() };
 }
 
-pub fn writeToFile(pkgs: Packages, file: std.fs.File) !void {
+pub fn writeToFile(pkgs: Packages, io: std.Io, file: std.Io.File) !void {
     var file_writer_buf: [std.heap.page_size_min]u8 = undefined;
-    var file_writer = file.writer(&file_writer_buf);
+    var file_writer = file.writer(io, &file_writer_buf);
     try pkgs.write(&file_writer.interface);
     try file_writer.end();
 }
