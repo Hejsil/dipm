@@ -590,35 +590,22 @@ fn pkgsUpdateCommand(prog: *Program) !void {
     };
     defer prog.progress.end(progress);
 
-    if (update_all) {
-        for (pkgs.by_name.keys(), pkgs.by_name.values(), 0..) |pkg_name, pkg, i| {
-            defer progress.advance(1);
-            if (i != 0 and delay.nanoseconds != 0)
-                try prog.init.io.sleep(delay, .awake);
+    for (0..num) |i| {
+        defer progress.advance(1);
+        if (i != 0 and delay.nanoseconds != 0)
+            try prog.init.io.sleep(delay, .awake);
 
-            try prog.pkgsAdd(.{
-                .name = pkg_name.get(pkgs.strs),
-                .version = pkg.update.version.get(pkgs.strs),
-                .download = pkg.update.download.getNullIfEmpty(pkgs.strs),
-            }, options);
-        }
-    } else {
-        for (pkgs_to_update.keys(), 0..) |pkg_name, i| {
-            defer progress.advance(1);
-            if (i != 0 and delay.nanoseconds != 0)
-                try prog.init.io.sleep(delay, .awake);
+        const pkg_name = if (update_all) pkgs.by_name.keys()[i].get(pkgs.strs) else pkgs_to_update.keys()[i];
+        const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
+            try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
+            continue;
+        };
 
-            const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
-                try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
-                continue;
-            };
-
-            try prog.pkgsAdd(.{
-                .name = pkg_name,
-                .version = pkg.update.version.get(pkgs.strs),
-                .download = pkg.update.download.getNullIfEmpty(pkgs.strs),
-            }, options);
-        }
+        try prog.pkgsAdd(.{
+            .name = pkg_name,
+            .version = pkg.update.version.get(pkgs.strs),
+            .download = pkg.update.download.getNullIfEmpty(pkgs.strs),
+        }, options);
     }
 }
 
