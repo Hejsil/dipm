@@ -194,6 +194,18 @@ fn pkgsUri(prog: Program) []const u8 {
     return prog.options.forced_pkgs_uri orelse prog.options.pkgs_uri;
 }
 
+fn packageManager(prog: Program, d: Packages.Download) !PackageManager {
+    return PackageManager.init(.{
+        .io = prog.init.io,
+        .gpa = prog.init.gpa,
+        .diag = prog.diag,
+        .progress = prog.progress,
+        .prefix = prog.prefix(),
+        .pkgs_uri = prog.pkgsUri(),
+        .download = d,
+    });
+}
+
 fn stdoutWriteAllLocked(prog: Program, str: []const u8) !void {
     prog.io_lock.lock();
     defer prog.io_lock.unlock();
@@ -300,15 +312,7 @@ fn installCommand(prog: *Program) !void {
             pkgs_to_install.appendAssumeCapacity(name);
     }
 
-    var pm = try PackageManager.init(.{
-        .io = prog.init.io,
-        .gpa = prog.init.gpa,
-        .diag = prog.diag,
-        .progress = prog.progress,
-        .prefix = prog.prefix(),
-        .pkgs_uri = prog.pkgsUri(),
-        .download = .only_if_required,
-    });
+    var pm = try prog.packageManager(.only_if_required);
     defer pm.deinit();
 
     try pm.installMany(pkgs_to_install.items);
@@ -337,15 +341,7 @@ fn uninstallCommand(prog: *Program) !void {
             pkgs_to_uninstall.appendAssumeCapacity(name);
     }
 
-    var pm = try PackageManager.init(.{
-        .io = prog.init.io,
-        .gpa = prog.init.gpa,
-        .diag = prog.diag,
-        .progress = prog.progress,
-        .prefix = prog.prefix(),
-        .pkgs_uri = prog.pkgsUri(),
-        .download = .only_if_required,
-    });
+    var pm = try prog.packageManager(.only_if_required);
     defer pm.deinit();
 
     try pm.uninstallMany(pkgs_to_uninstall.items);
@@ -381,15 +377,7 @@ fn updateCommand(prog: *Program) !void {
             pkgs_to_update.appendAssumeCapacity(name);
     }
 
-    var pm = try PackageManager.init(.{
-        .io = prog.init.io,
-        .gpa = prog.init.gpa,
-        .diag = prog.diag,
-        .progress = prog.progress,
-        .prefix = prog.prefix(),
-        .pkgs_uri = prog.pkgsUri(),
-        .download = .always,
-    });
+    var pm = try prog.packageManager(.always);
     defer pm.deinit();
 
     if (pkgs_to_update.items.len == 0) {
