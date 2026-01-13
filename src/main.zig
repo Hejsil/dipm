@@ -206,6 +206,18 @@ fn packageManager(prog: Program, d: Packages.Download) !PackageManager {
     });
 }
 
+fn packages(prog: Program) !Packages {
+    return Packages.download(.{
+        .io = prog.init.io,
+        .gpa = prog.init.gpa,
+        .diagnostics = prog.diag,
+        .progress = prog.progress,
+        .prefix = prog.prefix(),
+        .pkgs_uri = prog.pkgsUri(),
+        .download = .only_if_required,
+    });
+}
+
 fn stdoutWriteAllLocked(prog: Program, str: []const u8) !void {
     prog.io_lock.lock();
     defer prog.io_lock.unlock();
@@ -243,15 +255,7 @@ fn donateCommand(prog: *Program) !void {
             pkgs_to_show_hm.putAssumeCapacity(name, {});
     }
 
-    var pkgs = try Packages.download(.{
-        .io = prog.init.io,
-        .gpa = prog.init.gpa,
-        .diagnostics = prog.diag,
-        .progress = prog.progress,
-        .prefix = prog.prefix(),
-        .pkgs_uri = prog.pkgsUri(),
-        .download = .only_if_required,
-    });
+    var pkgs = try prog.packages();
     defer pkgs.deinit(prog.init.gpa);
 
     const pkgs_to_show = pkgs_to_show_hm.keys();
@@ -474,15 +478,7 @@ fn listAllCommand(prog: *Program) !void {
         }
     }
 
-    var pkgs = try Packages.download(.{
-        .gpa = prog.init.gpa,
-        .io = prog.init.io,
-        .diagnostics = prog.diag,
-        .progress = prog.progress,
-        .prefix = prog.prefix(),
-        .pkgs_uri = prog.pkgsUri(),
-        .download = .only_if_required,
-    });
+    var pkgs = try prog.packages();
     defer pkgs.deinit(prog.init.gpa);
 
     prog.io_lock.lock();
