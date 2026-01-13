@@ -3,7 +3,12 @@
     .version = "0.31.3",
     .minimum_zig_version = "0.16.0-dev.2145+ec25b1384",
     .fingerprint = 0xce3a2bf46fc8eacf,
-    .dependencies = .{},
+    .dependencies = .{
+        .spaghet = .{
+            .url = "git+https://github.com/hejsil/spaghet.git#8ddf09d45ee4e53ff3527e746d3851667abd74e5",
+            .hash = "spaghet-0.0.0-qAWgUccvAAA-FRGAv2QeHvbX2hqSPhnHOYMqLBB3gK1f",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
