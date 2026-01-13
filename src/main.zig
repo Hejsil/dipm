@@ -85,7 +85,7 @@ pub fn mainFull(init: std.process.Init, options: MainOptions) !void {
         .stdout = options.stdout,
         .stderr = options.stderr,
 
-        .args = .{ .args = args[1..] },
+        .args = .initSlice(args[1..]),
         .options = .{
             .forced_prefix = options.forced_prefix,
             .prefix = local_home_path,
@@ -174,7 +174,7 @@ io_lock: *std.Thread.Mutex,
 stdout: *std.Io.File.Writer,
 stderr: *std.Io.File.Writer,
 
-args: ArgParser,
+args: spaghet.Args,
 options: struct {
     /// If set, this prefix will be used instead of `prefix`. Unlike `prefix` this options cannot
     /// be set by command line arguments.
@@ -731,7 +731,6 @@ fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !vo
 }
 
 test {
-    _ = ArgParser;
     _ = Diagnostics;
     _ = InstalledPackages;
     _ = Package;
@@ -747,7 +746,6 @@ test {
     _ = @import("testing.zig");
 }
 
-const ArgParser = @import("ArgParser.zig");
 const Diagnostics = @import("Diagnostics.zig");
 const InstalledPackages = @import("InstalledPackages.zig");
 const PackageManager = @import("PackageManager.zig");
@@ -760,4 +758,5 @@ const download = @import("download.zig");
 const fmt = @import("fmt.zig");
 const fs = @import("fs.zig");
 const git = @import("git.zig");
+const spaghet = @import("spaghet");
 const std = @import("std");

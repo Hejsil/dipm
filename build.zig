@@ -6,11 +6,16 @@ pub fn build(b: *std.Build) void {
     const strip = b.option(bool, "strip", "Omit debug symbols") orelse false;
     const filters = b.option([]const []const u8, "filter", "Test filter") orelse &.{};
 
+    const spaghet = b.dependency("spaghet", .{});
+
     const dipm_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .strip = strip,
+        .imports = &.{
+            .{ .name = "spaghet", .module = spaghet.module("spaghet") },
+        },
     });
 
     const exe = b.addExecutable(.{
