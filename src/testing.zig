@@ -17,6 +17,19 @@ test "dipm list all" {
         "dup-lib3\t0.1.0\n");
 }
 
+test "dipm list installed" {
+    var prefix = try setupPrefix(.{ .version = "0.1.0" });
+    defer prefix.deinit();
+
+    try prefix.run(&.{ "dipm", "list", "installed" });
+    try prefix.expectFile("stdout", "");
+
+    try prefix.run(&.{ "dipm", "install", "test-file" });
+
+    try prefix.run(&.{ "dipm", "list", "installed" });
+    try prefix.expectFile("stdout", "test-file\t0.1.0\n");
+}
+
 test "dipm install test-file" {
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
