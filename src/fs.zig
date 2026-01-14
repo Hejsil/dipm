@@ -13,8 +13,8 @@ pub const ZigCacheTmpDir = struct {
         parent_dir.deleteTree(io, &dir.dir_name) catch {};
     }
 
-    pub fn path(dir: ZigCacheTmpDir, gpa: std.mem.Allocator) ![]u8 {
-        return std.fs.path.join(gpa, &.{
+    pub fn path(dir: ZigCacheTmpDir, gpa: std.mem.Allocator) ![:0]u8 {
+        return std.fs.path.joinZ(gpa, &.{
             dir.zig_cache_path,
             dir.tmp_subdir_name,
             &dir.dir_name,
@@ -42,7 +42,7 @@ pub fn zigCacheTmpDir(io: std.Io, open_dir_options: std.Io.Dir.OpenOptions) !Zig
     };
 }
 
-pub fn zigCacheTmpDirPath(io: std.Io, gpa: std.mem.Allocator) ![]const u8 {
+pub fn zigCacheTmpDirPath(io: std.Io, gpa: std.mem.Allocator) ![:0]const u8 {
     var tmp_dir = try zigCacheTmpDir(io, .{});
     defer tmp_dir.dir.close(io);
 
