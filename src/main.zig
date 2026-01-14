@@ -70,9 +70,6 @@ pub const MainOptions = struct {
 };
 
 pub fn mainFull(init: std.process.Init, options: MainOptions) !void {
-    const home_path = init.environ_map.get("HOME") orelse "/";
-    const local_home_path = try std.fs.path.join(init.arena.allocator(), &.{ home_path, ".local" });
-
     var diag = Diagnostics.init(init.gpa);
     defer diag.deinit();
 
@@ -88,7 +85,6 @@ pub fn mainFull(init: std.process.Init, options: MainOptions) !void {
         .args = .initSlice(args[1..]),
         .options = .{
             .forced_prefix = options.forced_prefix,
-            .prefix = local_home_path,
             .forced_pkgs_uri = options.forced_pkgs_uri,
         },
     };
@@ -179,40 +175,46 @@ options: struct {
     /// If set, this prefix will be used instead of `prefix`. Unlike `prefix` this options cannot
     /// be set by command line arguments.
     forced_prefix: ?[]const u8 = null,
-    prefix: []const u8,
+    prefix: ?[]const u8 = null,
     /// If set, this pkgs_uri will be used instead of `pkgs_uri`. Unlike `prefix` this options
     /// cannot be set by command line arguments.
     forced_pkgs_uri: ?[]const u8 = null,
     pkgs_uri: []const u8 = "https://github.com/Hejsil/dipm-pkgs/raw/0.31.3/pkgs.ini",
 },
 
-fn prefix(prog: Program) []const u8 {
-    return prog.options.forced_prefix orelse prog.options.prefix;
+fn prefix(prog: *Program) ![]const u8 {
+    if (prog.options.forced_prefix == null and prog.options.prefix == null) {
+        const arena = prog.init.arena.allocator();
+        const home_path = prog.init.environ_map.get("HOME") orelse "/";
+        prog.options.prefix = try std.fs.path.join(arena, &.{ home_path, ".local" });
+    }
+
+    return prog.options.forced_prefix orelse prog.options.prefix.?;
 }
 
 fn pkgsUri(prog: Program) []const u8 {
     return prog.options.forced_pkgs_uri orelse prog.options.pkgs_uri;
 }
 
-fn packageManager(prog: Program, d: Packages.Download) !PackageManager {
+fn packageManager(prog: *Program, d: Packages.Download) !PackageManager {
     return PackageManager.init(.{
         .io = prog.init.io,
         .gpa = prog.init.gpa,
         .diag = prog.diag,
         .progress = prog.progress,
-        .prefix = prog.prefix(),
+        .prefix = try prog.prefix(),
         .pkgs_uri = prog.pkgsUri(),
         .download = d,
     });
 }
 
-fn packages(prog: Program) !Packages {
+fn packages(prog: *Program) !Packages {
     return Packages.download(.{
         .io = prog.init.io,
         .gpa = prog.init.gpa,
         .diagnostics = prog.diag,
         .progress = prog.progress,
-        .prefix = prog.prefix(),
+        .prefix = try prog.prefix(),
         .pkgs_uri = prog.pkgsUri(),
         .download = .only_if_required,
     });
@@ -275,7 +277,7 @@ fn donateCommand(prog: *Program) !void {
     if (pkgs_to_show.len != 0)
         return;
 
-    var installed_pkgs = try InstalledPackages.open(prog.init.io, prog.init.gpa, prog.prefix());
+    var installed_pkgs = try InstalledPackages.open(prog.init.io, prog.init.gpa, try prog.prefix());
     defer installed_pkgs.deinit(prog.init.io, prog.init.gpa);
 
     for (installed_pkgs.by_name.keys()) |pkg_name_index| {
@@ -444,7 +446,7 @@ fn listInstalledCommand(prog: *Program) !void {
         }
     }
 
-    var installed = try InstalledPackages.open(prog.init.io, prog.init.gpa, prog.prefix());
+    var installed = try InstalledPackages.open(prog.init.io, prog.init.gpa, try prog.prefix());
     defer installed.deinit(prog.init.io, prog.init.gpa);
 
     prog.io_lock.lock();
