@@ -64,7 +64,6 @@ pub const MainOptions = struct {
     stdout: *std.Io.File.Writer,
     stderr: *std.Io.File.Writer,
 
-    forced_prefix: ?[]const u8 = null,
     forced_pkgs_uri: ?[]const u8 = null,
     progress: *Progress = &Progress.dummy,
 };
@@ -84,7 +83,6 @@ pub fn mainFull(init: std.process.Init, options: MainOptions) !void {
 
         .args = .initSlice(args[1..]),
         .options = .{
-            .forced_prefix = options.forced_prefix,
             .forced_pkgs_uri = options.forced_pkgs_uri,
         },
     };
@@ -172,9 +170,6 @@ stderr: *std.Io.File.Writer,
 
 args: spaghet.Args,
 options: struct {
-    /// If set, this prefix will be used instead of `prefix`. Unlike `prefix` this options cannot
-    /// be set by command line arguments.
-    forced_prefix: ?[]const u8 = null,
     prefix: ?[]const u8 = null,
     /// If set, this pkgs_uri will be used instead of `pkgs_uri`. Unlike `prefix` this options
     /// cannot be set by command line arguments.
@@ -183,13 +178,13 @@ options: struct {
 },
 
 fn prefix(prog: *Program) ![]const u8 {
-    if (prog.options.forced_prefix == null and prog.options.prefix == null) {
+    if (prog.options.prefix == null) {
         const arena = prog.init.arena.allocator();
         const home_path = prog.init.environ_map.get("HOME") orelse "/";
         prog.options.prefix = try std.fs.path.join(arena, &.{ home_path, ".local" });
     }
 
-    return prog.options.forced_prefix orelse prog.options.prefix.?;
+    return prog.options.prefix.?;
 }
 
 fn pkgsUri(prog: Program) []const u8 {
