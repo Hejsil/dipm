@@ -672,6 +672,16 @@ const AddPackage = struct {
 };
 
 fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !void {
+    prog.pkgsAddInner(add_pkg, options) catch |err| {
+        try prog.diag.genericError(.{
+            .id = try prog.diag.putStr(add_pkg.version),
+            .msg = try prog.diag.putStr("Failed to create pkg from url"),
+            .err = err,
+        });
+    };
+}
+
+fn pkgsAddInner(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !void {
     const io = prog.init.io;
     var http_client = std.http.Client{
         .io = prog.init.io,
@@ -694,7 +704,7 @@ fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !vo
     const progress = prog.progress.start(add_pkg.name orelse add_pkg.version, 1);
     defer prog.progress.end(progress);
 
-    const pkg = Package.fromUrl(.{
+    const pkg = try Package.fromUrl(.{
         .io = prog.init.io,
         .gpa = prog.init.gpa,
         .strs = &pkgs.strs,
@@ -703,15 +713,7 @@ fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !vo
         .version_uri = add_pkg.version,
         .download_uri = add_pkg.download,
         .target = .{ .os = builtin.os.tag, .arch = builtin.target.cpu.arch },
-    }) catch |err| {
-        try prog.diag.genericError(.{
-            .id = try prog.diag.putStr(add_pkg.version),
-            .msg = try prog.diag.putStr("Failed to create pkg from url"),
-            .err = err,
-        });
-        return;
-    };
-
+    });
     const old_pkg = try pkgs.update(prog.init.gpa, pkg, .{
         .description = options.update_description,
     });
