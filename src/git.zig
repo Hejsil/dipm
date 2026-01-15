@@ -7,7 +7,11 @@ pub fn commitFile(io: std.Io, dir: std.Io.Dir, file: []const u8, msg: []const u8
         .cwd_dir = dir,
     });
     const failed = switch (try child.wait(io)) {
-        .exited => |code| code != 0,
+        .exited => |code| switch (code) {
+            0 => false, // successful commit
+            1 => false, // nothing to commit commit
+            else => true,
+        },
         else => true,
     };
     if (failed)
