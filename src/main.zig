@@ -253,7 +253,7 @@ fn donateCommand(prog: *Program) !void {
     }
 
     var pkgs = try prog.packages();
-    defer pkgs.deinit(prog.init.gpa);
+    defer pkgs.deinit();
 
     const pkgs_to_show = pkgs_to_show_hm.keys();
     for (pkgs_to_show) |pkg_name| {
@@ -273,7 +273,7 @@ fn donateCommand(prog: *Program) !void {
         return;
 
     var installed_pkgs = try InstalledPackages.open(prog.init.io, prog.init.gpa, try prog.prefix());
-    defer installed_pkgs.deinit(prog.init.io, prog.init.gpa);
+    defer installed_pkgs.deinit(prog.init.io);
 
     for (installed_pkgs.by_name.keys()) |pkg_name_index| {
         const pkg_name = pkg_name_index.get(installed_pkgs.strs);
@@ -442,7 +442,7 @@ fn listInstalledCommand(prog: *Program) !void {
     }
 
     var installed = try InstalledPackages.open(prog.init.io, prog.init.gpa, try prog.prefix());
-    defer installed.deinit(prog.init.io, prog.init.gpa);
+    defer installed.deinit(prog.init.io);
 
     prog.io_lock.lock();
     defer prog.io_lock.unlock();
@@ -476,7 +476,7 @@ fn listAllCommand(prog: *Program) !void {
     }
 
     var pkgs = try prog.packages();
-    defer pkgs.deinit(prog.init.gpa);
+    defer pkgs.deinit();
 
     prog.io_lock.lock();
     defer prog.io_lock.unlock();
@@ -577,7 +577,7 @@ fn pkgsUpdateCommand(prog: *Program) !void {
 
     const cwd = std.Io.Dir.cwd();
     var pkgs = try Packages.parseFromPath(prog.init.gpa, prog.init.io, cwd, options.pkgs_ini_path);
-    defer pkgs.deinit(prog.init.gpa);
+    defer pkgs.deinit();
 
     const update_all = pkgs_to_update.count() == 0;
     const num = if (update_all) pkgs.by_name.count() else pkgs_to_update.count();
@@ -699,7 +699,7 @@ fn pkgsAddInner(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions
     defer pkgs_ini_file.close(io);
 
     var pkgs = try Packages.parseFile(prog.init.io, prog.init.gpa, pkgs_ini_file);
-    defer pkgs.deinit(prog.init.gpa);
+    defer pkgs.deinit();
 
     const progress = prog.progress.start(add_pkg.name orelse add_pkg.version, 1);
     defer prog.progress.end(progress);

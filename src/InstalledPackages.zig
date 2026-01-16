@@ -17,12 +17,12 @@ pub fn open(io: std.Io, gpa: std.mem.Allocator, prefix: []const u8) !InstalledPa
     return parseFile(io, gpa, file);
 }
 
-pub fn deinit(pkgs: *InstalledPackages, io: std.Io, gpa: std.mem.Allocator) void {
+pub fn deinit(pkgs: *InstalledPackages, io: std.Io) void {
     if (pkgs.file) |f|
         f.close(io);
 
-    pkgs.strs.deinit(gpa);
-    pkgs.by_name.deinit(gpa);
+    pkgs.by_name.deinit(pkgs.strs.arena.child_allocator);
+    pkgs.strs.deinit();
     pkgs.* = undefined;
 }
 
@@ -48,17 +48,18 @@ pub fn parseReader(io: std.Io, gpa: std.mem.Allocator, reader: *std.Io.Reader) !
 
 pub fn parse(io: std.Io, gpa: std.mem.Allocator, string: [:0]const u8) !InstalledPackages {
     var pkgs = InstalledPackages{
-        .strs = .empty,
+        .strs = .init(gpa),
         .by_name = .{},
         .file = null,
     };
-    errdefer pkgs.deinit(io, gpa);
+    errdefer pkgs.deinit(io);
 
-    try pkgs.parseInto(gpa, string);
+    try pkgs.parseInto(string);
     return pkgs;
 }
 
-pub fn parseInto(pkgs: *InstalledPackages, gpa: std.mem.Allocator, string: [:0]const u8) !void {
+pub fn parseInto(pkgs: *InstalledPackages, string: [:0]const u8) !void {
+    const gpa = pkgs.strs.arena.child_allocator;
     var parser = ini.Parser.init(string);
     var parsed = parser.next();
 
@@ -71,7 +72,6 @@ pub fn parseInto(pkgs: *InstalledPackages, gpa: std.mem.Allocator, string: [:0]c
     };
 
     // Use original string lengths as a heuristic for how much data to preallocate
-    try pkgs.strs.data.ensureUnusedCapacity(gpa, string.len);
     try pkgs.strs.indices.ensureUnusedCapacity(gpa, string.len / 32);
     try pkgs.by_name.ensureUnusedCapacity(gpa, string.len / 64);
 
@@ -91,14 +91,14 @@ pub fn parseInto(pkgs: *InstalledPackages, gpa: std.mem.Allocator, string: [:0]c
         if (entry.found_existing)
             return error.InvalidPackagesIni;
 
-        const next, const pkg = try pkgs.parsePackage(gpa, &parser);
-        entry.key_ptr.* = try pkgs.strs.putStr(gpa, section.name);
+        const next, const pkg = try pkgs.parsePackage(&parser);
+        entry.key_ptr.* = try pkgs.strs.putStr(section.name);
         entry.value_ptr.* = pkg;
         parsed = next;
     }
 }
 
-fn parsePackage(pkgs: *InstalledPackages, gpa: std.mem.Allocator, parser: *ini.Parser) !struct {
+fn parsePackage(pkgs: *InstalledPackages, parser: *ini.Parser) !struct {
     ini.Parser.Result,
     InstalledPackage,
 } {
@@ -116,14 +116,14 @@ fn parsePackage(pkgs: *InstalledPackages, gpa: std.mem.Allocator, parser: *ini.P
             const prop = parsed.property(parser.string).?;
             switch (std.meta.stringToEnum(PackageField, prop.name) orelse continue) {
                 .version => version = prop.value,
-                .location => _ = try pkgs.strs.putStrs(gpa, &.{prop.value}),
+                .location => _ = try pkgs.strs.putStrs(&.{prop.value}),
             }
         },
     };
 
     const location = pkgs.strs.putIndicesEnd(off);
     return .{ parsed, .{
-        .version = try pkgs.strs.putStr(gpa, version orelse return error.InvalidPackagesIni),
+        .version = try pkgs.strs.putStr(version orelse return error.InvalidPackagesIni),
         .location = location,
     } };
 }
@@ -150,7 +150,7 @@ fn expectTransform(from: [:0]const u8, to: []const u8) !void {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
     var pkgs = try parse(io, gpa, from);
-    defer pkgs.deinit(io, gpa);
+    defer pkgs.deinit(io);
 
     var rendered = std.Io.Writer.Allocating.init(gpa);
     defer rendered.deinit();

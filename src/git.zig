@@ -79,23 +79,23 @@ fn expectCreateCommitMessage(
 
 test createCommitMessage {
     const gpa = std.testing.allocator;
-    var pkgs = Packages.init;
-    defer pkgs.deinit(gpa);
+    var pkgs = Packages.init(gpa);
+    defer pkgs.deinit();
 
     try expectCreateCommitMessage(
         "dipm: Add 0.1.0",
         &pkgs,
         .{
-            .name = try pkgs.strs.putStr(gpa, "dipm"),
+            .name = try pkgs.strs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
+                    .version = try pkgs.strs.putStr("0.1.0"),
+                    .description = try pkgs.strs.putStr("Description 1"),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = try pkgs.strs.putStr(gpa, "a"),
-                    .hash = try pkgs.strs.putStr(gpa, "a"),
+                    .url = try pkgs.strs.putStr("a"),
+                    .hash = try pkgs.strs.putStr("a"),
                 },
             },
         },
@@ -105,28 +105,28 @@ test createCommitMessage {
         "dipm: Update 0.1.0",
         &pkgs,
         .{
-            .name = try pkgs.strs.putStr(gpa, "dipm"),
+            .name = try pkgs.strs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
+                    .version = try pkgs.strs.putStr("0.1.0"),
+                    .description = try pkgs.strs.putStr("Description 1"),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = try pkgs.strs.putStr(gpa, "a"),
-                    .hash = try pkgs.strs.putStr(gpa, "a"),
+                    .url = try pkgs.strs.putStr("a"),
+                    .hash = try pkgs.strs.putStr("a"),
                 },
             },
         },
         .{
             .info = .{
-                .version = try pkgs.strs.putStr(gpa, "0.2.0"),
-                .description = try pkgs.strs.putStr(gpa, "Description 2"),
+                .version = try pkgs.strs.putStr("0.2.0"),
+                .description = try pkgs.strs.putStr("Description 2"),
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = try pkgs.strs.putStr(gpa, "b"),
-                .hash = try pkgs.strs.putStr(gpa, "b"),
+                .url = try pkgs.strs.putStr("b"),
+                .hash = try pkgs.strs.putStr("b"),
             },
         },
     );
@@ -134,28 +134,28 @@ test createCommitMessage {
         "dipm: Update url",
         &pkgs,
         .{
-            .name = try pkgs.strs.putStr(gpa, "dipm"),
+            .name = try pkgs.strs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
+                    .version = try pkgs.strs.putStr("0.1.0"),
+                    .description = try pkgs.strs.putStr("Description 1"),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = try pkgs.strs.putStr(gpa, "a"),
-                    .hash = try pkgs.strs.putStr(gpa, "a"),
+                    .url = try pkgs.strs.putStr("a"),
+                    .hash = try pkgs.strs.putStr("a"),
                 },
             },
         },
         .{
             .info = .{
-                .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                .description = try pkgs.strs.putStr(gpa, "Description 2"),
+                .version = try pkgs.strs.putStr("0.1.0"),
+                .description = try pkgs.strs.putStr("Description 2"),
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = try pkgs.strs.putStr(gpa, "b"),
-                .hash = try pkgs.strs.putStr(gpa, "b"),
+                .url = try pkgs.strs.putStr("b"),
+                .hash = try pkgs.strs.putStr("b"),
             },
         },
     );
@@ -163,28 +163,28 @@ test createCommitMessage {
         "dipm: Update hash",
         &pkgs,
         .{
-            .name = try pkgs.strs.putStr(gpa, "dipm"),
+            .name = try pkgs.strs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
+                    .version = try pkgs.strs.putStr("0.1.0"),
+                    .description = try pkgs.strs.putStr("Description 1"),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = try pkgs.strs.putStr(gpa, "a"),
-                    .hash = try pkgs.strs.putStr(gpa, "a"),
+                    .url = try pkgs.strs.putStr("a"),
+                    .hash = try pkgs.strs.putStr("a"),
                 },
             },
         },
         .{
             .info = .{
-                .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                .description = try pkgs.strs.putStr(gpa, "Description 2"),
+                .version = try pkgs.strs.putStr("0.1.0"),
+                .description = try pkgs.strs.putStr("Description 2"),
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = try pkgs.strs.putStr(gpa, "a"),
-                .hash = try pkgs.strs.putStr(gpa, "b"),
+                .url = try pkgs.strs.putStr("a"),
+                .hash = try pkgs.strs.putStr("b"),
             },
         },
     );
@@ -192,28 +192,28 @@ test createCommitMessage {
         "dipm: Update description",
         &pkgs,
         .{
-            .name = try pkgs.strs.putStr(gpa, "dipm"),
+            .name = try pkgs.strs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
+                    .version = try pkgs.strs.putStr("0.1.0"),
+                    .description = try pkgs.strs.putStr("Description 1"),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = try pkgs.strs.putStr(gpa, "a"),
-                    .hash = try pkgs.strs.putStr(gpa, "a"),
+                    .url = try pkgs.strs.putStr("a"),
+                    .hash = try pkgs.strs.putStr("a"),
                 },
             },
         },
         .{
             .info = .{
-                .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                .description = try pkgs.strs.putStr(gpa, "Description 2"),
+                .version = try pkgs.strs.putStr("0.1.0"),
+                .description = try pkgs.strs.putStr("Description 2"),
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = try pkgs.strs.putStr(gpa, "a"),
-                .hash = try pkgs.strs.putStr(gpa, "a"),
+                .url = try pkgs.strs.putStr("a"),
+                .hash = try pkgs.strs.putStr("a"),
             },
         },
     );
@@ -221,30 +221,30 @@ test createCommitMessage {
         "dipm: Update donations",
         &pkgs,
         .{
-            .name = try pkgs.strs.putStr(gpa, "dipm"),
+            .name = try pkgs.strs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
+                    .version = try pkgs.strs.putStr("0.1.0"),
+                    .description = try pkgs.strs.putStr("Description 1"),
                     .donate = .empty,
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = try pkgs.strs.putStr(gpa, "a"),
-                    .hash = try pkgs.strs.putStr(gpa, "a"),
+                    .url = try pkgs.strs.putStr("a"),
+                    .hash = try pkgs.strs.putStr("a"),
                 },
             },
         },
         .{
             .info = .{
-                .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                .description = try pkgs.strs.putStr(gpa, "Description 1"),
-                .donate = try pkgs.strs.putStrs(gpa, &.{"a"}),
+                .version = try pkgs.strs.putStr("0.1.0"),
+                .description = try pkgs.strs.putStr("Description 1"),
+                .donate = try pkgs.strs.putStrs(&.{"a"}),
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = try pkgs.strs.putStr(gpa, "a"),
-                .hash = try pkgs.strs.putStr(gpa, "a"),
+                .url = try pkgs.strs.putStr("a"),
+                .hash = try pkgs.strs.putStr("a"),
             },
         },
     );
@@ -252,30 +252,30 @@ test createCommitMessage {
         "dipm: Update donations",
         &pkgs,
         .{
-            .name = try pkgs.strs.putStr(gpa, "dipm"),
+            .name = try pkgs.strs.putStr("dipm"),
             .pkg = .{
                 .info = .{
-                    .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                    .description = try pkgs.strs.putStr(gpa, "Description 1"),
-                    .donate = try pkgs.strs.putStrs(gpa, &.{"a"}),
+                    .version = try pkgs.strs.putStr("0.1.0"),
+                    .description = try pkgs.strs.putStr("Description 1"),
+                    .donate = try pkgs.strs.putStrs(&.{"a"}),
                 },
                 .update = .{},
                 .linux_x86_64 = .{
-                    .url = try pkgs.strs.putStr(gpa, "a"),
-                    .hash = try pkgs.strs.putStr(gpa, "a"),
+                    .url = try pkgs.strs.putStr("a"),
+                    .hash = try pkgs.strs.putStr("a"),
                 },
             },
         },
         .{
             .info = .{
-                .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                .description = try pkgs.strs.putStr(gpa, "Description 1"),
-                .donate = try pkgs.strs.putStrs(gpa, &.{"b"}),
+                .version = try pkgs.strs.putStr("0.1.0"),
+                .description = try pkgs.strs.putStr("Description 1"),
+                .donate = try pkgs.strs.putStrs(&.{"b"}),
             },
             .update = .{},
             .linux_x86_64 = .{
-                .url = try pkgs.strs.putStr(gpa, "a"),
-                .hash = try pkgs.strs.putStr(gpa, "a"),
+                .url = try pkgs.strs.putStr("a"),
+                .hash = try pkgs.strs.putStr("a"),
             },
         },
     );

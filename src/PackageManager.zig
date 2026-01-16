@@ -85,10 +85,10 @@ pub fn cleanup(pm: PackageManager) !void {
 }
 
 pub fn deinit(pm: *PackageManager) void {
-    if (pm.cache.pkgs) |*p| p.deinit(pm.gpa);
+    if (pm.cache.pkgs) |*p| p.deinit();
 
     pm.http_client.deinit();
-    pm.installed.deinit(pm.io, pm.gpa);
+    pm.installed.deinit(pm.io);
     pm.lock.close(pm.io);
     pm.prefix_dir.close(pm.io);
 }
@@ -319,7 +319,7 @@ fn installExtractedPackage(
     for (pkg.install.install_bin.get(pkgs.strs)) |install_field| {
         const the_install = Package.Install.fromString(install_field.get(pkgs.strs));
         const join_fmt = std.fs.path.fmtJoin(&.{ paths.bin_subpath, the_install.to });
-        const path = try pm.installed.strs.print(pm.gpa, "{f}", .{join_fmt});
+        const path = try pm.installed.strs.print("{f}", .{join_fmt});
         installBin(pm.io, the_install, from_dir, bin_dir) catch |err| switch (err) {
             error.PathAlreadyExists => {
                 try pm.diag.pathAlreadyExists(.{
@@ -353,7 +353,7 @@ fn installExtractedPackage(
         for (install.installs.get(pkgs.strs)) |install_field| {
             const the_install = Package.Install.fromString(install_field.get(pkgs.strs));
             const join_fmt = std.fs.path.fmtJoin(&.{ install.path, the_install.to });
-            const path = try pm.installed.strs.print(pm.gpa, "{f}", .{join_fmt});
+            const path = try pm.installed.strs.print("{f}", .{join_fmt});
             installGeneric(pm.io, the_install, from_dir, install.dir) catch |err| switch (err) {
                 error.PathAlreadyExists => {
                     try pm.diag.pathAlreadyExists(.{
@@ -372,10 +372,10 @@ fn installExtractedPackage(
     const entry = try pm.installed.by_name.getOrPutAdapted(pm.gpa, pkg.name, adapter);
     std.debug.assert(!entry.found_existing); // Caller ensures that pkg is not installed
 
-    entry.key_ptr.* = try pm.installed.strs.putStr(pm.gpa, pkg.name);
+    entry.key_ptr.* = try pm.installed.strs.putStr(pkg.name);
     entry.value_ptr.* = .{
-        .version = try pm.installed.strs.putStr(pm.gpa, pkg.info.version.get(pkgs.strs)),
-        .location = try pm.installed.strs.putIndices(pm.gpa, locations.items),
+        .version = try pm.installed.strs.putStr(pkg.info.version.get(pkgs.strs)),
+        .location = try pm.installed.strs.putIndices(locations.items),
     };
 }
 
