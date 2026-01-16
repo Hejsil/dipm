@@ -1,14 +1,16 @@
 strs: Strings,
 by_name: std.ArrayHashMapUnmanaged(Strings.Index, Package, void, true),
 
-pub const init = Packages{
-    .strs = .empty,
-    .by_name = .{},
-};
+pub fn init(gpa: std.mem.Allocator) Packages {
+    return .{
+        .strs = .init(gpa),
+        .by_name = .{},
+    };
+}
 
-pub fn deinit(pkgs: *Packages, gpa: std.mem.Allocator) void {
-    pkgs.by_name.deinit(gpa);
-    pkgs.strs.deinit(gpa);
+pub fn deinit(pkgs: *Packages) void {
+    pkgs.by_name.deinit(pkgs.strs.arena.child_allocator);
+    pkgs.strs.deinit();
     pkgs.* = undefined;
 }
 
@@ -42,8 +44,8 @@ const DownloadOptions = struct {
 pub fn download(options: DownloadOptions) !Packages {
     const io = options.io;
 
-    var pkgs = Packages.init;
-    errdefer pkgs.deinit(options.gpa);
+    var pkgs = Packages.init(options.gpa);
+    errdefer pkgs.deinit();
 
     const cwd = std.Io.Dir.cwd();
     var prefix_dir = try cwd.createDirPathOpen(io, options.prefix, .{});
@@ -92,7 +94,7 @@ pub fn download(options: DownloadOptions) !Packages {
     const string = try pkgs_file_reader.interface.allocRemainingAlignedSentinel(options.gpa, .unlimited, .of(u8), 0);
     defer options.gpa.free(string);
 
-    try pkgs.parseInto(options.gpa, string);
+    try pkgs.parseInto(string);
     return pkgs;
 }
 
@@ -121,14 +123,15 @@ pub fn parseReader(gpa: std.mem.Allocator, reader: *std.Io.Reader) !Packages {
 }
 
 pub fn parse(gpa: std.mem.Allocator, string: [:0]const u8) !Packages {
-    var res = Packages.init;
-    errdefer res.deinit(gpa);
+    var res = Packages.init(gpa);
+    errdefer res.deinit();
 
-    try res.parseInto(gpa, string);
+    try res.parseInto(string);
     return res;
 }
 
-pub fn parseInto(pkgs: *Packages, gpa: std.mem.Allocator, string: [:0]const u8) !void {
+pub fn parseInto(pkgs: *Packages, string: [:0]const u8) !void {
+    const gpa = pkgs.strs.arena.child_allocator;
     var parser = ini.Parser.init(string);
     var parsed = parser.next();
 
@@ -141,7 +144,7 @@ pub fn parseInto(pkgs: *Packages, gpa: std.mem.Allocator, string: [:0]const u8) 
     };
 
     // Use original string lengths as a heuristic for how much data to preallocate
-    try pkgs.strs.data.ensureUnusedCapacity(gpa, string.len);
+    try pkgs.strs.strings.ensureUnusedCapacity(gpa, string.len / 64);
     try pkgs.strs.indices.ensureUnusedCapacity(gpa, string.len / 256);
     try pkgs.by_name.ensureUnusedCapacity(gpa, string.len / 512);
 
@@ -163,8 +166,8 @@ pub fn parseInto(pkgs: *Packages, gpa: std.mem.Allocator, string: [:0]const u8) 
         if (entry.found_existing)
             return error.InvalidPackagesIni;
 
-        const next, const pkg = try pkgs.parsePackage(gpa, name, &parser, parsed);
-        entry.key_ptr.* = try pkgs.strs.putStr(gpa, name);
+        const next, const pkg = try pkgs.parsePackage(name, &parser, parsed);
+        entry.key_ptr.* = try pkgs.strs.putStr(name);
         entry.value_ptr.* = pkg;
         parsed = next;
     }
@@ -172,7 +175,6 @@ pub fn parseInto(pkgs: *Packages, gpa: std.mem.Allocator, string: [:0]const u8) 
 
 fn parsePackage(
     pkgs: *Packages,
-    gpa: std.mem.Allocator,
     pkg_name: []const u8,
     parser: *ini.Parser,
     first: ini.Parser.Result,
@@ -194,13 +196,13 @@ fn parsePackage(
         const PackageField = std.meta.FieldEnum(Package);
         switch (std.meta.stringToEnum(PackageField, field) orelse return error.InvalidPackagesIni) {
             .info => {
-                parsed, info = try pkgs.parseInfo(gpa, parser);
+                parsed, info = try pkgs.parseInfo(parser);
             },
             .update => {
-                parsed, update_field = try pkgs.parseUpdate(gpa, parser);
+                parsed, update_field = try pkgs.parseUpdate(parser);
             },
             .linux_x86_64 => {
-                parsed, linux_x86_64 = try pkgs.parseArch(gpa, parser);
+                parsed, linux_x86_64 = try pkgs.parseArch(parser);
             },
         }
     }
@@ -212,7 +214,7 @@ fn parsePackage(
     } };
 }
 
-fn parseInfo(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !struct {
+fn parseInfo(pkgs: *Packages, parser: *ini.Parser) !struct {
     ini.Parser.Result,
     Package.Info,
 } {
@@ -230,9 +232,9 @@ fn parseInfo(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !stru
             const prop = parsed.property(parser.string).?;
             const InfoField = std.meta.FieldEnum(Package.Info);
             switch (std.meta.stringToEnum(InfoField, prop.name) orelse continue) {
-                .version => version = try pkgs.strs.putStr(gpa, prop.value),
-                .description => desc = try pkgs.strs.putStr(gpa, prop.value),
-                .donate => _ = try pkgs.strs.putStrs(gpa, &.{prop.value}),
+                .version => version = try pkgs.strs.putStr(prop.value),
+                .description => desc = try pkgs.strs.putStr(prop.value),
+                .donate => _ = try pkgs.strs.putStrs(&.{prop.value}),
             }
         },
     };
@@ -245,7 +247,7 @@ fn parseInfo(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !stru
     } };
 }
 
-fn parseUpdate(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !struct {
+fn parseUpdate(pkgs: *Packages, parser: *ini.Parser) !struct {
     ini.Parser.Result,
     Package.Update,
 } {
@@ -260,8 +262,8 @@ fn parseUpdate(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !st
             const prop = parsed.property(parser.string).?;
             const UpdateField = std.meta.FieldEnum(Package.Update);
             switch (std.meta.stringToEnum(UpdateField, prop.name) orelse continue) {
-                .version => res.version = try pkgs.strs.putStr(gpa, prop.value),
-                .download => res.download = try pkgs.strs.putStr(gpa, prop.value),
+                .version => res.version = try pkgs.strs.putStr(prop.value),
+                .download => res.download = try pkgs.strs.putStr(prop.value),
             }
         },
     };
@@ -269,7 +271,7 @@ fn parseUpdate(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !st
     return .{ parsed, res };
 }
 
-fn parseArch(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !struct {
+fn parseArch(pkgs: *Packages, parser: *ini.Parser) !struct {
     ini.Parser.Result,
     Package.Arch,
 } {
@@ -301,7 +303,7 @@ fn parseArch(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !stru
 
                 off = pkgs.strs.putIndicesBegin();
                 prev_field = field;
-                _ = try pkgs.strs.putIndices(gpa, switch (field) {
+                _ = try pkgs.strs.putIndices(switch (field) {
                     .install_bin => install_bin.get(pkgs.strs),
                     .install_lib => install_lib.get(pkgs.strs),
                     .install_share => install_share.get(pkgs.strs),
@@ -313,7 +315,7 @@ fn parseArch(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !stru
                 .url => url = prop.value,
                 .hash => hash = prop.value,
                 .install_bin, .install_lib, .install_share => {
-                    _ = try pkgs.strs.putStrs(gpa, &.{prop.value});
+                    _ = try pkgs.strs.putStrs(&.{prop.value});
                 },
             }
         },
@@ -327,8 +329,8 @@ fn parseArch(pkgs: *Packages, gpa: std.mem.Allocator, parser: *ini.Parser) !stru
     }
 
     return .{ parsed, .{
-        .url = try pkgs.strs.putStr(gpa, url orelse return error.InvalidPackagesIni),
-        .hash = try pkgs.strs.putStr(gpa, hash orelse return error.InvalidPackagesIni),
+        .url = try pkgs.strs.putStr(url orelse return error.InvalidPackagesIni),
+        .hash = try pkgs.strs.putStr(hash orelse return error.InvalidPackagesIni),
         .install_bin = install_bin,
         .install_lib = install_lib,
         .install_share = install_share,
@@ -364,7 +366,7 @@ fn expectWrite(pkgs: *Packages, string: []const u8) !void {
 
 fn expectTransform(from: [:0]const u8, to: []const u8) !void {
     var pkgs = try parse(std.testing.allocator, from);
-    defer pkgs.deinit(std.testing.allocator);
+    defer pkgs.deinit();
 
     return expectWrite(&pkgs, to);
 }
@@ -447,7 +449,7 @@ fn parseAndWrite(gpa: std.mem.Allocator, string: []const u8) ![]u8 {
     defer out.deinit();
 
     var pkgs = try parse(gpa, str_z);
-    defer pkgs.deinit(gpa);
+    defer pkgs.deinit();
 
     try pkgs.write(&out.writer);
     return out.toOwnedSlice();
@@ -474,28 +476,28 @@ pub fn sort(pkgs: *Packages) void {
 
 test sort {
     const gpa = std.testing.allocator;
-    var pkgs = Packages.init;
-    defer pkgs.deinit(gpa);
+    var pkgs = Packages.init(gpa);
+    defer pkgs.deinit();
 
     try std.testing.expect(try pkgs.update(gpa, .{
-        .name = try pkgs.strs.putStr(gpa, "btest"),
+        .name = try pkgs.strs.putStr("btest"),
         .pkg = .{
-            .info = .{ .version = try pkgs.strs.putStr(gpa, "0.2.0") },
-            .update = .{ .version = try pkgs.strs.putStr(gpa, "https://github.com/test/test") },
+            .info = .{ .version = try pkgs.strs.putStr("0.2.0") },
+            .update = .{ .version = try pkgs.strs.putStr("https://github.com/test/test") },
             .linux_x86_64 = .{
-                .hash = try pkgs.strs.putStr(gpa, "test_hash"),
-                .url = try pkgs.strs.putStr(gpa, "test_url"),
+                .hash = try pkgs.strs.putStr("test_hash"),
+                .url = try pkgs.strs.putStr("test_url"),
             },
         },
     }, .{}) == null);
     try std.testing.expect(try pkgs.update(gpa, .{
-        .name = try pkgs.strs.putStr(gpa, "atest"),
+        .name = try pkgs.strs.putStr("atest"),
         .pkg = .{
-            .info = .{ .version = try pkgs.strs.putStr(gpa, "0.2.0") },
-            .update = .{ .version = try pkgs.strs.putStr(gpa, "https://github.com/test/test") },
+            .info = .{ .version = try pkgs.strs.putStr("0.2.0") },
+            .update = .{ .version = try pkgs.strs.putStr("https://github.com/test/test") },
             .linux_x86_64 = .{
-                .hash = try pkgs.strs.putStr(gpa, "test_hash"),
-                .url = try pkgs.strs.putStr(gpa, "test_url"),
+                .hash = try pkgs.strs.putStr("test_hash"),
+                .url = try pkgs.strs.putStr("test_url"),
             },
         },
     }, .{}) == null);
@@ -646,7 +648,7 @@ fn updateInstall(pkgs: *Packages, gpa: std.mem.Allocator, options: struct {
                 // Old and new from location are the same after we replace old_version
                 // with new version in the old install string:
                 //   test:test-0.1.0, test-0.2.0 -> test:test-0.2.0
-                const install = try pkgs.strs.print(gpa, "{s}:{s}", .{
+                const install = try pkgs.strs.print("{s}:{s}", .{
                     old_install_replaced.to,
                     new_install.from,
                 });
@@ -664,24 +666,24 @@ fn updateInstall(pkgs: *Packages, gpa: std.mem.Allocator, options: struct {
 
 test update {
     const gpa = std.testing.allocator;
-    var pkgs = Packages.init;
-    defer pkgs.deinit(gpa);
+    var pkgs = Packages.init(gpa);
+    defer pkgs.deinit();
 
     try expectWrite(&pkgs, "");
 
     try std.testing.expect(try pkgs.update(gpa, .{
-        .name = try pkgs.strs.putStr(gpa, "test"),
+        .name = try pkgs.strs.putStr("test"),
         .pkg = .{
             .info = .{
-                .version = try pkgs.strs.putStr(gpa, "0.1.0"),
-                .description = try pkgs.strs.putStr(gpa, "Test package"),
-                .donate = try pkgs.strs.putStrs(gpa, &.{ "donate-link", "donate-link" }),
+                .version = try pkgs.strs.putStr("0.1.0"),
+                .description = try pkgs.strs.putStr("Test package"),
+                .donate = try pkgs.strs.putStrs(&.{ "donate-link", "donate-link" }),
             },
-            .update = .{ .version = try pkgs.strs.putStr(gpa, "https://github.com/test/test") },
+            .update = .{ .version = try pkgs.strs.putStr("https://github.com/test/test") },
             .linux_x86_64 = .{
-                .hash = try pkgs.strs.putStr(gpa, "test_hash1"),
-                .url = try pkgs.strs.putStr(gpa, "test_url1"),
-                .install_bin = try pkgs.strs.putStrs(gpa, &.{
+                .hash = try pkgs.strs.putStr("test_hash1"),
+                .url = try pkgs.strs.putStr("test_url1"),
+                .install_bin = try pkgs.strs.putStrs(&.{
                     "test-0.1.0/test",
                     "test2:test-0.1.0",
                 }),
@@ -707,17 +709,17 @@ test update {
     );
 
     const new_version = Package.Named{
-        .name = try pkgs.strs.putStr(gpa, "test"),
+        .name = try pkgs.strs.putStr("test"),
         .pkg = .{
-            .info = .{ .version = try pkgs.strs.putStr(gpa, "0.2.0") },
+            .info = .{ .version = try pkgs.strs.putStr("0.2.0") },
             .update = .{
-                .version = try pkgs.strs.putStr(gpa, "https://github.com/test/test"),
-                .download = try pkgs.strs.putStr(gpa, "https://download.com"),
+                .version = try pkgs.strs.putStr("https://github.com/test/test"),
+                .download = try pkgs.strs.putStr("https://download.com"),
             },
             .linux_x86_64 = .{
-                .hash = try pkgs.strs.putStr(gpa, "test_hash2"),
-                .url = try pkgs.strs.putStr(gpa, "test_url2"),
-                .install_bin = try pkgs.strs.putStrs(gpa, &.{
+                .hash = try pkgs.strs.putStr("test_hash2"),
+                .url = try pkgs.strs.putStr("test_url2"),
+                .install_bin = try pkgs.strs.putStrs(&.{
                     "test-0.2.0/test",
                     "test-0.2.0",
                     "test3",

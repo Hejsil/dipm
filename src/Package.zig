@@ -300,7 +300,7 @@ pub fn fromGithub(args: struct {
     });
 
     const hash = std.fmt.bytesToHex(downloaded.result.hash, .lower);
-    const version_uri = try args.strs.print(args.gpa, "https://github.com/{s}/{s}", .{
+    const version_uri = try args.strs.print("https://github.com/{s}/{s}", .{
         args.repo.user,
         args.repo.name,
     });
@@ -311,22 +311,22 @@ pub fn fromGithub(args: struct {
     }
 
     return .{
-        .name = try args.strs.putStr(args.gpa, name),
+        .name = try args.strs.putStr(name),
         .pkg = .{
             .info = .{
-                .version = try args.strs.putStr(args.gpa, version),
-                .description = try args.strs.putStr(args.gpa, description),
+                .version = try args.strs.putStr(version),
+                .description = try args.strs.putStr(description),
                 .donate = donate,
             },
             .update = .{
                 .version = version_uri,
-                .download = if (args.download_uri) |d| try args.strs.putStr(args.gpa, d) else .empty,
+                .download = if (args.download_uri) |d| try args.strs.putStr(d) else .empty,
             },
             .linux_x86_64 = .{
-                .url = try args.strs.putStr(args.gpa, download_url.url),
-                .hash = try args.strs.putStr(args.gpa, &hash),
+                .url = try args.strs.putStr(download_url.url),
+                .hash = try args.strs.putStr(&hash),
                 .install_bin = binaries,
-                .install_share = try args.strs.concatIndices(args.gpa, &.{ shares, man_pages }),
+                .install_share = try args.strs.concatIndices(&.{ shares, man_pages }),
             },
         },
     };
@@ -497,12 +497,12 @@ fn githubDownloadSponsorUrls(args: struct {
     if (repository_result.status != .ok)
         return .empty;
 
-    return fundingYmlToUrls(args.gpa, args.strs, funding_yml.written());
+    return fundingYmlToUrls(args.strs, funding_yml.written());
 }
 
 // Very scuffed but working parser for FUNDING.yml. Didn't really wonna write something proper or
 // pull in a yaml dependency.
-fn fundingYmlToUrls(gpa: std.mem.Allocator, strs: *Strings, string: []const u8) !Strings.Indices {
+fn fundingYmlToUrls(strs: *Strings, string: []const u8) !Strings.Indices {
     const off = strs.putIndicesBegin();
     const Tokenizer = struct {
         str: []const u8,
@@ -617,8 +617,8 @@ fn fundingYmlToUrls(gpa: std.mem.Allocator, strs: *Strings, string: []const u8) 
                     break;
 
                 const value = tok.nextValue();
-                const url = try strs.print(gpa, "{s}{s}", .{ prefix, value });
-                try strs.indices.append(gpa, url);
+                const url = try strs.print("{s}{s}", .{ prefix, value });
+                _ = try strs.putIndices(&.{url});
             },
             '[' => while (true) {
                 reset = tok;
@@ -634,14 +634,14 @@ fn fundingYmlToUrls(gpa: std.mem.Allocator, strs: *Strings, string: []const u8) 
 
                 tok = reset;
                 const value = tok.nextValue();
-                const url = try strs.print(gpa, "{s}{s}", .{ prefix, value });
-                try strs.indices.append(gpa, url);
+                const url = try strs.print("{s}{s}", .{ prefix, value });
+                _ = try strs.putIndices(&.{url});
             },
             else => {
                 tok = reset;
                 const value = tok.nextValue();
-                const url = try strs.print(gpa, "{s}{s}", .{ prefix, value });
-                try strs.indices.append(gpa, url);
+                const url = try strs.print("{s}{s}", .{ prefix, value });
+                _ = try strs.putIndices(&.{url});
                 curr = tok.next();
             },
         }
@@ -651,10 +651,10 @@ fn fundingYmlToUrls(gpa: std.mem.Allocator, strs: *Strings, string: []const u8) 
 }
 
 fn expectFundingUrls(funding_yml: []const u8, expected: []const []const u8) !void {
-    var strs = Strings.empty;
-    defer strs.deinit(std.testing.allocator);
+    var strs = Strings.init(std.testing.allocator);
+    defer strs.deinit();
 
-    const actual = try fundingYmlToUrls(std.testing.allocator, &strs, funding_yml);
+    const actual = try fundingYmlToUrls(&strs, funding_yml);
     const len = @min(expected.len, actual.len);
     for (expected[0..len], actual.get(strs)[0..len]) |e, a|
         try std.testing.expectEqualStrings(e, a.get(strs));
@@ -1112,7 +1112,7 @@ fn testFromGithub(options: struct {
         , .{options.description}),
     });
 
-    var strs = Strings.empty;
+    var strs = Strings.init(arena);
     const pkg_from_latest_release = try fromGithub(.{
         .io = io,
         .gpa = arena,
@@ -1256,7 +1256,7 @@ fn findStaticallyLinkedBinaries(args: struct {
     const off = args.strs.putIndicesBegin();
     var static_files_lines = std.mem.tokenizeScalar(u8, static_files_result.stdout, '\n');
     while (static_files_lines.next()) |static_bin|
-        _ = try args.strs.putStrs(args.gpa, &.{static_bin});
+        _ = try args.strs.putStrs(&.{static_bin});
 
     return args.strs.putIndicesEnd(off);
 }
@@ -1277,8 +1277,8 @@ fn testFindStaticallyLinkedBinaries(options: struct {
         try tmp_dir.dir.writeFile(io, file_options);
     }
 
-    var strs = Strings.empty;
-    defer strs.deinit(gpa);
+    var strs = Strings.init(gpa);
+    defer strs.deinit();
 
     const result = try findStaticallyLinkedBinaries(.{
         .io = io,
@@ -1361,8 +1361,8 @@ fn findShare(args: struct {
                     continue :share_dir_loop;
             }
 
-            const path = try args.strs.print(gpa, "{s}/{s}", .{ entry.path, share_dir_entry.name });
-            _ = try args.strs.putIndices(gpa, &.{path});
+            const path = try args.strs.print("{s}/{s}", .{ entry.path, share_dir_entry.name });
+            _ = try args.strs.putIndices(&.{path});
         }
         break;
     }
@@ -1401,8 +1401,8 @@ fn testFindShare(options: struct {
     }
 
     const gpa = std.testing.allocator;
-    var strs = Strings.empty;
-    defer strs.deinit(gpa);
+    var strs = Strings.init(gpa);
+    defer strs.deinit();
 
     const result = try findShare(.{
         .io = io,
@@ -1462,12 +1462,12 @@ fn findManPages(args: struct {
         _ = name_split.first();
         const man_section = name_split.next() orelse continue;
 
-        const install = try args.strs.print(gpa, "man/man{s}/{s}:{s}", .{
+        const install = try args.strs.print("man/man{s}/{s}:{s}", .{
             man_section,
             std.fs.path.basename(entry.path),
             entry.path,
         });
-        _ = try args.strs.putIndices(gpa, &.{install});
+        _ = try args.strs.putIndices(&.{install});
     }
 
     const SortContext = struct {
@@ -1538,8 +1538,8 @@ fn testfindManPages(options: struct {
     }
 
     const gpa = std.testing.allocator;
-    var strs = Strings.empty;
-    defer strs.deinit(gpa);
+    var strs = Strings.init(gpa);
+    defer strs.deinit();
 
     const result = try findManPages(.{
         .io = io,

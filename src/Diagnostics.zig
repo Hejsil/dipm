@@ -29,7 +29,7 @@ failures: struct {
 pub fn init(gpa: std.mem.Allocator) Diagnostics {
     return .{
         .gpa = gpa,
-        .strs = .empty,
+        .strs = .init(gpa),
         .lock = .{},
         .successes = .{
             .donate = .{},
@@ -63,7 +63,7 @@ pub fn deinit(diag: *Diagnostics) void {
     inline for (@typeInfo(@TypeOf(diag.failures)).@"struct".fields) |field|
         @field(diag.failures, field.name).deinit(diag.gpa);
 
-    diag.strs.deinit(diag.gpa);
+    diag.strs.deinit();
     diag.* = undefined;
 }
 
@@ -117,7 +117,7 @@ pub fn hasFailed(diag: Diagnostics) bool {
 pub fn putStr(diag: *Diagnostics, string: []const u8) !Strings.Index {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.strs.putStr(diag.gpa, string);
+    return diag.strs.putStr(string);
 }
 
 pub fn donate(diag: *Diagnostics, pkg: PackageDonate) !void {

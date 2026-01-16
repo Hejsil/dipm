@@ -1,16 +1,16 @@
-data: std.ArrayListUnmanaged(u8),
+arena: std.heap.ArenaAllocator,
+strings: std.ArrayListUnmanaged([]const u8),
 indices: std.ArrayListUnmanaged(Index),
-pointer_stability: std.debug.SafetyLock,
 
 pub const Index = enum(u32) {
     empty = std.math.maxInt(u32),
     _,
 
-    pub fn get(i: Index, strings: Strings) [:0]const u8 {
+    pub fn get(i: Index, strings: Strings) []const u8 {
         return strings.getStr(i);
     }
 
-    pub fn getNullIfEmpty(i: Index, strings: Strings) ?[:0]const u8 {
+    pub fn getNullIfEmpty(i: Index, strings: Strings) ?[]const u8 {
         const res = i.get(strings);
         if (res.len == 0) return null;
         return res;
@@ -31,117 +31,71 @@ pub const Indices = struct {
     }
 };
 
-pub const empty = Strings{
-    .data = .empty,
-    .indices = .empty,
-    .pointer_stability = .{},
-};
+pub fn init(gpa: std.mem.Allocator) Strings {
+    return .{
+        .arena = .init(gpa),
+        .strings = .empty,
+        .indices = .empty,
+    };
+}
 
-pub fn deinit(strings: *Strings, gpa: std.mem.Allocator) void {
-    strings.data.deinit(gpa);
-    strings.indices.deinit(gpa);
+pub fn deinit(strings: *Strings) void {
+    strings.strings.deinit(strings.arena.child_allocator);
+    strings.indices.deinit(strings.arena.child_allocator);
+    strings.arena.deinit();
     strings.* = undefined;
 }
 
-pub fn putStr(strings: *Strings, gpa: std.mem.Allocator, string: []const u8) !Index {
-    strings.pointer_stability.lock();
-    defer strings.pointer_stability.unlock();
-
-    try strings.data.ensureUnusedCapacity(gpa, string.len + 1);
-    return strings.putStrAssumeCapacityNoLock(string);
-}
-
-pub fn putStrAssumeCapacity(strings: *Strings, string: []const u8) Index {
-    strings.pointer_stability.lock();
-    defer strings.pointer_stability.unlock();
-    return strings.putStrAssumeCapacityNoLock(string);
-}
-
-fn putStrAssumeCapacityNoLock(strings: *Strings, string: []const u8) Index {
-    strings.pointer_stability.assertLocked();
-    const index: u32 = @intCast(strings.data.items.len);
-    strings.data.appendSliceAssumeCapacity(string);
-    strings.data.appendAssumeCapacity(0);
-    return @enumFromInt(index);
+pub fn putStr(strings: *Strings, string: []const u8) !Index {
+    const duped = try strings.arena.allocator().dupe(u8, string);
+    try strings.strings.append(strings.arena.child_allocator, duped);
+    return @enumFromInt(strings.strings.items.len - 1);
 }
 
 test putStr {
     const gpa = std.testing.allocator;
-    var strings = Strings.empty;
-    defer strings.deinit(gpa);
+    var strings = Strings.init(gpa);
+    defer strings.deinit();
 
-    const a = try strings.putStr(gpa, "a");
-    const b = try strings.putStr(gpa, "b");
+    const a = try strings.putStr("a");
+    const b = try strings.putStr("b");
     try std.testing.expectEqual(@as(u32, 0), @intFromEnum(a));
-    try std.testing.expectEqual(@as(u32, 2), @intFromEnum(b));
+    try std.testing.expectEqual(@as(u32, 1), @intFromEnum(b));
     try std.testing.expectEqualStrings("a", a.get(strings));
     try std.testing.expectEqualStrings("b", b.get(strings));
 }
 
-pub fn putStrs(strings: *Strings, gpa: std.mem.Allocator, strs: []const []const u8) !Indices {
-    strings.pointer_stability.lock();
-    defer strings.pointer_stability.unlock();
-
-    try strings.data.ensureUnusedCapacity(gpa, blk: {
-        var needed_capacity: usize = 0;
-        for (strs) |str| needed_capacity += str.len + 1;
-        break :blk needed_capacity;
-    });
-    try strings.indices.ensureUnusedCapacity(gpa, strs.len);
-
-    return strings.putStrsAssumeCapacityNoLock(strs);
-}
-
-pub fn putStrsAssumeCapacity(strings: *Strings, strs: []const []const u8) Indices {
-    strings.pointer_stability.lock();
-    defer strings.pointer_stability.unlock();
-    return strings.putStrsAssumeCapacityNoLock(strs);
-}
-
-fn putStrsAssumeCapacityNoLock(strings: *Strings, strs: []const []const u8) Indices {
-    strings.pointer_stability.assertLocked();
+pub fn putStrs(strings: *Strings, strs: []const []const u8) !Indices {
+    try strings.indices.ensureUnusedCapacity(strings.arena.child_allocator, strs.len);
 
     const off = strings.putIndicesBegin();
     for (strs) |str| {
-        const index = strings.putStrAssumeCapacityNoLock(str);
+        const index = try strings.putStr(str);
         strings.indices.appendAssumeCapacity(index);
     }
-
     return strings.putIndicesEnd(off);
 }
 
 test putStrs {
     const gpa = std.testing.allocator;
-    var strings = Strings.empty;
-    defer strings.deinit(gpa);
+    var strings = Strings.init(gpa);
+    defer strings.deinit();
 
-    const indices = try strings.putStrs(gpa, &.{ "a", "b" });
+    const indices = try strings.putStrs(&.{ "a", "b" });
     try std.testing.expectEqual(@as(u32, 0), indices.off);
     try std.testing.expectEqual(@as(u32, 2), indices.len);
 
     const indices_slice = indices.get(strings);
     try std.testing.expectEqual(@as(usize, 2), indices_slice.len);
     try std.testing.expectEqual(@as(u32, 0), @intFromEnum(indices_slice[0]));
-    try std.testing.expectEqual(@as(u32, 2), @intFromEnum(indices_slice[1]));
+    try std.testing.expectEqual(@as(u32, 1), @intFromEnum(indices_slice[1]));
     try std.testing.expectEqualStrings("a", indices_slice[0].get(strings));
     try std.testing.expectEqualStrings("b", indices_slice[1].get(strings));
 }
 
-pub fn putIndices(strings: *Strings, gpa: std.mem.Allocator, indices: []const Index) !Indices {
-    strings.pointer_stability.lock();
-    defer strings.pointer_stability.unlock();
-    try strings.indices.ensureUnusedCapacity(gpa, indices.len);
-    return strings.putIndicesAssumeCapacityNoLock(indices);
-}
+pub fn putIndices(strings: *Strings, indices: []const Index) !Indices {
+    try strings.indices.ensureUnusedCapacity(strings.arena.child_allocator, indices.len);
 
-pub fn putIndicesAssumeCapacity(strings: *Strings, indices: []const Index) !Indices {
-    strings.pointer_stability.lock();
-    defer strings.pointer_stability.unlock();
-    return strings.putIndicesAssumeCapacityNoLock(indices);
-}
-
-fn putIndicesAssumeCapacityNoLock(strings: *Strings, indices: []const Index) !Indices {
-    strings.pointer_stability.assertLocked();
     const off = strings.putIndicesBegin();
     strings.indices.appendSliceAssumeCapacity(indices);
     return strings.putIndicesEnd(off);
@@ -149,12 +103,12 @@ fn putIndicesAssumeCapacityNoLock(strings: *Strings, indices: []const Index) !In
 
 test putIndices {
     const gpa = std.testing.allocator;
-    var strings = Strings.empty;
-    defer strings.deinit(gpa);
+    var strings = Strings.init(gpa);
+    defer strings.deinit();
 
-    const a = try strings.putStr(gpa, "a");
-    const b = try strings.putStr(gpa, "b");
-    const indices = try strings.putIndices(gpa, &.{ a, b });
+    const a = try strings.putStr("a");
+    const b = try strings.putStr("b");
+    const indices = try strings.putIndices(&.{ a, b });
     try std.testing.expectEqual(@as(u32, 0), indices.off);
     try std.testing.expectEqual(@as(u32, 2), indices.len);
 
@@ -166,30 +120,26 @@ test putIndices {
     try std.testing.expectEqualStrings("b", strings.getStr(indices_slice[1]));
 }
 
-pub fn concatIndices(strings: *Strings, gpa: std.mem.Allocator, indices: []const Indices) !Indices {
-    strings.pointer_stability.lock();
-    defer strings.pointer_stability.unlock();
-
+pub fn concatIndices(strings: *Strings, indices: []const Indices) !Indices {
     var num: usize = 0;
     for (indices) |i|
         num += i.len;
 
+    try strings.indices.ensureUnusedCapacity(strings.arena.child_allocator, num);
     const off = strings.putIndicesBegin();
-    try strings.indices.ensureUnusedCapacity(gpa, num);
-    for (indices) |i| {
+    for (indices) |i|
         strings.indices.appendSliceAssumeCapacity(i.get(strings.*));
-    }
     return strings.putIndicesEnd(off);
 }
 
 test concatIndices {
     const gpa = std.testing.allocator;
-    var strings = Strings.empty;
-    defer strings.deinit(gpa);
+    var strings = Strings.init(gpa);
+    defer strings.deinit();
 
-    const as = try strings.putStrs(gpa, &.{ "a", "aa", "aaa" });
-    const bs = try strings.putStrs(gpa, &.{ "b", "bb", "bbb" });
-    const both = try strings.concatIndices(gpa, &.{ as, bs });
+    const as = try strings.putStrs(&.{ "a", "aa", "aaa" });
+    const bs = try strings.putStrs(&.{ "b", "bb", "bbb" });
+    const both = try strings.concatIndices(&.{ as, bs });
     const both_slice = both.get(strings);
     try std.testing.expectEqual(@as(usize, 6), both_slice.len);
     try std.testing.expectEqualStrings("a", strings.getStr(both_slice[0]));
@@ -208,48 +158,22 @@ pub fn putIndicesEnd(strings: *Strings, off: u32) Indices {
     return .{ .off = off, .len = @intCast(strings.indices.items.len - off) };
 }
 
-pub fn print(
-    strings: *Strings,
-    gpa: std.mem.Allocator,
-    comptime format: []const u8,
-    args: anytype,
-) !Index {
-    strings.pointer_stability.lock();
-    defer strings.pointer_stability.unlock();
+pub fn print(strings: *Strings, comptime format: []const u8, args: anytype) !Index {
+    const string = try std.fmt.allocPrint(strings.arena.child_allocator, format, args);
+    defer strings.arena.child_allocator.free(string);
 
-    const len = std.fmt.count(format, args);
-    try strings.data.ensureUnusedCapacity(gpa, len + 1);
-    return strings.printAssumeCapacityNoLock(format, args);
-}
-
-pub fn printAssumeCapacity(strings: *Strings, comptime format: []const u8, args: anytype) Index {
-    strings.pointer_stability.lock();
-    defer strings.pointer_stability.unlock();
-    return strings.printAssumeCapacityNoLock(format, args);
-}
-
-fn printAssumeCapacityNoLock(strings: *Strings, comptime format: []const u8, args: anytype) Index {
-    strings.pointer_stability.assertLocked();
-    var fba = std.heap.FixedBufferAllocator.init("");
-    const index: u32 = @intCast(strings.data.items.len);
-
-    var writer = std.Io.Writer.Allocating.fromArrayList(fba.allocator(), &strings.data);
-    writer.writer.print(format, args) catch unreachable;
-    strings.data = writer.toArrayList();
-
-    strings.data.appendAssumeCapacity(0);
-    return @enumFromInt(index);
+    return strings.putStr(string);
 }
 
 test print {
     const gpa = std.testing.allocator;
-    var strings = Strings.empty;
-    defer strings.deinit(gpa);
+    var strings = Strings.init(gpa);
+    defer strings.deinit();
 
-    const a = try strings.print(gpa, "{}{}", .{ 0, 1 });
-    const b = try strings.print(gpa, "{s}{s}", .{ "b", "c" });
+    const a = try strings.print("{}{}", .{ 0, 1 });
+    const b = try strings.print("{s}{s}", .{ "b", "c" });
     try std.testing.expectEqual(@as(u32, 0), @intFromEnum(a));
-    try std.testing.expectEqual(@as(u32, 3), @intFromEnum(b));
+    try std.testing.expectEqual(@as(u32, 1), @intFromEnum(b));
     try std.testing.expectEqualStrings("01", strings.getStr(a));
     try std.testing.expectEqualStrings("bc", strings.getStr(b));
 }
@@ -258,21 +182,14 @@ pub fn eql(strings: Strings, a: Index, b: Index) bool {
     return std.mem.eql(u8, a.get(strings), b.get(strings));
 }
 
-fn getPtr(strings: Strings, index: Index) [*:0]const u8 {
-    strings.pointer_stability.assertUnlocked();
-    const i = @intFromEnum(index);
-    return strings.data.items[i .. strings.data.items.len - 1 :0];
-}
-
-fn getStr(strings: Strings, index: Index) [:0]const u8 {
+fn getStr(strings: Strings, index: Index) []const u8 {
     if (index == .empty) return "";
 
-    strings.pointer_stability.assertUnlocked();
-    const ptr = strings.getPtr(index);
-    return std.mem.span(ptr);
+    const i = @intFromEnum(index);
+    return strings.strings.items[i];
 }
 
-fn getIndices(strings: Strings, indices: Indices) []Index {
+pub fn getIndices(strings: Strings, indices: Indices) []Index {
     return strings.indices.items[indices.off..][0..indices.len];
 }
 
@@ -296,14 +213,14 @@ pub const ArrayHashMapAdapter = struct {
 
 test ArrayHashMapAdapter {
     const gpa = std.testing.allocator;
-    var strings = Strings.empty;
-    defer strings.deinit(gpa);
+    var strings = Strings.init(gpa);
+    defer strings.deinit();
 
     var map = std.ArrayHashMapUnmanaged(Index, void, void, true){};
     defer map.deinit(gpa);
 
     const a_entry = try map.getOrPutAdapted(gpa, "a", strings.adapter());
-    a_entry.key_ptr.* = try strings.putStr(gpa, "a");
+    a_entry.key_ptr.* = try strings.putStr("a");
 
     try std.testing.expect(!a_entry.found_existing);
     try std.testing.expect(map.getAdapted("a", strings.adapter()) != null);
