@@ -1,5 +1,4 @@
-gpa: std.mem.Allocator,
-strs: Strings,
+arena_alloc: std.heap.ArenaAllocator,
 lock: std.Thread.Mutex,
 
 successes: struct {
@@ -26,10 +25,9 @@ failures: struct {
     generic_error: std.ArrayListUnmanaged(GenericError),
 },
 
-pub fn init(gpa: std.mem.Allocator) Diagnostics {
+pub fn init(alloc: std.mem.Allocator) Diagnostics {
     return .{
-        .gpa = gpa,
-        .strs = .init(gpa),
+        .arena_alloc = std.heap.ArenaAllocator.init(alloc),
         .lock = .{},
         .successes = .{
             .donate = .{},
@@ -57,14 +55,22 @@ pub fn init(gpa: std.mem.Allocator) Diagnostics {
 
 pub fn deinit(diag: *Diagnostics) void {
     inline for (@typeInfo(@TypeOf(diag.successes)).@"struct".fields) |field|
-        @field(diag.successes, field.name).deinit(diag.gpa);
+        @field(diag.successes, field.name).deinit(diag.gpa());
     inline for (@typeInfo(@TypeOf(diag.warnings)).@"struct".fields) |field|
-        @field(diag.warnings, field.name).deinit(diag.gpa);
+        @field(diag.warnings, field.name).deinit(diag.gpa());
     inline for (@typeInfo(@TypeOf(diag.failures)).@"struct".fields) |field|
-        @field(diag.failures, field.name).deinit(diag.gpa);
+        @field(diag.failures, field.name).deinit(diag.gpa());
 
-    diag.strs.deinit();
+    diag.arena_alloc.deinit();
     diag.* = undefined;
+}
+
+fn gpa(diag: *Diagnostics) std.mem.Allocator {
+    return diag.arena_alloc.child_allocator;
+}
+
+fn arena(diag: *Diagnostics) std.mem.Allocator {
+    return diag.arena_alloc.allocator();
 }
 
 pub fn reportToFile(diag: *Diagnostics, writer: *std.Io.File.Writer) !void {
@@ -88,19 +94,19 @@ pub fn report(diag: *Diagnostics, writer: *std.Io.Writer, opt: ReportOptions) !v
     inline for (@typeInfo(@TypeOf(diag.successes)).@"struct".fields) |field| {
         for (@field(diag.successes, field.name).items) |item| {
             try writer.print("{s}{s}✓{s} ", .{ esc.bold, esc.green, esc.reset });
-            try item.print(diag.strs, esc, writer);
+            try item.print(esc, writer);
         }
     }
     inline for (@typeInfo(@TypeOf(diag.warnings)).@"struct".fields) |field| {
         for (@field(diag.warnings, field.name).items) |item| {
             try writer.print("{s}{s}⚠{s} ", .{ esc.bold, esc.yellow, esc.reset });
-            try item.print(diag.strs, esc, writer);
+            try item.print(esc, writer);
         }
     }
     inline for (@typeInfo(@TypeOf(diag.failures)).@"struct".fields) |field| {
         for (@field(diag.failures, field.name).items) |item| {
             try writer.print("{s}{s}✗{s} ", .{ esc.bold, esc.red, esc.reset });
-            try item.print(diag.strs, esc, writer);
+            try item.print(esc, writer);
         }
     }
 }
@@ -114,240 +120,245 @@ pub fn hasFailed(diag: Diagnostics) bool {
     return false;
 }
 
-pub fn putStr(diag: *Diagnostics, string: []const u8) !Strings.Index {
-    diag.lock.lock();
-    defer diag.lock.unlock();
-    return diag.strs.putStr(string);
-}
-
 pub fn donate(diag: *Diagnostics, pkg: PackageDonate) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.successes.donate.append(diag.gpa, pkg);
+    return diag.successes.donate.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, pkg.name),
+        .version = try diag.arena().dupe(u8, pkg.version),
+        .donate = try diag.arena().dupe(u8, pkg.donate),
+    });
 }
 
 pub fn installSucceeded(diag: *Diagnostics, pkg: PackageInstall) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.successes.installs.append(diag.gpa, pkg);
+    return diag.successes.installs.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, pkg.name),
+        .version = try diag.arena().dupe(u8, pkg.version),
+    });
 }
 
 pub fn updateSucceeded(diag: *Diagnostics, pkg: PackageFromTo) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.successes.updates.append(diag.gpa, pkg);
+    return diag.successes.updates.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, pkg.name),
+        .from_version = try diag.arena().dupe(u8, pkg.from_version),
+        .to_version = try diag.arena().dupe(u8, pkg.to_version),
+    });
 }
 
 pub fn uninstallSucceeded(diag: *Diagnostics, pkg: PackageUninstall) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.successes.uninstalls.append(diag.gpa, pkg);
+    return diag.successes.uninstalls.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, pkg.name),
+        .version = try diag.arena().dupe(u8, pkg.version),
+    });
 }
 
 pub fn alreadyInstalled(diag: *Diagnostics, pkg: PackageAlreadyInstalled) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.warnings.already_installed.append(diag.gpa, pkg);
+    return diag.warnings.already_installed.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, pkg.name),
+    });
 }
 
 pub fn notInstalled(diag: *Diagnostics, pkg: PackageNotInstalled) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.warnings.not_installed.append(diag.gpa, pkg);
+    return diag.warnings.not_installed.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, pkg.name),
+    });
 }
 
 pub fn notFound(diag: *Diagnostics, pkg: PackageNotFound) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.warnings.not_found.append(diag.gpa, pkg);
+    return diag.warnings.not_found.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, pkg.name),
+    });
 }
 
 pub fn notFoundForTarget(diag: *Diagnostics, not_found: PackageTarget) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.warnings.not_found_for_target.append(diag.gpa, not_found);
+    return diag.warnings.not_found_for_target.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, not_found.name),
+        .target = not_found.target,
+    });
 }
 
 pub fn upToDate(diag: *Diagnostics, pkg: PackageUpToDate) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.warnings.up_to_date.append(diag.gpa, pkg);
+    return diag.warnings.up_to_date.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, pkg.name),
+        .version = try diag.arena().dupe(u8, pkg.version),
+    });
 }
 
 pub fn noVersionFound(diag: *Diagnostics, pkg: PackageError) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.failures.no_version_found.append(diag.gpa, pkg);
+    return diag.failures.no_version_found.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, pkg.name),
+        .err = pkg.err,
+    });
 }
 
 pub fn hashMismatch(diag: *Diagnostics, mismatch: HashMismatch) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.failures.hash_mismatches.append(diag.gpa, mismatch);
+    return diag.failures.hash_mismatches.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, mismatch.name),
+        .version = try diag.arena().dupe(u8, mismatch.version),
+        .expected_hash = try diag.arena().dupe(u8, mismatch.expected_hash),
+        .actual_hash = try diag.arena().dupe(u8, mismatch.actual_hash),
+    });
 }
 
 pub fn downloadFailed(diag: *Diagnostics, failure: DownloadFailed) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.failures.downloads.append(diag.gpa, failure);
+    return diag.failures.downloads.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, failure.name),
+        .version = try diag.arena().dupe(u8, failure.version),
+        .url = try diag.arena().dupe(u8, failure.url),
+        .err = failure.err,
+    });
 }
 
 pub fn downloadFailedWithStatus(diag: *Diagnostics, failure: DownloadFailedWithStatus) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.failures.downloads_with_status.append(diag.gpa, failure);
+    return diag.failures.downloads_with_status.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, failure.name),
+        .version = try diag.arena().dupe(u8, failure.version),
+        .url = try diag.arena().dupe(u8, failure.url),
+        .status = failure.status,
+    });
 }
 
 pub fn pathAlreadyExists(diag: *Diagnostics, failure: PathAlreadyExists) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.failures.path_already_exists.append(diag.gpa, failure);
+    return diag.failures.path_already_exists.append(diag.gpa(), .{
+        .name = try diag.arena().dupe(u8, failure.name),
+        .path = try diag.arena().dupe(u8, failure.path),
+    });
 }
 
 pub fn genericError(diag: *Diagnostics, failure: GenericError) !void {
     diag.lock.lock();
     defer diag.lock.unlock();
-    return diag.failures.generic_error.append(diag.gpa, failure);
+    return diag.failures.generic_error.append(diag.gpa(), .{
+        .id = try diag.arena().dupe(u8, failure.id),
+        .msg = try diag.arena().dupe(u8, failure.msg),
+        .err = failure.err,
+    });
 }
 
 pub const PackageAlreadyInstalled = struct {
-    name: Strings.Index,
+    name: []const u8,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s}{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            esc.reset,
-        });
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s}{s}\n", .{ esc.bold, this.name, esc.reset });
         try writer.print("└── Package already installed\n", .{});
     }
 };
 
 pub const PackageNotInstalled = struct {
-    name: Strings.Index,
+    name: []const u8,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s}{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            esc.reset,
-        });
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s}{s}\n", .{ esc.bold, this.name, esc.reset });
         try writer.print("└── Package is not installed\n", .{});
     }
 };
 
 pub const PackageNotFound = struct {
-    name: Strings.Index,
+    name: []const u8,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s}{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            esc.reset,
-        });
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s}{s}\n", .{ esc.bold, this.name, esc.reset });
         try writer.print("└── Package not found\n", .{});
     }
 };
 
 pub const PackageDonate = struct {
-    name: Strings.Index,
-    version: Strings.Index,
-    donate: Strings.Index,
+    name: []const u8,
+    version: []const u8,
+    donate: []const u8,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s} {s}{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            this.version.get(strs),
-            esc.reset,
-        });
-        try writer.print("└── {s}\n", .{this.donate.get(strs)});
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s} {s}{s}\n", .{ esc.bold, this.name, this.version, esc.reset });
+        try writer.print("└── {s}\n", .{this.donate});
     }
 };
 
 pub const PackageInstall = struct {
-    name: Strings.Index,
-    version: Strings.Index,
+    name: []const u8,
+    version: []const u8,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s} {s}{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            this.version.get(strs),
-            esc.reset,
-        });
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s} {s}{s}\n", .{ esc.bold, this.name, this.version, esc.reset });
     }
 };
 
 pub const PackageUninstall = struct {
-    name: Strings.Index,
-    version: Strings.Index,
+    name: []const u8,
+    version: []const u8,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s} {s} -> ✗{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            this.version.get(strs),
-            esc.reset,
-        });
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s} {s} -> ✗{s}\n", .{ esc.bold, this.name, this.version, esc.reset });
     }
 };
 
 pub const PackageUpToDate = struct {
-    name: Strings.Index,
-    version: Strings.Index,
+    name: []const u8,
+    version: []const u8,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s} {s}{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            this.version.get(strs),
-            esc.reset,
-        });
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s} {s}{s}\n", .{ esc.bold, this.name, this.version, esc.reset });
         try writer.print("└── Package is up to date\n", .{});
     }
 };
 
 pub const PackageFromTo = struct {
-    name: Strings.Index,
-    from_version: Strings.Index,
-    to_version: Strings.Index,
+    name: []const u8,
+    from_version: []const u8,
+    to_version: []const u8,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
         try writer.print("{s}{s} {s} -> {s}{s}\n", .{
             esc.bold,
-            this.name.get(strs),
-            this.from_version.get(strs),
-            this.to_version.get(strs),
+            this.name,
+            this.from_version,
+            this.to_version,
             esc.reset,
         });
     }
 };
 
 pub const PackageError = struct {
-    name: Strings.Index,
+    name: []const u8,
     err: anyerror,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s}{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            esc.reset,
-        });
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s}{s}\n", .{ esc.bold, this.name, esc.reset });
         try writer.print("└── No version found: {s}\n", .{@errorName(this.err)});
     }
 };
 
 pub const PackageTarget = struct {
-    name: Strings.Index,
+    name: []const u8,
     target: Target,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s}{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            esc.reset,
-        });
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s}{s}\n", .{ esc.bold, this.name, esc.reset });
         try writer.print("└── Package not found for {s}_{s}\n", .{
             @tagName(this.target.os),
             @tagName(this.target.arch),
@@ -356,58 +367,43 @@ pub const PackageTarget = struct {
 };
 
 pub const HashMismatch = struct {
-    name: Strings.Index,
-    version: Strings.Index,
-    expected_hash: Strings.Index,
-    actual_hash: Strings.Index,
+    name: []const u8,
+    version: []const u8,
+    expected_hash: []const u8,
+    actual_hash: []const u8,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s} {s}{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            this.version.get(strs),
-            esc.reset,
-        });
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s} {s}{s}\n", .{ esc.bold, this.name, this.version, esc.reset });
         try writer.print("│   Hash mismatch\n", .{});
-        try writer.print("│     expected: {s}\n", .{this.expected_hash.get(strs)});
-        try writer.print("└──   actual:   {s}\n", .{this.actual_hash.get(strs)});
+        try writer.print("│     expected: {s}\n", .{this.expected_hash});
+        try writer.print("└──   actual:   {s}\n", .{this.actual_hash});
     }
 };
 
 pub const DownloadFailed = struct {
-    name: Strings.Index,
-    version: Strings.Index,
-    url: Strings.Index,
+    name: []const u8,
+    version: []const u8,
+    url: []const u8,
     err: anyerror,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s} {s}{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            this.version.get(strs),
-            esc.reset,
-        });
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s} {s}{s}\n", .{ esc.bold, this.name, this.version, esc.reset });
         try writer.print("│   Failed to download\n", .{});
-        try writer.print("│     url:   {s}\n", .{this.url.get(strs)});
+        try writer.print("│     url:   {s}\n", .{this.url});
         try writer.print("└──   error: {s}\n", .{@errorName(this.err)});
     }
 };
 
 pub const DownloadFailedWithStatus = struct {
-    name: Strings.Index,
-    version: Strings.Index,
-    url: Strings.Index,
+    name: []const u8,
+    version: []const u8,
+    url: []const u8,
     status: std.http.Status,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s} {s}{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            this.version.get(strs),
-            esc.reset,
-        });
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s} {s}{s}\n", .{ esc.bold, this.name, this.version, esc.reset });
         try writer.print("│   Failed to download\n", .{});
-        try writer.print("│     url:   {s}\n", .{this.url.get(strs)});
+        try writer.print("│     url:   {s}\n", .{this.url});
         try writer.print("└──   status: {} {s}\n", .{
             @intFromEnum(this.status),
             this.status.phrase() orelse "",
@@ -416,31 +412,23 @@ pub const DownloadFailedWithStatus = struct {
 };
 
 pub const PathAlreadyExists = struct {
-    name: Strings.Index,
-    path: Strings.Index,
+    name: []const u8,
+    path: []const u8,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s}{s}\n", .{
-            esc.bold,
-            this.name.get(strs),
-            esc.reset,
-        });
-        try writer.print("└── Path already exists: {s}\n", .{this.path.get(strs)});
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s}{s}\n", .{ esc.bold, this.name, esc.reset });
+        try writer.print("└── Path already exists: {s}\n", .{this.path});
     }
 };
 
 pub const GenericError = struct {
-    id: Strings.Index,
-    msg: Strings.Index,
+    id: []const u8,
+    msg: []const u8,
     err: anyerror,
 
-    fn print(this: @This(), strs: Strings, esc: Escapes, writer: *std.Io.Writer) !void {
-        try writer.print("{s}{s}{s}\n", .{
-            esc.bold,
-            this.id.get(strs),
-            esc.reset,
-        });
-        try writer.print("│   {s}\n", .{this.msg.get(strs)});
+    fn print(this: @This(), esc: Escapes, writer: *std.Io.Writer) !void {
+        try writer.print("{s}{s}{s}\n", .{ esc.bold, this.id, esc.reset });
+        try writer.print("│   {s}\n", .{this.msg});
         try writer.print("└──   {s}\n", .{@errorName(this.err)});
     }
 };
@@ -451,14 +439,12 @@ pub const Error = error{
 
 test {
     _ = Escapes;
-    _ = Strings;
     _ = Target;
 }
 
 const Diagnostics = @This();
 
 const Escapes = @import("Escapes.zig");
-const Strings = @import("Strings.zig");
 const Target = @import("Target.zig");
 
 const std = @import("std");
