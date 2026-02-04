@@ -1,5 +1,5 @@
-strs: Strings,
-by_name: std.ArrayHashMapUnmanaged(Strings.Index, InstalledPackage, void, true),
+arena_alloc: std.heap.ArenaAllocator,
+by_name: std.StringArrayHashMapUnmanaged(InstalledPackage),
 
 file: ?std.Io.File,
 
@@ -21,13 +21,21 @@ pub fn deinit(pkgs: *InstalledPackages, io: std.Io) void {
     if (pkgs.file) |f|
         f.close(io);
 
-    pkgs.by_name.deinit(pkgs.strs.arena.child_allocator);
-    pkgs.strs.deinit();
+    pkgs.by_name.deinit(pkgs.alloc());
+    pkgs.arena_alloc.deinit();
     pkgs.* = undefined;
 }
 
+fn alloc(diag: *InstalledPackages) std.mem.Allocator {
+    return diag.arena_alloc.child_allocator;
+}
+
+pub fn arena(diag: *InstalledPackages) std.mem.Allocator {
+    return diag.arena_alloc.allocator();
+}
+
 pub fn isInstalled(pkgs: *const InstalledPackages, pkg_name: []const u8) bool {
-    return pkgs.by_name.containsAdapted(pkg_name, pkgs.strs.adapter());
+    return pkgs.by_name.contains(pkg_name);
 }
 
 pub fn parseFile(io: std.Io, gpa: std.mem.Allocator, file: std.Io.File) !InstalledPackages {
@@ -40,26 +48,32 @@ pub fn parseFile(io: std.Io, gpa: std.mem.Allocator, file: std.Io.File) !Install
 }
 
 pub fn parseReader(io: std.Io, gpa: std.mem.Allocator, reader: *std.Io.Reader) !InstalledPackages {
-    const data_str = try reader.allocRemainingAlignedSentinel(gpa, .unlimited, .of(u8), 0);
-    defer gpa.free(data_str);
-
-    return parse(io, gpa, data_str);
-}
-
-pub fn parse(io: std.Io, gpa: std.mem.Allocator, string: [:0]const u8) !InstalledPackages {
     var pkgs = InstalledPackages{
-        .strs = .init(gpa),
+        .arena_alloc = .init(gpa),
         .by_name = .{},
         .file = null,
     };
     errdefer pkgs.deinit(io);
 
-    try pkgs.parseInto(string);
+    const str = try reader.allocRemainingAlignedSentinel(pkgs.arena(), .unlimited, .of(u8), 0);
+    try pkgs.parseInto(str);
+    return pkgs;
+}
+
+pub fn parse(io: std.Io, gpa: std.mem.Allocator, string: [:0]const u8) !InstalledPackages {
+    var pkgs = InstalledPackages{
+        .arena_alloc = .init(gpa),
+        .by_name = .{},
+        .file = null,
+    };
+    errdefer pkgs.deinit(io);
+
+    try pkgs.parseInto(try pkgs.arena().dupeZ(u8, string));
     return pkgs;
 }
 
 pub fn parseInto(pkgs: *InstalledPackages, string: [:0]const u8) !void {
-    const gpa = pkgs.strs.arena.child_allocator;
+    const gpa = pkgs.alloc();
     var parser = ini.Parser.init(string);
     var parsed = parser.next();
 
@@ -72,27 +86,21 @@ pub fn parseInto(pkgs: *InstalledPackages, string: [:0]const u8) !void {
     };
 
     // Use original string lengths as a heuristic for how much data to preallocate
-    try pkgs.strs.indices.ensureUnusedCapacity(gpa, string.len / 32);
     try pkgs.by_name.ensureUnusedCapacity(gpa, string.len / 64);
 
     // Use a debug build of `dipm list installed` to find the limits above using the code below
     // const indices_cap = pkgs.strs.indices.capacity;
-    // const data_cap = pkgs.strs.data.capacity;
-    // const by_name_cap = pkgs.by_name.entries.capacity;
-    // defer std.debug.assert(pkgs.strs.data.capacity == data_cap);
-    // defer std.debug.assert(pkgs.strs.indices.capacity == indices_cap);
     // defer std.debug.assert(pkgs.by_name.entries.capacity == by_name_cap);
 
     while (parsed.kind != .end) {
         std.debug.assert(parsed.kind == .section);
 
         const section = parsed.section(string).?;
-        const entry = try pkgs.by_name.getOrPutAdapted(gpa, section.name, pkgs.strs.adapter());
+        const entry = try pkgs.by_name.getOrPut(gpa, section.name);
         if (entry.found_existing)
             return error.InvalidPackagesIni;
 
         const next, const pkg = try pkgs.parsePackage(&parser);
-        entry.key_ptr.* = try pkgs.strs.putStr(section.name);
         entry.value_ptr.* = pkg;
         parsed = next;
     }
@@ -104,7 +112,7 @@ fn parsePackage(pkgs: *InstalledPackages, parser: *ini.Parser) !struct {
 } {
     const PackageField = std.meta.FieldEnum(InstalledPackage);
 
-    const off = pkgs.strs.putIndicesBegin();
+    var location = std.ArrayList([]const u8).empty;
     var version: ?[]const u8 = null;
 
     var parsed = parser.next();
@@ -116,15 +124,14 @@ fn parsePackage(pkgs: *InstalledPackages, parser: *ini.Parser) !struct {
             const prop = parsed.property(parser.string).?;
             switch (std.meta.stringToEnum(PackageField, prop.name) orelse continue) {
                 .version => version = prop.value,
-                .location => _ = try pkgs.strs.putStrs(&.{prop.value}),
+                .location => try location.append(pkgs.arena(), prop.value),
             }
         },
     };
 
-    const location = pkgs.strs.putIndicesEnd(off);
     return .{ parsed, .{
-        .version = try pkgs.strs.putStr(version orelse return error.InvalidPackagesIni),
-        .location = location,
+        .version = version orelse return error.InvalidPackagesIni,
+        .location = try location.toOwnedSlice(pkgs.arena()),
     } };
 }
 
@@ -139,20 +146,17 @@ pub fn flush(pkgs: InstalledPackages, io: std.Io) !void {
 
 pub fn writeTo(pkgs: InstalledPackages, writer: *std.Io.Writer) !void {
     for (pkgs.by_name.keys(), pkgs.by_name.values(), 0..) |pkg_name, pkg, i| {
-        if (i != 0)
-            try writer.writeAll("\n");
-
-        try pkg.write(pkgs.strs, pkg_name.get(pkgs.strs), writer);
+        if (i != 0) try writer.writeAll("\n");
+        try pkg.write(pkg_name, writer);
     }
 }
 
 fn expectTransform(from: [:0]const u8, to: []const u8) !void {
     const io = std.testing.io;
-    const gpa = std.testing.allocator;
-    var pkgs = try parse(io, gpa, from);
+    var pkgs = try parse(io, std.testing.allocator, from);
     defer pkgs.deinit(io);
 
-    var rendered = std.Io.Writer.Allocating.init(gpa);
+    var rendered = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer rendered.deinit();
 
     try pkgs.writeTo(&rendered.writer);
