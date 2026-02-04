@@ -258,14 +258,14 @@ fn donateCommand(prog: *Program) !void {
     const pkgs_to_show = pkgs_to_show_hm.keys();
     for (pkgs_to_show) |pkg_name| {
         const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
-            try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
+            try prog.diag.notFound(.{ .name = pkg_name });
             continue;
         };
         for (pkg.info.donate.get(pkgs.strs)) |donate| {
             try prog.diag.donate(.{
-                .name = try prog.diag.putStr(pkg_name),
-                .version = try prog.diag.putStr(pkg.info.version.get(pkgs.strs)),
-                .donate = try prog.diag.putStr(donate.get(pkgs.strs)),
+                .name = pkg_name,
+                .version = pkg.info.version.get(pkgs.strs),
+                .donate = donate.get(pkgs.strs),
             });
         }
     }
@@ -278,14 +278,14 @@ fn donateCommand(prog: *Program) !void {
     for (installed_pkgs.by_name.keys()) |pkg_name_index| {
         const pkg_name = pkg_name_index.get(installed_pkgs.strs);
         const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
-            try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
+            try prog.diag.notFound(.{ .name = pkg_name });
             continue;
         };
         for (pkg.info.donate.get(pkgs.strs)) |donate| {
             try prog.diag.donate(.{
-                .name = try prog.diag.putStr(pkg_name),
-                .version = try prog.diag.putStr(pkg.info.version.get(pkgs.strs)),
-                .donate = try prog.diag.putStr(donate.get(pkgs.strs)),
+                .name = pkg_name,
+                .version = pkg.info.version.get(pkgs.strs),
+                .donate = donate.get(pkgs.strs),
             });
         }
     }
@@ -594,7 +594,7 @@ fn pkgsUpdateCommand(prog: *Program) !void {
 
         const pkg_name = if (update_all) pkgs.by_name.keys()[i].get(pkgs.strs) else pkgs_to_update.keys()[i];
         const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
-            try prog.diag.notFound(.{ .name = try prog.diag.putStr(pkg_name) });
+            try prog.diag.notFound(.{ .name = pkg_name });
             continue;
         };
 
@@ -674,8 +674,8 @@ const AddPackage = struct {
 fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !void {
     prog.pkgsAddInner(add_pkg, options) catch |err| {
         try prog.diag.genericError(.{
-            .id = try prog.diag.putStr(add_pkg.version),
-            .msg = try prog.diag.putStr("Failed to create pkg from url"),
+            .id = add_pkg.version,
+            .msg = "Failed to create pkg from url",
             .err = err,
         });
     };
