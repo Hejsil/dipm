@@ -275,8 +275,7 @@ fn donateCommand(prog: *Program) !void {
     var installed_pkgs = try InstalledPackages.open(prog.init.io, prog.init.gpa, try prog.prefix());
     defer installed_pkgs.deinit(prog.init.io);
 
-    for (installed_pkgs.by_name.keys()) |pkg_name_index| {
-        const pkg_name = pkg_name_index.get(installed_pkgs.strs);
+    for (installed_pkgs.by_name.keys()) |pkg_name| {
         const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
             try prog.diag.notFound(.{ .name = pkg_name });
             continue;
@@ -448,10 +447,7 @@ fn listInstalledCommand(prog: *Program) !void {
     defer prog.io_lock.unlock();
 
     for (installed.by_name.keys(), installed.by_name.values()) |name, pkg|
-        try prog.stdout.interface.print("{s}\t{s}\n", .{
-            name.get(installed.strs),
-            pkg.version.get(installed.strs),
-        });
+        try prog.stdout.interface.print("{s}\t{s}\n", .{ name, pkg.version });
 }
 
 const list_all_usage =
