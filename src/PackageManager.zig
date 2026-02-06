@@ -162,12 +162,12 @@ pub fn installMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
 
         const pkg = downloaded.pkg;
         const working_dir = downloaded.working_dir;
-        pm.installExtractedPackage(pkgs, working_dir, pkg) catch |err| switch (err) {
+        pm.installExtractedPackage(working_dir, pkg) catch |err| switch (err) {
             Diagnostics.Error.DiagnosticsReported => continue,
             else => |e| return e,
         };
 
-        try pm.diag.installSucceeded(.{ .name = pkg.name, .version = pkg.info.version.get(pkgs.strs) });
+        try pm.diag.installSucceeded(.{ .name = pkg.name, .version = pkg.info.version });
     }
 
     try pm.installed.flush(pm.io);
@@ -191,7 +191,7 @@ fn pkgsToInstall(pm: *PackageManager, pkg_names: []const []const u8) !PkgsToInst
     while (i < pkgs_to_install.count()) {
         const pkg_name = pkgs_to_install.keys()[i];
 
-        const pkg = pkgs.by_name.getAdapted(pkg_name, pkgs.strs.adapter()) orelse {
+        const pkg = pkgs.by_name.get(pkg_name) orelse {
             try pm.diag.notFound(.{ .name = pkg_name });
             pkgs_to_install.swapRemoveAt(i);
             continue;
@@ -215,7 +215,6 @@ const DownloadAndExtractReturnType =
 
 fn downloadAndExtractPackage(
     pm: *PackageManager,
-    pkgs: *const Packages,
     dir: std.Io.Dir,
     pkg: Package.Specific,
 ) !void {
@@ -229,7 +228,7 @@ fn downloadAndExtractPackage(
     const progress = pm.progress.start(download_name, 1);
     defer pm.progress.end(progress);
 
-    const downloaded_file_name = std.fs.path.basename(pkg.install.url.get(pkgs.strs));
+    const downloaded_file_name = std.fs.path.basename(pkg.install.url);
     const downloaded_file = try dir.createFile(pm.io, downloaded_file_name, .{ .read = true });
     defer downloaded_file.close(pm.io);
 
@@ -243,13 +242,13 @@ fn downloadAndExtractPackage(
         .io = pm.io,
         .writer = &downloaded_file_writer.interface,
         .client = &pm.http_client,
-        .uri_str = pkg.install.url.get(pkgs.strs),
+        .uri_str = pkg.install.url,
         .progress = progress,
     }) catch |err| {
         try pm.diag.downloadFailed(.{
             .name = pkg.name,
-            .version = pkg.info.version.get(pkgs.strs),
-            .url = pkg.install.url.get(pkgs.strs),
+            .version = pkg.info.version,
+            .url = pkg.install.url,
             .err = err,
         });
         return Diagnostics.Error.DiagnosticsReported;
@@ -257,19 +256,19 @@ fn downloadAndExtractPackage(
     if (download_result.status != .ok) {
         try pm.diag.downloadFailedWithStatus(.{
             .name = pkg.name,
-            .version = pkg.info.version.get(pkgs.strs),
-            .url = pkg.install.url.get(pkgs.strs),
+            .version = pkg.info.version,
+            .url = pkg.install.url,
             .status = download_result.status,
         });
         return Diagnostics.Error.DiagnosticsReported;
     }
 
     const actual_hash = std.fmt.bytesToHex(download_result.hash, .lower);
-    if (!std.mem.eql(u8, pkg.install.hash.get(pkgs.strs), &actual_hash)) {
+    if (!std.mem.eql(u8, pkg.install.hash, &actual_hash)) {
         try pm.diag.hashMismatch(.{
             .name = pkg.name,
-            .version = pkg.info.version.get(pkgs.strs),
-            .expected_hash = pkg.install.hash.get(pkgs.strs),
+            .version = pkg.info.version,
+            .expected_hash = pkg.install.hash,
             .actual_hash = &actual_hash,
         });
         return Diagnostics.Error.DiagnosticsReported;
@@ -290,7 +289,6 @@ fn downloadAndExtractPackage(
 
 fn installExtractedPackage(
     pm: *PackageManager,
-    pkgs: *const Packages,
     from_dir: std.Io.Dir,
     pkg: Package.Specific,
 ) !void {
@@ -308,8 +306,8 @@ fn installExtractedPackage(
     var bin_dir = try pm.prefix_dir.createDirPathOpen(pm.io, paths.bin_subpath, .{});
     defer bin_dir.close(pm.io);
 
-    for (pkg.install.install_bin.get(pkgs.strs)) |install_field| {
-        const the_install = Package.Install.fromString(install_field.get(pkgs.strs));
+    for (pkg.install.install_bin) |install_field| {
+        const the_install = Package.Install.fromString(install_field);
         const join_fmt = std.fs.path.fmtJoin(&.{ paths.bin_subpath, the_install.to });
         const path = try std.fmt.allocPrint(pm.installed.arena(), "{f}", .{join_fmt});
         installBin(pm.io, the_install, from_dir, bin_dir) catch |err| switch (err) {
@@ -331,7 +329,7 @@ fn installExtractedPackage(
     const GenericInstall = struct {
         dir: std.Io.Dir,
         path: []const u8,
-        installs: Strings.Indices,
+        installs: []const []const u8,
     };
 
     const generic_installs = [_]GenericInstall{
@@ -339,8 +337,8 @@ fn installExtractedPackage(
         .{ .dir = share_dir, .path = paths.share_subpath, .installs = pkg.install.install_share },
     };
     for (generic_installs) |install| {
-        for (install.installs.get(pkgs.strs)) |install_field| {
-            const the_install = Package.Install.fromString(install_field.get(pkgs.strs));
+        for (install.installs) |install_field| {
+            const the_install = Package.Install.fromString(install_field);
             const join_fmt = std.fs.path.fmtJoin(&.{ install.path, the_install.to });
             const path = try std.fmt.allocPrint(pm.installed.arena(), "{f}", .{join_fmt});
             installGeneric(pm.io, the_install, from_dir, install.dir) catch |err| switch (err) {
@@ -359,7 +357,7 @@ fn installExtractedPackage(
 
     entry.key_ptr.* = try pm.installed.arena().dupe(u8, pkg.name);
     entry.value_ptr.* = .{
-        .version = try pm.installed.arena().dupe(u8, pkg.info.version.get(pkgs.strs)),
+        .version = try pm.installed.arena().dupe(u8, pkg.info.version),
         .location = try locations.toOwnedSlice(pm.installed.arena()),
     };
 }
@@ -514,7 +512,7 @@ fn updatePackages(pm: *PackageManager, pkg_names: []const []const u8, options: s
         // Remove up to date packages from the list if we're not force updating
         for (pkgs_to_uninstall.keys(), pkgs_to_uninstall.values()) |pkg_name, installed_pkg| {
             const updated_pkg = pkgs_to_install.get(pkg_name) orelse continue;
-            const updated_version = updated_pkg.info.version.get(pkgs.strs);
+            const updated_version = updated_pkg.info.version;
             const installed_version = installed_pkg.version;
             if (!std.mem.eql(u8, installed_version, updated_version))
                 continue;
@@ -568,7 +566,7 @@ fn updatePackages(pm: *PackageManager, pkg_names: []const []const u8, options: s
 
         const pkg = downloaded.pkg;
         const working_dir = downloaded.working_dir;
-        pm.installExtractedPackage(pkgs, working_dir, pkg) catch |err| switch (err) {
+        pm.installExtractedPackage(working_dir, pkg) catch |err| switch (err) {
             Diagnostics.Error.DiagnosticsReported => continue,
             else => |e| return e,
         };
@@ -577,7 +575,7 @@ fn updatePackages(pm: *PackageManager, pkg_names: []const []const u8, options: s
         try pm.diag.updateSucceeded(.{
             .name = pkg.name,
             .from_version = installed_pkg.version,
-            .to_version = pkg.info.version.get(pkgs.strs),
+            .to_version = pkg.info.version,
         });
     }
 
@@ -604,7 +602,6 @@ const DownloadAndExtractJobs = struct {
             errdefer working_dir.close();
 
             res.jobs.appendAssumeCapacity(.{
-                .pkgs = options.pkgs,
                 .working_dir = working_dir.dir,
                 .progress = options.progress,
                 .pkg = pkg,
@@ -630,14 +627,13 @@ const DownloadAndExtractJobs = struct {
 };
 
 const DownloadAndExtractJob = struct {
-    pkgs: *const Packages,
     pkg: Package.Specific,
     progress: Progress.Node,
     working_dir: std.Io.Dir,
     result: DownloadAndExtractReturnType,
 
     fn run(job: *DownloadAndExtractJob, pm: *PackageManager) void {
-        job.result = pm.downloadAndExtractPackage(job.pkgs, job.working_dir, job.pkg);
+        job.result = pm.downloadAndExtractPackage(job.working_dir, job.pkg);
         job.progress.advance(1);
     }
 };
@@ -649,7 +645,6 @@ test {
     _ = Package;
     _ = Packages;
     _ = Progress;
-    _ = Strings;
     _ = Target;
 
     _ = download;
@@ -665,7 +660,6 @@ const InstalledPackages = @import("InstalledPackages.zig");
 const Package = @import("Package.zig");
 const Packages = @import("Packages.zig");
 const Progress = @import("Progress.zig");
-const Strings = @import("Strings.zig");
 const Target = @import("Target.zig");
 
 const builtin = @import("builtin");

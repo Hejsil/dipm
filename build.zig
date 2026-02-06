@@ -32,4 +32,8 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    const check = b.step("check", "Check if tests compile");
+    check.dependOn(&exe.step);
+    check.dependOn(&exe_unit_tests.step);
 }

@@ -204,7 +204,6 @@ test {
 const InstalledPackages = @This();
 
 const InstalledPackage = @import("InstalledPackage.zig");
-const Strings = @import("Strings.zig");
 
 const ini = @import("ini.zig");
 const paths = @import("paths.zig");

@@ -10,10 +10,6 @@ pub fn write(pkg: Package, name: []const u8, writer: *std.Io.Writer) !void {
 
 const Package = @This();
 
-test {
-    _ = Strings;
-}
-
-const Strings = @import("Strings.zig");
+test {}
 
 const std = @import("std");
