@@ -266,6 +266,10 @@ pub fn fromGithub(args: struct {
             try std.fmt.allocPrint(tmp_arena, "{s}_{s}", .{ name, version }),
             try std.fmt.allocPrint(tmp_arena, "{s}-{s}", .{ name, latest_release.tag_name }),
             try std.fmt.allocPrint(tmp_arena, "{s}_{s}", .{ name, latest_release.tag_name }),
+
+            // Pick `atuin-x86_64` over `atuin-server-x86_64`
+            try std.fmt.allocPrint(tmp_arena, "{s}-{s}", .{ name, @tagName(args.target.arch) }),
+            try std.fmt.allocPrint(tmp_arena, "{s}_{s}", .{ name, @tagName(args.target.arch) }),
         },
         .urls = download_urls.items(.url),
     });
