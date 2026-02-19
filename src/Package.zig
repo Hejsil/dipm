@@ -1412,7 +1412,7 @@ fn findManPages(io: std.Io, arena: std.mem.Allocator, dir: std.Io.Dir) ![]const 
         if (!isManPage(entry.basename))
             continue;
 
-        var name_split = std.mem.splitScalar(u8, entry.path, '.');
+        var name_split = std.mem.splitScalar(u8, entry.basename, '.');
         _ = name_split.first();
         const man_section = name_split.next() orelse continue;
 
@@ -1515,8 +1515,10 @@ test findManPages {
             .{ .sub_path = "subdir/text.10.gz", .data = "" },
             .{ .sub_path = "subdir/.text.10.gz", .data = "" },
             .{ .sub_path = "subdir/text-0.2.0", .data = "" },
+            .{ .sub_path = "gh_2.87.0_linux_amd64/share/man/man1/gh-copilot.1", .data = "" },
         },
         .expected = &.{
+            "man/man1/gh-copilot.1:gh_2.87.0_linux_amd64/share/man/man1/gh-copilot.1",
             "man/man1/text.1.gz:subdir/text.1.gz",
             "man/man1/text.1.gz:text.1.gz",
             "man/man1/text.1:subdir/text.1",
