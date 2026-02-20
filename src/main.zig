@@ -706,9 +706,7 @@ fn pkgsAddInner(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions
         .download_uri = add_pkg.download,
         .target = .{ .os = builtin.os.tag, .arch = builtin.target.cpu.arch },
     });
-    const old_pkg = try pkgs.update(prog.init.gpa, pkg, .{
-        .description = options.update_description,
-    });
+    const old_pkg = try pkgs.update(pkg, .{ .description = options.update_description });
 
     pkgs.sort();
     try pkgs.writeToFile(io, pkgs_ini_file);

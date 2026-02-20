@@ -445,7 +445,7 @@ test sort {
     var pkgs = Packages.init(gpa);
     defer pkgs.deinit();
 
-    try std.testing.expect(try pkgs.update(gpa, .{
+    try std.testing.expect(try pkgs.update(.{
         .name = "btest",
         .pkg = .{
             .info = .{ .version = "0.2.0" },
@@ -456,7 +456,7 @@ test sort {
             },
         },
     }, .{}) == null);
-    try std.testing.expect(try pkgs.update(gpa, .{
+    try std.testing.expect(try pkgs.update(.{
         .name = "atest",
         .pkg = .{
             .info = .{ .version = "0.2.0" },
@@ -522,10 +522,10 @@ pub const UpdateOptions = struct {
 /// Update a package. If it doesn't exist it is added.
 pub fn update(
     pkgs: *Packages,
-    gpa: std.mem.Allocator,
     pkg: Package.Named,
     options: UpdateOptions,
 ) !?Package {
+    const gpa = pkgs.alloc();
     const entry = try pkgs.by_name.getOrPut(gpa, pkg.name);
     if (entry.found_existing) {
         const old_pkg = entry.value_ptr.*;
@@ -632,7 +632,7 @@ test update {
 
     try expectWrite(&pkgs, "");
 
-    try std.testing.expect(try pkgs.update(gpa, .{
+    try std.testing.expect(try pkgs.update(.{
         .name = "test",
         .pkg = .{
             .info = .{
@@ -681,7 +681,7 @@ test update {
             },
         },
     };
-    try std.testing.expect(try pkgs.update(gpa, new_version, .{}) != null);
+    try std.testing.expect(try pkgs.update(new_version, .{}) != null);
     try expectWrite(&pkgs,
         \\[test.info]
         \\version = 0.2.0
@@ -700,9 +700,7 @@ test update {
         \\
     );
 
-    try std.testing.expect(try pkgs.update(gpa, new_version, .{
-        .description = true,
-    }) != null);
+    try std.testing.expect(try pkgs.update(new_version, .{ .description = true }) != null);
     try expectWrite(&pkgs,
         \\[test.info]
         \\version = 0.2.0
