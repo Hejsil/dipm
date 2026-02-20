@@ -1242,7 +1242,7 @@ fn findBinaries(
     });
 
     if (static_files_result.stdout.len < 1)
-        return error.NoStaticallyLinkedFiles;
+        return error.NoBinariesFound;
 
     var res = std.ArrayList([]const u8).empty;
     var static_files_lines = std.mem.tokenizeScalar(u8, static_files_result.stdout, '\n');
