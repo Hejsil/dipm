@@ -1407,17 +1407,10 @@ fn findManPages(io: std.Io, arena: std.mem.Allocator, dir: std.Io.Dir) ![]const 
     while (try walker.next(io)) |entry| {
         if (entry.kind != .file)
             continue;
-        if (std.mem.startsWith(u8, entry.basename, "."))
-            continue;
-        if (!isManPage(entry.basename))
-            continue;
 
-        var name_split = std.mem.splitScalar(u8, entry.basename, '.');
-        _ = name_split.first();
-        const man_section = name_split.next() orelse continue;
-
+        const section = path.isManPage(entry.basename) orelse continue;
         try res.append(arena, try std.fmt.allocPrint(arena, "man/man{s}/{s}:{s}", .{
-            man_section,
+            section,
             std.fs.path.basename(entry.path),
             entry.path,
         }));
@@ -1430,41 +1423,6 @@ fn findManPages(io: std.Io, arena: std.mem.Allocator, dir: std.Io.Dir) ![]const 
     };
     std.mem.sort([]const u8, res.items, SortContext{}, SortContext.lessThan);
     return res.toOwnedSlice(arena);
-}
-
-fn isManPage(filename: []const u8) bool {
-    var basename = filename;
-    if (std.mem.endsWith(u8, basename, ".gz"))
-        basename = basename[0 .. basename.len - ".gz".len];
-
-    var state: enum {
-        start,
-        number,
-        end,
-    } = .start;
-
-    for (0..basename.len) |i_forward| {
-        const i_backward = (basename.len - i_forward) - 1;
-        const c = basename[i_backward];
-        switch (state) {
-            .start => switch (c) {
-                '0'...'9' => state = .number,
-                else => return false,
-            },
-            .number => switch (c) {
-                '0'...'9' => {},
-                '.' => state = .end,
-                else => return false,
-            },
-            .end => switch (c) {
-                // This seems like a binary ending with a version number, like fzf-0.2.2
-                '0'...'9' => return false,
-                else => return true,
-            },
-        }
-    }
-
-    return false;
 }
 
 fn testfindManPages(options: struct {
@@ -2731,6 +2689,7 @@ test {
     _ = download;
     _ = fs;
     _ = heap;
+    _ = path;
 }
 
 const Package = @This();
@@ -2743,4 +2702,5 @@ const builtin = @import("builtin");
 const download = @import("download.zig");
 const fs = @import("fs.zig");
 const heap = @import("heap.zig");
+const path = @import("path.zig");
 const std = @import("std");
