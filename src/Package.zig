@@ -1340,8 +1340,8 @@ fn findShare(
                     continue :share_dir_loop;
             }
 
-            const path = try std.fmt.allocPrint(arena, "{s}/{s}", .{ entry.path, share_dir_entry.name });
-            try res.append(arena, path);
+            const p = try std.fmt.allocPrint(arena, "{s}/{s}", .{ entry.path, share_dir_entry.name });
+            try res.append(arena, p);
         }
         break;
     }
