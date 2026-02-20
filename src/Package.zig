@@ -287,7 +287,7 @@ pub fn fromGithub(args: struct {
 
     const shares = try findShare(args.io, args.arena, downloaded.dir.dir);
     const man_pages = try findManPages(args.io, args.arena, downloaded.dir.dir);
-    const binaries = try findStaticallyLinkedBinaries(
+    const binaries = try findBinaries(
         args.io,
         args.arena,
         args.target.arch,
@@ -1213,7 +1213,7 @@ test fromGithub {
     }));
 }
 
-fn findStaticallyLinkedBinaries(
+fn findBinaries(
     io: std.Io,
     arena: std.mem.Allocator,
     arch: std.Target.Cpu.Arch,
@@ -1224,35 +1224,57 @@ fn findStaticallyLinkedBinaries(
         .arm => "ARM",
         else => unreachable, // Unsupported
     };
+
+    // Find statically linked binaries, then all binaries. This will give statically linked
+    // binaries priority over dynamically linked ones when they have the same basename.
     const shell_script = try std.fmt.allocPrint(
         arena,
+        \\{{
         \\find -type f -exec file '{{}}' '+' |
-        \\    grep -E '{s}.*(statically linked|static-pie linked)' |
+        \\    grep -E 'ELF (32|64)-bit LSB (pie )?executable, {s}.*(statically linked|static-pie linked)' |
         \\    cut -d: -f1 |
         \\    sed 's#^./##' |
         \\    sort
+        \\find -type f -exec file '{{}}' '+' |
+        \\    grep -E 'ELF (32|64)-bit LSB (pie )?executable, {s}' |
+        \\    cut -d: -f1 |
+        \\    sed 's#^./##' |
+        \\    sort
+        \\}}
         \\
     ,
-        .{arch_str},
+        .{ arch_str, arch_str },
     );
-
-    const static_files_result = try std.process.run(arena, io, .{
+    const script_result = try std.process.run(arena, io, .{
         .argv = &.{ "sh", "-c", shell_script },
         .cwd_dir = dir,
     });
 
-    if (static_files_result.stdout.len < 1)
-        return error.NoStaticallyLinkedFiles;
-
+    // Deduplicate binaries by their basename
     var res = std.ArrayList([]const u8).empty;
-    var static_files_lines = std.mem.tokenizeScalar(u8, static_files_result.stdout, '\n');
-    while (static_files_lines.next()) |static_bin|
-        try res.append(arena, static_bin);
+    var script_result_lines = std.mem.tokenizeScalar(u8, script_result.stdout, '\n');
+    outer: while (script_result_lines.next()) |bin| {
+        const bin_basename = std.fs.path.basename(bin);
+        for (res.items) |existing_bin| {
+            const existing_bin_basename = std.fs.path.basename(existing_bin);
+            if (std.mem.eql(u8, bin_basename, existing_bin_basename))
+                continue :outer;
+        }
+
+        try res.append(arena, bin);
+    }
+
+    const SortContext = struct {
+        fn lessThan(_: @This(), a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    };
+    std.mem.sort([]const u8, res.items, SortContext{}, SortContext.lessThan);
 
     return res.toOwnedSlice(arena);
 }
 
-fn testFindStaticallyLinkedBinaries(options: struct {
+fn testFindBinaries(options: struct {
     arch: std.Target.Cpu.Arch,
     files: []const std.Io.Dir.WriteFileOptions,
     expected: []const []const u8,
@@ -1270,7 +1292,7 @@ fn testFindStaticallyLinkedBinaries(options: struct {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    const result = try findStaticallyLinkedBinaries(io, arena.allocator(), options.arch, tmp_dir.dir);
+    const result = try findBinaries(io, arena.allocator(), options.arch, tmp_dir.dir);
 
     const len = @min(options.expected.len, result.len);
     for (options.expected[0..len], result[0..len]) |expected, actual|
@@ -1278,35 +1300,35 @@ fn testFindStaticallyLinkedBinaries(options: struct {
     try std.testing.expectEqual(options.expected.len, result.len);
 }
 
-test findStaticallyLinkedBinaries {
-    try testFindStaticallyLinkedBinaries(.{
+test findBinaries {
+    try testFindBinaries(.{
         .arch = .x86_64,
         .files = &.{
             .{ .sub_path = "binary_x86_64", .data = &testing_static_x86_64_binary },
             .{ .sub_path = "binary_arm", .data = &testing_static_arm_binary },
             .{ .sub_path = "text", .data = "Text" },
-            .{ .sub_path = "subdir/binary_x86_64", .data = &testing_static_x86_64_binary },
-            .{ .sub_path = "subdir/binary_arm", .data = &testing_static_arm_binary },
+            .{ .sub_path = "subdir/binary_inner_x86_64", .data = &testing_static_x86_64_binary },
+            .{ .sub_path = "subdir/binary_inner_arm", .data = &testing_static_arm_binary },
             .{ .sub_path = "subdir/text", .data = "Text" },
         },
         .expected = &.{
             "binary_x86_64",
-            "subdir/binary_x86_64",
+            "subdir/binary_inner_x86_64",
         },
     });
-    try testFindStaticallyLinkedBinaries(.{
+    try testFindBinaries(.{
         .arch = .arm,
         .files = &.{
             .{ .sub_path = "binary_x86_64", .data = &testing_static_x86_64_binary },
             .{ .sub_path = "binary_arm", .data = &testing_static_arm_binary },
             .{ .sub_path = "text", .data = "Text" },
-            .{ .sub_path = "subdir/binary_x86_64", .data = &testing_static_x86_64_binary },
-            .{ .sub_path = "subdir/binary_arm", .data = &testing_static_arm_binary },
+            .{ .sub_path = "subdir/binary_inner_x86_64", .data = &testing_static_x86_64_binary },
+            .{ .sub_path = "subdir/binary_inner_arm", .data = &testing_static_arm_binary },
             .{ .sub_path = "subdir/text", .data = "Text" },
         },
         .expected = &.{
             "binary_arm",
-            "subdir/binary_arm",
+            "subdir/binary_inner_arm",
         },
     });
 }
