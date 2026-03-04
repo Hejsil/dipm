@@ -1539,11 +1539,14 @@ fn findDownloadUrlIndex(options: FindDownloadUrlOptions) !usize {
             .linux => {
                 this_score += std.mem.count(u8, url, "Linux");
 
+                // AppImage is a portable distribution format, so let's score it higher
+                this_score += std.mem.count(u8, url, "AppImage") * 2;
+
                 // Targeting musl abi or the alpine distro tends mean the executable is statically
-                // linked
-                this_score += std.mem.count(u8, url, "alpine");
-                this_score += std.mem.count(u8, url, "musl");
-                this_score += std.mem.count(u8, url, "static");
+                // linked. Score it highest
+                this_score += std.mem.count(u8, url, "alpine") * 3;
+                this_score += std.mem.count(u8, url, "musl") * 3;
+                this_score += std.mem.count(u8, url, "static") * 3;
             },
             else => {},
         }
@@ -1604,6 +1607,7 @@ fn findDownloadUrlIndex(options: FindDownloadUrlOptions) !usize {
             ".sha512sum",
             ".sig",
             ".sigstore",
+            ".zsync",
 
             // HACK: atuin has an "update" binary used for (I assume) updating atuin itself. This
             //       is picked instead of the actual binary, so lets just deprioritized it
@@ -2673,6 +2677,21 @@ test findDownloadUrl {
         .urls = &.{
             "/atuin-x86_64-unknown-linux-musl-update",
             "/atuin-x86_64-unknown-linux-musl.tar.gz",
+        },
+    }));
+    try std.testing.expectEqualStrings("/helix-25.07.1-x86_64.AppImage", try findDownloadUrl(.{
+        .target = .{ .os = .linux, .arch = .x86_64 },
+        .extra_strs = &.{"helix"},
+        .urls = &.{
+            "/helix-25.07.1-aarch64-linux.tar.xz",
+            "/helix-25.07.1-aarch64-macos.tar.xz",
+            "/helix-25.07.1-source.tar.xz",
+            "/helix-25.07.1-x86_64-linux.tar.xz",
+            "/helix-25.07.1-x86_64-macos.tar.xz",
+            "/helix-25.07.1-x86_64-windows.zip",
+            "/helix-25.07.1-x86_64.AppImage",
+            "/helix-25.07.1-x86_64.AppImage.zsync",
+            "/helix_25.7.1-1_amd64.deb",
         },
     }));
 
