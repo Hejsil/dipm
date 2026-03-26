@@ -1539,22 +1539,6 @@ fn findDownloadUrlIndex(options: FindDownloadUrlOptions) !usize {
         this_score += std.mem.count(u8, url, @tagName(options.target.arch));
         this_score += std.mem.count(u8, url, @tagName(options.target.os));
 
-        switch (options.target.os) {
-            .linux => {
-                this_score += std.mem.count(u8, url, "Linux");
-
-                // AppImage is a portable distribution format, so let's score it higher
-                this_score += std.mem.count(u8, url, "AppImage") * 2;
-
-                // Targeting musl abi or the alpine distro tends mean the executable is statically
-                // linked. Score it highest
-                this_score += std.mem.count(u8, url, "alpine") * 3;
-                this_score += std.mem.count(u8, url, "musl") * 3;
-                this_score += std.mem.count(u8, url, "static") * 3;
-            },
-            else => {},
-        }
-
         switch (options.target.arch) {
             .x86_64 => {
                 this_score += std.mem.count(u8, url, "64bit");
@@ -1571,6 +1555,25 @@ fn findDownloadUrlIndex(options: FindDownloadUrlOptions) !usize {
             },
             .x86 => {
                 this_score += std.mem.count(u8, url, "32bit");
+            },
+            else => {},
+        }
+
+        switch (options.target.os) {
+            .linux => {
+                this_score += std.mem.count(u8, url, "Linux");
+
+                // AppImage is a portable distribution format, so let's score it higher
+                this_score += std.mem.count(u8, url, "AppImage") * 2;
+
+                // Targeting musl abi or the alpine distro tends mean the executable is statically
+                // linked. Score it highest
+                this_score += std.mem.count(u8, url, "alpine") * 3;
+                this_score += std.mem.count(u8, url, "musl") * 3;
+                this_score += std.mem.count(u8, url, "static") * 3;
+
+                // Avoid picking windows binaries
+                this_score -|= std.mem.count(u8, url, "windows") * 5;
             },
             else => {},
         }
@@ -2696,6 +2699,15 @@ test findDownloadUrl {
             "/helix-25.07.1-x86_64.AppImage",
             "/helix-25.07.1-x86_64.AppImage.zsync",
             "/helix_25.7.1-1_amd64.deb",
+        },
+    }));
+    try std.testing.expectEqualStrings("/gomuks-terminal-amd64", try findDownloadUrl(.{
+        .target = .{ .os = .linux, .arch = .x86_64 },
+        .extra_strs = &.{"gomuks"},
+        .urls = &.{
+            "/gomuks-amd64",
+            "/gomuks-terminal-amd64",
+            "/gomuks-windows-amd64.exe",
         },
     }));
 
