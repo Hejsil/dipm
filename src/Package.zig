@@ -1601,6 +1601,7 @@ fn findDownloadUrlIndex(options: FindDownloadUrlOptions) !usize {
             ".b3",
             ".deb",
             ".json",
+            ".jsonl",
             ".minisig",
             ".pem",
             ".proof",
@@ -2708,6 +2709,15 @@ test findDownloadUrl {
             "/gomuks-amd64",
             "/gomuks-terminal-amd64",
             "/gomuks-windows-amd64.exe",
+        },
+    }));
+    try std.testing.expectEqualStrings("/kibi-v0.3.3-aarch64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
+        .target = .{ .os = .linux, .arch = .x86_64 },
+        .extra_strs = &.{"kilo"},
+        .urls = &.{
+            "/kibi-v0.3.3-aarch64-unknown-linux-musl.tar.gz",
+            "/kibi-v0.3.3-aarch64-unknown-linux-musl.tar.gz.asc",
+            "/kibi-v0.3.3-aarch64-unknown-linux-musl.tar.gz.intoto.jsonl",
         },
     }));
 
