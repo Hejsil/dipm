@@ -1423,19 +1423,27 @@ test findShare {
 }
 
 fn findManPages(io: std.Io, arena: std.mem.Allocator, dir: std.Io.Dir) ![]const []const u8 {
-    var res = std.ArrayList([]const u8){};
+    var res = std.StringArrayHashMap([]const u8).init(arena);
 
     var walker = try dir.walk(arena);
-    while (try walker.next(io)) |entry| {
-        if (entry.kind != .file)
+    while (try walker.next(io)) |file_entry| {
+        if (file_entry.kind != .file)
             continue;
 
-        const section = path.isManPage(entry.basename) orelse continue;
-        try res.append(arena, try std.fmt.allocPrint(arena, "man/man{s}/{s}:{s}", .{
-            section,
-            std.fs.path.basename(entry.path),
-            entry.path,
-        }));
+        const section = path.isManPage(file_entry.basename) orelse continue;
+        const res_entry = try res.getOrPut(file_entry.basename);
+        if (!res_entry.found_existing)
+            res_entry.key_ptr.* = try arena.dupe(u8, file_entry.basename);
+
+        // There can be multiple man pages with the same filename. In that case, only pick the one
+        // with the shorest path
+        const format = "man/man{s}/{s}:{s}";
+        const current_file_len = std.fmt.count(format, .{ section, file_entry.basename, file_entry.path });
+
+        if (!res_entry.found_existing or current_file_len < res_entry.value_ptr.len)
+            res_entry.value_ptr.* = try std.fmt.allocPrint(arena, format, .{
+                section, file_entry.basename, file_entry.path,
+            });
     }
 
     const SortContext = struct {
@@ -1443,8 +1451,8 @@ fn findManPages(io: std.Io, arena: std.mem.Allocator, dir: std.Io.Dir) ![]const 
             return std.mem.lessThan(u8, a, b);
         }
     };
-    std.mem.sort([]const u8, res.items, SortContext{}, SortContext.lessThan);
-    return res.toOwnedSlice(arena);
+    std.mem.sort([]const u8, res.values(), SortContext{}, SortContext.lessThan);
+    return res.values();
 }
 
 fn testfindManPages(options: struct {
@@ -1499,13 +1507,9 @@ test findManPages {
         },
         .expected = &.{
             "man/man1/gh-copilot.1:gh_2.87.0_linux_amd64/share/man/man1/gh-copilot.1",
-            "man/man1/text.1.gz:subdir/text.1.gz",
             "man/man1/text.1.gz:text.1.gz",
-            "man/man1/text.1:subdir/text.1",
             "man/man1/text.1:text.1",
-            "man/man10/text.10.gz:subdir/text.10.gz",
             "man/man10/text.10.gz:text.10.gz",
-            "man/man10/text.10:subdir/text.10",
             "man/man10/text.10:text.10",
         },
     });
