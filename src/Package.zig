@@ -1600,6 +1600,7 @@ fn findDownloadUrlIndex(options: FindDownloadUrlOptions) !usize {
             ".asc",
             ".b3",
             ".deb",
+            ".flatpak",
             ".json",
             ".jsonl",
             ".minisig",
