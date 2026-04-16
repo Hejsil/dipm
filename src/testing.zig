@@ -575,16 +575,18 @@ test "dipm install packages with shared files in lib/" {
     );
 }
 
-fn fuzz(_: void, fuzz_input: []const u8) !void {
-    const gpa = std.testing.allocator;
-    var args = std.ArrayList([*:0]const u8){};
-    defer args.deinit(gpa);
+fn fuzz(_: void, smith: *std.testing.Smith) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
 
-    var args_it = try std.process.Args.IteratorGeneral(.{}).init(std.testing.allocator, fuzz_input);
-    defer args_it.deinit();
+    var args = std.ArrayList([*:0]const u8).empty;
+    while (!smith.eos()) {
+        const len = smith.value(u8);
+        const string = try arena.allocator().allocSentinel(u8, len, 0);
+        smith.bytes(string);
 
-    while (args_it.next()) |arg|
-        try args.append(gpa, arg.ptr);
+        try args.append(arena.allocator(), string);
+    }
 
     var prefix = try setupPrefix(.{ .version = "0.1.0" });
     defer prefix.deinit();
@@ -715,7 +717,7 @@ const Prefix = struct {
         var dir = try std.Io.Dir.cwd().openDir(io, prefix.prefix, .{});
         defer dir.close(io);
 
-        var io_lock = std.Thread.Mutex{};
+        var io_lock = std.Io.Mutex.init;
         var stdout = try dir.createFile(io, "stdout", .{ .read = true });
         defer stdout.close(io);
 

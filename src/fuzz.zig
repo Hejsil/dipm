@@ -1,16 +1,20 @@
 pub fn fnFromParseAndWrite(
     comptime parseAndWrite: fn (std.mem.Allocator, []const u8) anyerror![]u8,
-) fn (void, []const u8) anyerror!void {
+) fn (void, *std.testing.Smith) anyerror!void {
     return struct {
-        fn fuzz(_: void, fuzz_input: []const u8) !void {
-            const allocator = std.testing.allocator;
+        fn fuzz(_: void, smith: *std.testing.Smith) !void {
+            const gpa = std.testing.allocator;
+
+            const fuzz_input = try gpa.alloc(u8, smith.value(u16));
+            smith.bytes(fuzz_input);
+
             // This fuzz test ensure that once parsed and written out once, doing so again should
             // yield the same result.
-            const stage1 = parseAndWrite(allocator, fuzz_input) catch return;
-            defer allocator.free(stage1);
+            const stage1 = parseAndWrite(gpa, fuzz_input) catch return;
+            defer gpa.free(stage1);
 
-            const stage2 = try parseAndWrite(allocator, stage1);
-            defer allocator.free(stage2);
+            const stage2 = try parseAndWrite(gpa, stage1);
+            defer gpa.free(stage2);
 
             std.testing.expectEqualStrings(stage1, stage2) catch |err| {
                 // On failure, also do `expectEqualSlices` to get a hex diff

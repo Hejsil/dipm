@@ -1055,7 +1055,7 @@ fn testFromGithub(options: struct {
     try cwd.writeFile(io, .{
         .sub_path = latest_release_file_path,
         .data = blk: {
-            var out = std.ArrayList(u8){};
+            var out = std.ArrayList(u8).empty;
             try out.appendSlice(arena, "{\"tag_name\": \"");
             try out.appendSlice(arena, options.tag_name);
             try out.appendSlice(arena, "\",\"assets\": [{");
@@ -1247,7 +1247,7 @@ fn findBinaries(
     );
     const script_result = try std.process.run(arena, io, .{
         .argv = &.{ "sh", "-c", shell_script },
-        .cwd_dir = dir,
+        .cwd = .{ .dir = dir },
     });
 
     // Deduplicate binaries by their basename
@@ -1423,7 +1423,7 @@ test findShare {
 }
 
 fn findManPages(io: std.Io, arena: std.mem.Allocator, dir: std.Io.Dir) ![]const []const u8 {
-    var res = std.StringArrayHashMap([]const u8).init(arena);
+    var res = std.array_hash_map.String([]const u8).empty;
 
     var walker = try dir.walk(arena);
     while (try walker.next(io)) |file_entry| {
@@ -1431,7 +1431,7 @@ fn findManPages(io: std.Io, arena: std.mem.Allocator, dir: std.Io.Dir) ![]const 
             continue;
 
         const section = path.isManPage(file_entry.basename) orelse continue;
-        const res_entry = try res.getOrPut(file_entry.basename);
+        const res_entry = try res.getOrPut(arena, file_entry.basename);
         if (!res_entry.found_existing)
             res_entry.key_ptr.* = try arena.dupe(u8, file_entry.basename);
 

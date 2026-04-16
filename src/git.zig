@@ -4,7 +4,7 @@ pub fn commitFile(io: std.Io, dir: std.Io.Dir, file: []const u8, msg: []const u8
         .stdin = .ignore,
         .stdout = .pipe,
         .stderr = .pipe,
-        .cwd_dir = dir,
+        .cwd = .{ .dir = dir },
     });
     const failed = switch (try child.wait(io)) {
         .exited => |code| switch (code) {

@@ -110,7 +110,7 @@ fn packages(pm: *PackageManager) !*const Packages {
 }
 
 pub fn installMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
-    var pkgs_not_installed = std.ArrayList([]const u8){};
+    var pkgs_not_installed = std.ArrayList([]const u8).empty;
     defer pkgs_not_installed.deinit(pm.gpa);
 
     try pkgs_not_installed.ensureTotalCapacity(pm.gpa, pkg_names.len);
@@ -126,7 +126,7 @@ pub fn installMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
         return;
 
     var pkgs_to_install = try pm.pkgsToInstall(pkgs_not_installed.items);
-    defer pkgs_to_install.deinit();
+    defer pkgs_to_install.deinit(pm.gpa);
 
     const global_progress = switch (pkgs_to_install.count()) {
         0 => return,
@@ -173,14 +173,14 @@ pub fn installMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
     try pm.installed.flush(pm.io);
 }
 
-const PkgsToInstall = std.StringArrayHashMap(Package.Specific);
+const PkgsToInstall = std.array_hash_map.String(Package.Specific);
 
 fn pkgsToInstall(pm: *PackageManager, pkg_names: []const []const u8) !PkgsToInstall {
-    var pkgs_to_install = std.StringArrayHashMap(Package.Specific).init(pm.gpa);
-    errdefer pkgs_to_install.deinit();
+    var pkgs_to_install = std.array_hash_map.String(Package.Specific).empty;
+    errdefer pkgs_to_install.deinit(pm.gpa);
 
     // First, deduplicate. The value is undefined and set later
-    try pkgs_to_install.ensureTotalCapacity(pkg_names.len);
+    try pkgs_to_install.ensureTotalCapacity(pm.gpa, pkg_names.len);
     for (pkg_names) |pkg_name|
         pkgs_to_install.putAssumeCapacity(pkg_name, undefined);
 
@@ -292,7 +292,7 @@ fn installExtractedPackage(
     from_dir: std.Io.Dir,
     pkg: Package.Specific,
 ) !void {
-    var locations = std.ArrayList([]const u8){};
+    var locations = std.ArrayList([]const u8).empty;
     try locations.ensureUnusedCapacity(pm.installed.arena(), pkg.install.install_bin.len +
         pkg.install.install_lib.len +
         pkg.install.install_share.len);
@@ -431,7 +431,7 @@ fn installFile(
 
 pub fn uninstallMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
     var pkgs_to_uninstall = try pm.pkgsToUninstall(pkg_names);
-    defer pkgs_to_uninstall.deinit();
+    defer pkgs_to_uninstall.deinit(pm.gpa);
 
     for (pkgs_to_uninstall.keys(), pkgs_to_uninstall.values()) |pkg_name, pkg| {
         try pm.uninstallOneUnchecked(pkg_name, pkg);
@@ -444,11 +444,11 @@ pub fn uninstallMany(pm: *PackageManager, pkg_names: []const []const u8) !void {
 fn pkgsToUninstall(
     pm: *PackageManager,
     pkg_names: []const []const u8,
-) !std.StringArrayHashMap(InstalledPackage) {
-    var pkgs_to_uninstall = std.StringArrayHashMap(InstalledPackage).init(pm.gpa);
-    errdefer pkgs_to_uninstall.deinit();
+) !std.array_hash_map.String(InstalledPackage) {
+    var pkgs_to_uninstall = std.array_hash_map.String(InstalledPackage).empty;
+    errdefer pkgs_to_uninstall.deinit(pm.gpa);
 
-    try pkgs_to_uninstall.ensureTotalCapacity(pkg_names.len);
+    try pkgs_to_uninstall.ensureTotalCapacity(pm.gpa, pkg_names.len);
     for (pkg_names) |pkg_name| {
         const pkg = pm.installed.by_name.get(pkg_name) orelse {
             try pm.diag.notInstalled((.{ .name = pkg_name }));
@@ -502,10 +502,10 @@ fn updatePackages(pm: *PackageManager, pkg_names: []const []const u8, options: s
     force: bool,
 }) !void {
     var pkgs_to_uninstall = try pm.pkgsToUninstall(pkg_names);
-    defer pkgs_to_uninstall.deinit();
+    defer pkgs_to_uninstall.deinit(pm.gpa);
 
     var pkgs_to_install = try pm.pkgsToInstall(pkgs_to_uninstall.keys());
-    defer pkgs_to_install.deinit();
+    defer pkgs_to_install.deinit(pm.gpa);
 
     const pkgs = try pm.packages();
     if (!options.force) {
@@ -583,7 +583,7 @@ fn updatePackages(pm: *PackageManager, pkg_names: []const []const u8, options: s
 }
 
 const DownloadAndExtractJobs = struct {
-    jobs: std.ArrayList(DownloadAndExtractJob) = .{},
+    jobs: std.ArrayList(DownloadAndExtractJob) = .empty,
 
     fn init(options: struct {
         io: std.Io,

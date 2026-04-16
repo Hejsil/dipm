@@ -1,5 +1,5 @@
 arena_alloc: std.heap.ArenaAllocator,
-by_name: std.StringArrayHashMapUnmanaged(Package),
+by_name: std.array_hash_map.String(Package),
 
 pub fn init(gpa: std.mem.Allocator) Packages {
     return .{ .arena_alloc = .init(gpa), .by_name = .{} };
@@ -219,7 +219,7 @@ fn parseInfo(pkgs: *Packages, parser: *ini.Parser) !struct {
 } {
     var parsed = parser.next();
 
-    var donate = std.ArrayList([]const u8){};
+    var donate = std.ArrayList([]const u8).empty;
     var version: ?[]const u8 = null;
     var description: []const u8 = "";
 
