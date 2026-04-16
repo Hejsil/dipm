@@ -1,5 +1,6 @@
+io: std.Io,
 arena_alloc: std.heap.ArenaAllocator,
-lock: std.Thread.Mutex,
+lock: std.Io.Mutex,
 
 successes: struct {
     donate: std.ArrayListUnmanaged(PackageDonate),
@@ -25,30 +26,31 @@ failures: struct {
     generic_error: std.ArrayListUnmanaged(GenericError),
 },
 
-pub fn init(alloc: std.mem.Allocator) Diagnostics {
+pub fn init(io: std.Io, alloc: std.mem.Allocator) Diagnostics {
     return .{
+        .io = io,
         .arena_alloc = std.heap.ArenaAllocator.init(alloc),
-        .lock = .{},
+        .lock = .init,
         .successes = .{
-            .donate = .{},
-            .installs = .{},
-            .updates = .{},
-            .uninstalls = .{},
+            .donate = .empty,
+            .installs = .empty,
+            .updates = .empty,
+            .uninstalls = .empty,
         },
         .warnings = .{
-            .already_installed = .{},
-            .not_installed = .{},
-            .not_found = .{},
-            .not_found_for_target = .{},
-            .up_to_date = .{},
+            .already_installed = .empty,
+            .not_installed = .empty,
+            .not_found = .empty,
+            .not_found_for_target = .empty,
+            .up_to_date = .empty,
         },
         .failures = .{
-            .no_version_found = .{},
-            .hash_mismatches = .{},
-            .downloads = .{},
-            .downloads_with_status = .{},
-            .path_already_exists = .{},
-            .generic_error = .{},
+            .no_version_found = .empty,
+            .hash_mismatches = .empty,
+            .downloads = .empty,
+            .downloads_with_status = .empty,
+            .path_already_exists = .empty,
+            .generic_error = .empty,
         },
     };
 }
@@ -87,8 +89,8 @@ pub const ReportOptions = struct {
 };
 
 pub fn report(diag: *Diagnostics, writer: *std.Io.Writer, opt: ReportOptions) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
 
     const esc = opt.escapes;
     inline for (@typeInfo(@TypeOf(diag.successes)).@"struct".fields) |field| {
@@ -121,8 +123,8 @@ pub fn hasFailed(diag: Diagnostics) bool {
 }
 
 pub fn donate(diag: *Diagnostics, pkg: PackageDonate) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.successes.donate.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, pkg.name),
         .version = try diag.arena().dupe(u8, pkg.version),
@@ -131,8 +133,8 @@ pub fn donate(diag: *Diagnostics, pkg: PackageDonate) !void {
 }
 
 pub fn installSucceeded(diag: *Diagnostics, pkg: PackageInstall) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.successes.installs.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, pkg.name),
         .version = try diag.arena().dupe(u8, pkg.version),
@@ -140,8 +142,8 @@ pub fn installSucceeded(diag: *Diagnostics, pkg: PackageInstall) !void {
 }
 
 pub fn updateSucceeded(diag: *Diagnostics, pkg: PackageFromTo) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.successes.updates.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, pkg.name),
         .from_version = try diag.arena().dupe(u8, pkg.from_version),
@@ -150,8 +152,8 @@ pub fn updateSucceeded(diag: *Diagnostics, pkg: PackageFromTo) !void {
 }
 
 pub fn uninstallSucceeded(diag: *Diagnostics, pkg: PackageUninstall) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.successes.uninstalls.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, pkg.name),
         .version = try diag.arena().dupe(u8, pkg.version),
@@ -159,32 +161,32 @@ pub fn uninstallSucceeded(diag: *Diagnostics, pkg: PackageUninstall) !void {
 }
 
 pub fn alreadyInstalled(diag: *Diagnostics, pkg: PackageAlreadyInstalled) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.warnings.already_installed.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, pkg.name),
     });
 }
 
 pub fn notInstalled(diag: *Diagnostics, pkg: PackageNotInstalled) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.warnings.not_installed.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, pkg.name),
     });
 }
 
 pub fn notFound(diag: *Diagnostics, pkg: PackageNotFound) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.warnings.not_found.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, pkg.name),
     });
 }
 
 pub fn notFoundForTarget(diag: *Diagnostics, not_found: PackageTarget) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.warnings.not_found_for_target.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, not_found.name),
         .target = not_found.target,
@@ -192,8 +194,8 @@ pub fn notFoundForTarget(diag: *Diagnostics, not_found: PackageTarget) !void {
 }
 
 pub fn upToDate(diag: *Diagnostics, pkg: PackageUpToDate) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.warnings.up_to_date.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, pkg.name),
         .version = try diag.arena().dupe(u8, pkg.version),
@@ -201,8 +203,8 @@ pub fn upToDate(diag: *Diagnostics, pkg: PackageUpToDate) !void {
 }
 
 pub fn noVersionFound(diag: *Diagnostics, pkg: PackageError) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.failures.no_version_found.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, pkg.name),
         .err = pkg.err,
@@ -210,8 +212,8 @@ pub fn noVersionFound(diag: *Diagnostics, pkg: PackageError) !void {
 }
 
 pub fn hashMismatch(diag: *Diagnostics, mismatch: HashMismatch) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.failures.hash_mismatches.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, mismatch.name),
         .version = try diag.arena().dupe(u8, mismatch.version),
@@ -221,8 +223,8 @@ pub fn hashMismatch(diag: *Diagnostics, mismatch: HashMismatch) !void {
 }
 
 pub fn downloadFailed(diag: *Diagnostics, failure: DownloadFailed) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.failures.downloads.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, failure.name),
         .version = try diag.arena().dupe(u8, failure.version),
@@ -232,8 +234,8 @@ pub fn downloadFailed(diag: *Diagnostics, failure: DownloadFailed) !void {
 }
 
 pub fn downloadFailedWithStatus(diag: *Diagnostics, failure: DownloadFailedWithStatus) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.failures.downloads_with_status.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, failure.name),
         .version = try diag.arena().dupe(u8, failure.version),
@@ -243,8 +245,8 @@ pub fn downloadFailedWithStatus(diag: *Diagnostics, failure: DownloadFailedWithS
 }
 
 pub fn pathAlreadyExists(diag: *Diagnostics, failure: PathAlreadyExists) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.failures.path_already_exists.append(diag.gpa(), .{
         .name = try diag.arena().dupe(u8, failure.name),
         .path = try diag.arena().dupe(u8, failure.path),
@@ -252,8 +254,8 @@ pub fn pathAlreadyExists(diag: *Diagnostics, failure: PathAlreadyExists) !void {
 }
 
 pub fn genericError(diag: *Diagnostics, failure: GenericError) !void {
-    diag.lock.lock();
-    defer diag.lock.unlock();
+    try diag.lock.lock(diag.io);
+    defer diag.lock.unlock(diag.io);
     return diag.failures.generic_error.append(diag.gpa(), .{
         .id = try diag.arena().dupe(u8, failure.id),
         .msg = try diag.arena().dupe(u8, failure.msg),

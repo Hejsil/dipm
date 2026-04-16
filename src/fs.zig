@@ -23,7 +23,9 @@ pub const ZigCacheTmpDir = struct {
 };
 
 pub fn zigCacheTmpDir(io: std.Io, open_dir_options: std.Io.Dir.OpenOptions) !ZigCacheTmpDir {
-    const zig_cache_path = zigCachePath(io);
+    var zig_cache_path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const zig_cache_path = zigCachePath(io, &zig_cache_path_buf);
+
     var zig_cache_dir = try std.Io.Dir.cwd().createDirPathOpen(io, zig_cache_path, .{});
     defer zig_cache_dir.close(io);
 
@@ -49,17 +51,12 @@ pub fn zigCacheTmpDirPath(io: std.Io, gpa: std.mem.Allocator) ![:0]const u8 {
     return tmp_dir.path(gpa);
 }
 
-var zig_cache_path_io: std.Io = undefined;
-var zig_cache_path_buf: [std.fs.max_path_bytes]u8 = undefined;
-var zig_cache_path_len: usize = 0;
-var zig_cache_path_once = std.once(zigCachePathOnce);
-
-fn zigCachePathOnce() void {
+pub fn zigCachePath(io: std.Io, out: []u8) []const u8 {
     comptime std.debug.assert(builtin.is_test);
 
     var self_exe_dir_path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const self_exe_dir_path = blk: {
-        const len = std.process.executableDirPath(zig_cache_path_io, &self_exe_dir_path_buf) catch
+        const len = std.process.executableDirPath(io, &self_exe_dir_path_buf) catch
             break :blk ".zig-cache/o/aaaa";
         break :blk self_exe_dir_path_buf[0..len];
     };
@@ -69,14 +66,9 @@ fn zigCachePathOnce() void {
     const o_path = std.fs.path.dirname(self_exe_dir_path) orelse unreachable;
     const zig_cache_path = std.fs.path.dirname(o_path) orelse unreachable;
 
-    zig_cache_path_len = zig_cache_path.len;
-    @memcpy(zig_cache_path_buf[0..zig_cache_path.len], zig_cache_path);
-}
-
-pub fn zigCachePath(io: std.Io) []const u8 {
-    zig_cache_path_io = io;
-    zig_cache_path_once.call();
-    return zig_cache_path_buf[0..zig_cache_path_len];
+    const len = @min(zig_cache_path.len, out.len);
+    @memcpy(out[0..len], zig_cache_path[0..len]);
+    return out[0..len];
 }
 
 const tmp_dir_bytes_count = 12;
@@ -262,7 +254,7 @@ fn testOneExtract(file_type: FileType, files: []const std.Io.Dir.WriteFileOption
     var tmp_dir = try zigCacheTmpDir(io, .{});
     defer tmp_dir.deleteAndClose(io);
 
-    var args = std.ArrayList([]const u8){};
+    var args = std.ArrayList([]const u8).empty;
     try args.ensureTotalCapacity(arena, 4 + files.len);
 
     for (files) |file| {
@@ -283,7 +275,7 @@ fn testOneExtract(file_type: FileType, files: []const std.Io.Dir.WriteFileOption
     const res = switch (file_type) {
         .gz, .zip, .tar_xz, .tar_bz2, .tar_gz, .tar_zst, .tar => std.process.run(arena, io, .{
             .argv = args.items,
-            .cwd_dir = tmp_dir.dir,
+            .cwd = .{ .dir = tmp_dir.dir },
         }),
         .binary => std.process.RunResult{
             .term = .{ .exited = 0 },

@@ -1,5 +1,5 @@
 arena_alloc: std.heap.ArenaAllocator,
-by_name: std.StringArrayHashMapUnmanaged(InstalledPackage),
+by_name: std.array_hash_map.String(InstalledPackage),
 
 file: ?std.Io.File,
 

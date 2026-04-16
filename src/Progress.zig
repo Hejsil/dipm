@@ -23,9 +23,9 @@ pub const Node = enum(usize) {
 
     pub fn advance(node: Node, amount: u32) void {
         const state = node.unwrap() orelse return;
-        state.lock.lock();
+        state.lock();
         state.inner.curr +|= amount;
-        state.lock.unlock();
+        state.unlock();
     }
 
     pub fn set(node: Node, fields: struct {
@@ -34,14 +34,14 @@ pub const Node = enum(usize) {
         max: ?u32 = null,
     }) void {
         const state = node.unwrap() orelse return;
-        state.lock.lock();
+        state.lock();
         if (fields.name) |name|
             state.inner.name = name;
         if (fields.max) |max|
             state.inner.max = max;
         if (fields.curr) |curr|
             state.inner.curr = curr;
-        state.lock.unlock();
+        state.unlock();
     }
 
     // Wraps a file reader to provide progress
@@ -114,9 +114,7 @@ pub const Node = enum(usize) {
 
 const NodeState = struct {
     inner: Inner,
-    // TODO: This can probably be done in a lock free way using a certain value of `max` as a
-    //       "locked" value, and spinning until we can get it
-    lock: std.Thread.Mutex,
+    locked: bool,
 
     pub const Inner = struct {
         name: ?[]const u8 = null,
@@ -124,21 +122,21 @@ const NodeState = struct {
         max: u32 = 0,
     };
 
-    const none = NodeState{
+    pub const none = NodeState{
         .inner = .{},
-        .lock = .{},
+        .locked = false,
     };
 
     fn get(node: *NodeState) Inner {
-        node.lock.lock();
+        node.lock();
         const res = node.inner;
-        node.lock.unlock();
+        node.unlock();
         return res;
     }
 
     fn acquire(node: *NodeState, inner: Inner) bool {
-        node.lock.lock();
-        defer node.lock.unlock();
+        node.lock();
+        defer node.unlock();
 
         if (node.inner.name != null)
             return false;
@@ -148,9 +146,18 @@ const NodeState = struct {
     }
 
     fn release(node: *NodeState) void {
-        node.lock.lock();
+        node.lock();
         node.inner = .{};
-        node.lock.unlock();
+        node.unlock();
+    }
+
+    fn lock(node: *NodeState) void {
+        while (@cmpxchgWeak(bool, &node.locked, false, true, .monotonic, .monotonic)) |_| {}
+    }
+
+    fn unlock(node: *NodeState) void {
+        std.debug.assert(node.locked);
+        node.locked = false;
     }
 };
 
