@@ -1597,6 +1597,7 @@ fn findDownloadUrlIndex(options: FindDownloadUrlOptions) !usize {
         // Certain extensions indicate means the link downloads a signature, deb package or other
         // none useful resources to `dipm`
         const deprioritized_suffixs = [_][]const u8{
+            ".apk",
             ".asc",
             ".b3",
             ".deb",
@@ -2719,6 +2720,14 @@ test findDownloadUrl {
             "/kibi-v0.3.3-aarch64-unknown-linux-musl.tar.gz",
             "/kibi-v0.3.3-aarch64-unknown-linux-musl.tar.gz.asc",
             "/kibi-v0.3.3-aarch64-unknown-linux-musl.tar.gz.intoto.jsonl",
+        },
+    }));
+    try std.testing.expectEqualStrings("/lazyjira_linux_amd64.tar.gz", try findDownloadUrl(.{
+        .target = .{ .os = .linux, .arch = .x86_64 },
+        .extra_strs = &.{"lazyjira"},
+        .urls = &.{
+            "/lazyjira_2.13.0_linux_amd64.apk",
+            "/lazyjira_linux_amd64.tar.gz",
         },
     }));
 
