@@ -1,21 +1,95 @@
 pub fn commitFile(io: std.Io, dir: std.Io.Dir, file: []const u8, msg: []const u8) !void {
-    var child = try std.process.spawn(io, .{
-        .argv = &.{ "git", "commit", "-i", file, "-m", msg },
-        .stdin = .ignore,
-        .stdout = .pipe,
-        .stderr = .pipe,
+    return switch (try runCommand(io, dir, &.{ "git", "commit", "-i", file, "-m", msg })) {
+        0 => {},
+        else => error.GitCommitFailed,
+    };
+}
+
+pub fn hasDiffForFile(io: std.Io, dir: std.Io.Dir, file: []const u8) !bool {
+    const code = try runCommand(io, dir, &.{ "git", "diff", "--quiet", "--", file });
+    return switch (code) {
+        0 => false,
+        1 => true,
+        else => error.GitDiffFailed,
+    };
+}
+
+pub fn currentBranch(gpa: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) ![]u8 {
+    const res = try std.process.run(gpa, io, .{
+        .argv = &.{ "git", "branch", "--show-current" },
         .cwd = .{ .dir = dir },
     });
-    const failed = switch (try child.wait(io)) {
+    defer gpa.free(res.stdout);
+    defer gpa.free(res.stderr);
+
+    switch (res.term) {
         .exited => |code| switch (code) {
-            0 => false, // successful commit
-            1 => false, // nothing to commit commit
-            else => true,
+            0 => {},
+            else => return error.GitCurrentBranchFailed,
         },
-        else => true,
+        else => return error.ProcessExitedAbnormally,
+    }
+
+    const trimmed = std.mem.trim(u8, res.stdout, " \r\n\t");
+    if (trimmed.len == 0)
+        return error.GitCurrentBranchFailed;
+
+    return gpa.dupe(u8, trimmed);
+}
+
+pub fn createBranch(io: std.Io, dir: std.Io.Dir, branch: []const u8) !void {
+    const code = try runCommand(io, dir, &.{ "git", "switch", "-c", branch });
+    if (code != 0)
+        return error.GitCreateBranchFailed;
+}
+
+pub fn switchBranch(io: std.Io, dir: std.Io.Dir, branch: []const u8) !void {
+    const code = try runCommand(io, dir, &.{ "git", "switch", branch });
+    if (code != 0)
+        return error.GitSwitchBranchFailed;
+}
+
+pub fn push(io: std.Io, dir: std.Io.Dir) !void {
+    const code = try runCommand(io, dir, &.{ "git", "push" });
+    if (code != 0)
+        return error.GitPushFailed;
+}
+
+pub const PullOptions = struct {
+    prune: bool = false,
+};
+
+pub fn pull(io: std.Io, dir: std.Io.Dir, options: PullOptions) !void {
+    const code = try runCommand(io, dir, &.{ "git", "pull", if (options.prune) "--prune" else "--no-prune" });
+    if (code != 0)
+        return error.GitPullFailed;
+}
+
+pub const PrOptions = struct {
+    base: []const u8 = "main",
+};
+
+pub fn createPullRequest(io: std.Io, dir: std.Io.Dir, options: PrOptions) !void {
+    const code = try runCommand(io, dir, &.{
+        "gh", "pr", "create", "--fill", "--base", options.base,
+    });
+    if (code != 0)
+        return error.GhPrCreateFailed;
+}
+
+fn runCommand(io: std.Io, dir: std.Io.Dir, argv: []const []const u8) !u8 {
+    var child = try std.process.spawn(io, .{
+        .argv = argv,
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+        .cwd = .{ .dir = dir },
+    });
+
+    return switch (try child.wait(io)) {
+        .exited => |code| code,
+        else => error.ProcessExitedAbnormally,
     };
-    if (failed)
-        return error.GitCommitFailed;
 }
 
 pub const MessageOptions = struct {
