@@ -430,7 +430,7 @@ test "parse.fuzz" {
     try std.testing.fuzz({}, fuzz.fnFromParseAndWrite(parseAndWrite), .{});
 }
 
-pub fn sort(pkgs: *Packages) void {
+fn sort(pkgs: *Packages) void {
     pkgs.by_name.sort(struct {
         keys: []const []const u8,
 
@@ -467,30 +467,6 @@ test sort {
             },
         },
     }, .{}) == null);
-    try expectWrite(&pkgs,
-        \\[btest.info]
-        \\version = 0.2.0
-        \\
-        \\[btest.update]
-        \\version = https://github.com/test/test
-        \\
-        \\[btest.linux_x86_64]
-        \\url = test_url
-        \\hash = test_hash
-        \\
-        \\[atest.info]
-        \\version = 0.2.0
-        \\
-        \\[atest.update]
-        \\version = https://github.com/test/test
-        \\
-        \\[atest.linux_x86_64]
-        \\url = test_url
-        \\hash = test_hash
-        \\
-    );
-
-    pkgs.sort();
     try expectWrite(&pkgs,
         \\[atest.info]
         \\version = 0.2.0
@@ -571,6 +547,7 @@ pub fn update(
     } else {
         entry.key_ptr.* = pkg.name;
         entry.value_ptr.* = pkg.pkg;
+        pkgs.sort();
         return null;
     }
 }

@@ -535,6 +535,9 @@ const pkgs_update_usage =
     \\  -f, --pkgs-file <path>
     \\          Path to pkgs.ini (default: ./pkgs.ini)
     \\
+    \\  -p, --pull-request
+    \\          Create branch, commit, push and open a PR for each updated pkg
+    \\
     \\  -h, --help
     \\          Display this message
     \\
@@ -556,6 +559,10 @@ fn pkgsUpdateCommand(prog: *Program) !void {
             options.commit = true;
         if (prog.args.flag(&.{ "-d", "--update-description" }))
             options.update_description = true;
+        if (prog.args.flag(&.{ "-p", "--pull-request" })) {
+            options.pr = true;
+            options.commit = true;
+        }
         if (prog.args.flag(&.{ "-h", "--help" }))
             return prog.stdoutWriteAllLocked(pkgs_update_usage);
         if (prog.args.positional()) |url|
@@ -649,6 +656,7 @@ fn pkgsAddCommand(prog: *Program) !void {
 const PackagesAddOptions = struct {
     pkgs_ini_path: []const u8 = "./pkgs.ini",
     commit: bool = false,
+    pr: bool = false,
     update_description: bool,
 };
 
@@ -670,6 +678,11 @@ fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !vo
 
 fn pkgsAddInner(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !void {
     const io = prog.init.io;
+
+    var arena_allocator = std.heap.ArenaAllocator.init(prog.init.gpa);
+    const arena = arena_allocator.allocator();
+    defer arena_allocator.deinit();
+
     var http_client = std.http.Client{
         .io = prog.init.io,
         .allocator = prog.init.gpa,
@@ -677,12 +690,16 @@ fn pkgsAddInner(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions
     defer http_client.deinit();
 
     const cwd = std.Io.Dir.cwd();
+    const pkgs_ini_dir_path = std.fs.path.dirname(options.pkgs_ini_path) orelse ".";
     const pkgs_ini_base_name = std.fs.path.basename(options.pkgs_ini_path);
 
-    var pkgs_ini_dir, const pkgs_ini_file = try fs.openDirAndFile(io, cwd, options.pkgs_ini_path, .{
-        .file = .{ .mode = .read_write },
-    });
+    var pkgs_ini_dir = try cwd.openDir(io, pkgs_ini_dir_path, .{});
     defer pkgs_ini_dir.close(io);
+
+    // Ensure repo is up to date
+    try git.pull(prog.init.io, pkgs_ini_dir, .{ .prune = true });
+
+    const pkgs_ini_file = try pkgs_ini_dir.openFile(io, pkgs_ini_base_name, .{ .mode = .read_write });
     defer pkgs_ini_file.close(io);
 
     var pkgs = try Packages.parseFile(prog.init.io, prog.init.gpa, pkgs_ini_file);
@@ -696,6 +713,7 @@ fn pkgsAddInner(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions
         .gpa = prog.init.gpa,
         .arena = pkgs.arena(),
         .http_client = &http_client,
+        .progress = progress,
         .name = add_pkg.name,
         .version_uri = add_pkg.version,
         .download_uri = add_pkg.download,
@@ -703,14 +721,33 @@ fn pkgsAddInner(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions
     });
     const old_pkg = try pkgs.update(pkg, .{ .description = options.update_description });
 
-    pkgs.sort();
     try pkgs.writeToFile(io, pkgs_ini_file);
     try pkgs_ini_file.sync(io);
-    if (options.commit) {
-        const msg = try git.createCommitMessage(prog.init.arena.allocator(), pkg, old_pkg, .{
-            .description = options.update_description,
+
+    if (!options.commit and !options.pr)
+        return;
+    if (!try git.hasDiffForFile(io, pkgs_ini_dir, pkgs_ini_base_name))
+        return;
+
+    const msg = try git.createCommitMessage(arena, pkg, old_pkg, .{
+        .description = options.update_description,
+    });
+
+    if (options.pr) {
+        const base_branch = try git.currentBranch(arena, io, pkgs_ini_dir);
+        const pr_branch = try std.fmt.allocPrint(arena, "{s}-{s}", .{
+            pkg.name, pkg.pkg.info.version,
         });
-        try git.commitFile(prog.init.io, pkgs_ini_dir, pkgs_ini_base_name, msg);
+
+        try git.createBranch(io, pkgs_ini_dir, pr_branch);
+        errdefer git.switchBranch(io, pkgs_ini_dir, base_branch) catch {};
+
+        try git.commitFile(io, pkgs_ini_dir, pkgs_ini_base_name, msg);
+        try git.push(io, pkgs_ini_dir);
+        try git.createPullRequest(io, pkgs_ini_dir, .{ .base = base_branch });
+        try git.switchBranch(io, pkgs_ini_dir, base_branch);
+    } else {
+        try git.commitFile(io, pkgs_ini_dir, pkgs_ini_base_name, msg);
     }
 }
 
