@@ -55,14 +55,45 @@ pub fn push(io: std.Io, dir: std.Io.Dir) !void {
         return error.GitPushFailed;
 }
 
-pub const PullOptions = struct {
-    prune: bool = false,
-};
+/// Prune remote-tracking refs, then delete every local branch that has no
+/// remote-tracking branch of the same name. So a local `foo` is kept iff some
+/// `refs/remotes/<remote>/foo` exists after pruning.
+pub fn pruneBranches(gpa: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !void {
+    // Drop remote-tracking refs whose branch no longer exists remotely, so the
+    // remaining set only contains branches that actually exist.
+    const code_fetch = try runCommand(io, dir, &.{ "git", "pull", "--prune" });
+    if (code_fetch != 0)
+        return error.GitFetchFailed;
 
-pub fn pull(io: std.Io, dir: std.Io.Dir, options: PullOptions) !void {
-    const code = try runCommand(io, dir, &.{ "git", "pull", if (options.prune) "--prune" else "--no-prune" });
-    if (code != 0)
-        return error.GitPullFailed;
+    const res = try std.process.run(gpa, io, .{
+        .argv = &.{ "git", "for-each-ref", "--format=%(refname)" },
+        .cwd = .{ .dir = dir },
+    });
+    defer gpa.free(res.stdout);
+    defer gpa.free(res.stderr);
+
+    var it_outer = std.mem.tokenizeScalar(u8, res.stdout, '\n');
+    outer: while (it_outer.next()) |line_head| {
+        if (!std.mem.startsWith(u8, line_head, "refs/heads/"))
+            continue;
+
+        const head_branch = std.fs.path.basename(line_head);
+
+        var it_inner = std.mem.tokenizeScalar(u8, res.stdout, '\n');
+        while (it_inner.next()) |line_remote| {
+            if (!std.mem.startsWith(u8, line_remote, "refs/remotes/"))
+                continue;
+
+            const remote_branch = std.fs.path.basename(line_remote);
+            if (std.mem.eql(u8, head_branch, remote_branch))
+                continue :outer;
+        }
+
+        // No remote-tracking branch of the same name exists, so delete the local branch.
+        const code_delete = try runCommand(io, dir, &.{ "git", "branch", "-D", head_branch });
+        if (code_delete != 0)
+            return error.GitBranchDeleteFailed;
+    }
 }
 
 pub const PrOptions = struct {

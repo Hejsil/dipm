@@ -696,8 +696,7 @@ fn pkgsAddInner(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions
     var pkgs_ini_dir = try cwd.openDir(io, pkgs_ini_dir_path, .{});
     defer pkgs_ini_dir.close(io);
 
-    // Ensure repo is up to date
-    try git.pull(prog.init.io, pkgs_ini_dir, .{ .prune = true });
+    try git.pruneBranches(prog.init.arena.allocator(), prog.init.io, pkgs_ini_dir);
 
     const pkgs_ini_file = try pkgs_ini_dir.openFile(io, pkgs_ini_base_name, .{ .mode = .read_write });
     defer pkgs_ini_file.close(io);
