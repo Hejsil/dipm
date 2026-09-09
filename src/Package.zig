@@ -1355,7 +1355,7 @@ fn findShare(
                 continue;
 
             const names_to_ignore = [_][]const u8{
-                "man", "doc", "applications", "zsh", "fish", "locale",
+                "man", "doc", "applications", "zsh", "fish", "locale", "schemas",
             };
             for (names_to_ignore) |name_to_ignore| {
                 if (std.mem.eql(u8, share_dir_entry.name, name_to_ignore))
@@ -1414,6 +1414,7 @@ test findShare {
             .{ .sub_path = "share/man/test.txt", .data = "" },
             .{ .sub_path = "share/zsh/test.txt", .data = "" },
             .{ .sub_path = "share/fish/test.txt", .data = "" },
+            .{ .sub_path = "share/schemas/test.json", .data = "" },
         },
         &.{
             "share/a",
