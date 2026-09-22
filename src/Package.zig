@@ -1573,6 +1573,15 @@ fn findDownloadUrlIndex(options: FindDownloadUrlOptions) !usize {
                 this_score += std.mem.count(u8, url, "musl") * 3;
                 this_score += std.mem.count(u8, url, "static") * 3;
 
+                // Some projects (e.g. `ouch`) ship both a `...-linux-musl.tar.gz` and a
+                // `...-linux-musl.AppImage`. Prefer the plain tarball over the AppImage so the
+                // statically linked binary is picked over the portable AppImage format.
+                if (std.mem.indexOf(u8, url, "musl") != null and
+                    std.mem.indexOf(u8, url, "AppImage") == null)
+                {
+                    this_score += 5;
+                }
+
                 // Avoid picking windows binaries
                 this_score -|= std.mem.count(u8, url, "windows") * 5;
             },
@@ -2703,6 +2712,19 @@ test findDownloadUrl {
             "/helix-25.07.1-x86_64.AppImage",
             "/helix-25.07.1-x86_64.AppImage.zsync",
             "/helix_25.7.1-1_amd64.deb",
+        },
+    }));
+    try std.testing.expectEqualStrings("/ouch-x86_64-unknown-linux-musl.tar.gz", try findDownloadUrl(.{
+        .target = .{ .os = .linux, .arch = .x86_64 },
+        .extra_strs = &.{"ouch"},
+        .urls = &.{
+            "/ouch-aarch64-apple-darwin.tar.gz",
+            "/ouch-aarch64-unknown-linux-musl.AppImage",
+            "/ouch-aarch64-unknown-linux-musl.tar.gz",
+            "/ouch-x86_64-apple-darwin.tar.gz",
+            "/ouch-x86_64-unknown-linux-gnu.tar.gz",
+            "/ouch-x86_64-unknown-linux-musl.AppImage",
+            "/ouch-x86_64-unknown-linux-musl.tar.gz",
         },
     }));
     try std.testing.expectEqualStrings("/gomuks-terminal-amd64", try findDownloadUrl(.{
