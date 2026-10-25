@@ -696,8 +696,6 @@ fn pkgsAddInner(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions
     var pkgs_ini_dir = try cwd.openDir(io, pkgs_ini_dir_path, .{});
     defer pkgs_ini_dir.close(io);
 
-    try git.pruneBranches(prog.init.arena.allocator(), prog.init.io, pkgs_ini_dir);
-
     const pkgs_ini_file = try pkgs_ini_dir.openFile(io, pkgs_ini_base_name, .{ .mode = .read_write });
     defer pkgs_ini_file.close(io);
 
@@ -725,6 +723,12 @@ fn pkgsAddInner(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions
 
     if (!options.commit and !options.pr)
         return;
+
+    // Pruning stale PR branches only makes sense when dipm is about to create and push a branch.
+    // A plain `-c` commit must also work in a repository that has no remote at all.
+    if (options.pr)
+        try git.pruneBranches(prog.init.arena.allocator(), prog.init.io, pkgs_ini_dir);
+
     if (!try git.hasDiffForFile(prog.init.arena.allocator(), io, pkgs_ini_dir, pkgs_ini_base_name))
         return;
 
