@@ -184,13 +184,22 @@ pub fn extract(options: ExtractOptions) !void {
             var out_path_buf: [std.fs.max_path_bytes]u8 = undefined;
             const out_path_len = try options.output_dir.realPath(io, &out_path_buf);
 
+            // `stdout`/`stderr` must not be `.pipe` here: nothing drains those pipes, so `tar`
+            // would block as soon as it has written more than a pipe buffer's worth of output.
+            // With `-v` that happens for any archive with more than a few hundred entries.
             var child = try std.process.spawn(io, .{
-                .argv = &.{ "tar", "-xvf", options.input_name, "-C", out_path_buf[0..out_path_len] },
+                .argv = &.{ "tar", "-xf", options.input_name, "-C", out_path_buf[0..out_path_len] },
                 .stdin = .ignore,
-                .stdout = .pipe,
-                .stderr = .pipe,
+                .stdout = .ignore,
+                .stderr = .ignore,
             });
-            _ = try child.wait(io);
+
+            // A failed extraction must not be silently ignored. Otherwise dipm would "install" a
+            // package that contains none of the files it is supposed to install.
+            switch (try child.wait(io)) {
+                .exited => |code| if (code != 0) return error.TarExtractionFailed,
+                else => return error.TarExtractionFailed,
+            }
         },
         .tar_gz => {
             var decomp = std.compress.flate.Decompress.init(reader, .gzip, &decomp_buf);
@@ -344,6 +353,23 @@ test "extract.tar"     { try testExtract(.tar);     }
 test "extract.zip"     { try testExtract(.zip);     }
 test "extract.binary"  { try testExtract(.binary);  }
 // zig fmt: on
+
+// Regression test: extracting a `tar.bz2` used to deadlock as soon as the extractor produced more
+// output than a pipe buffer could hold, which is the case for any archive with many entries.
+test "extract.tar_bz2: many files" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    const arena = arena_state.allocator();
+    defer arena_state.deinit();
+
+    const files = try arena.alloc(std.Io.Dir.WriteFileOptions, 4096);
+    for (files, 0..) |*file, i|
+        file.* = .{
+            .sub_path = try std.fmt.allocPrint(arena, "some_quite_long_file_name_number_{d}.txt", .{i}),
+            .data = "content",
+        };
+
+    try testOneExtract(.tar_bz2, files);
+}
 
 pub fn openDirAndFile(
     io: std.Io,
