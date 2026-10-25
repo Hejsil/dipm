@@ -491,10 +491,15 @@ fn githubDownloadSponsorUrls(args: struct {
         .uri_str = funding_uri,
         .progress = args.progress,
     });
-    if (repository_result.status != .ok)
-        return &.{};
 
-    return fundingYmlToUrls(args.arena, funding_yml.written());
+    switch (repository_result.status) {
+        // Not having a FUNDING.yml is the common case: the project has no sponsors.
+        .not_found => return &.{},
+        .ok => return fundingYmlToUrls(args.arena, funding_yml.written()),
+        // Any other status is a real failure. Returning no donations here would silently remove
+        // the donations of the package from pkgs.ini.
+        else => return error.FundingDownloadFailed,
+    }
 }
 
 // Very scuffed but working parser for FUNDING.yml. Didn't really wonna write something proper or
