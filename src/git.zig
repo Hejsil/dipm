@@ -50,7 +50,11 @@ pub fn switchBranch(io: std.Io, dir: std.Io.Dir, branch: []const u8) !void {
 }
 
 pub fn push(io: std.Io, dir: std.Io.Dir) !void {
-    const code = try runCommand(io, dir, &.{ "git", "push" });
+    // `--set-upstream` is needed because the branch was just created, and has no upstream branch
+    // yet. Without it, `git push` fails unless the user has `push.autoSetupRemote` configured.
+    // Setting the upstream also means the branch is cleaned up by `pruneBranches` later, once the
+    // PR branch is deleted on the remote.
+    const code = try runCommand(io, dir, &.{ "git", "push", "--set-upstream", "origin", "HEAD" });
     if (code != 0)
         return error.GitPushFailed;
 }
