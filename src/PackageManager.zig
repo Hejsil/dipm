@@ -40,7 +40,7 @@ pub fn init(options: Options) !PackageManager {
     errdefer http_client.deinit();
 
     var installed = try InstalledPackages.open(options.io, options.gpa, options.prefix);
-    errdefer installed.deinit(options.gpa);
+    errdefer installed.deinit(options.io);
 
     return PackageManager{
         .io = options.io,
