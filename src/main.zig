@@ -669,7 +669,7 @@ const AddPackage = struct {
 fn pkgsAdd(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions) !void {
     prog.pkgsAddInner(add_pkg, options) catch |err| {
         try prog.diag.genericError(.{
-            .id = add_pkg.version,
+            .id = add_pkg.name orelse add_pkg.version,
             .msg = "Failed to create pkg from url",
             .err = err,
         });
