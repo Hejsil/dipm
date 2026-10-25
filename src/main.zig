@@ -27,6 +27,9 @@ pub fn main(init: std.process.Init) !u8 {
 
     return if (res) |_| 0 else |err| switch (err) {
         Diagnostics.Error.DiagnosticsReported => 1,
+        // Command line usage errors already print the relevant usage to stderr. Don't dump a
+        // stack trace on the user for them.
+        error.InvalidArgument => 1,
         else => |e| e,
     };
 }
@@ -242,7 +245,7 @@ fn donateCommand(prog: *Program) !void {
 
     while (prog.args.next()) {
         if (prog.args.flag(&.{ "-h", "--help" }))
-            return prog.stdoutWriteAllLocked(install_usage);
+            return prog.stdoutWriteAllLocked(donate_usage);
         if (prog.args.positional()) |name|
             pkgs_to_show_hm.putAssumeCapacity(name, {});
     }
@@ -646,8 +649,13 @@ fn pkgsAddCommand(prog: *Program) !void {
             version = url;
     }
 
+    const version_uri = version orelse {
+        try prog.stderrWriteAllLocked(pkgs_add_usage);
+        return error.InvalidArgument;
+    };
+
     return prog.pkgsAdd(.{
-        .version = version orelse return,
+        .version = version_uri,
         .download = down,
         .name = name,
     }, options);
