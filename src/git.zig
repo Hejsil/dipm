@@ -1,17 +1,40 @@
 pub fn commitFile(io: std.Io, dir: std.Io.Dir, file: []const u8, msg: []const u8) !void {
-    return switch (try runCommand(io, dir, &.{ "git", "commit", "-i", file, "-m", msg })) {
+    // Stage the file explicitly. `git commit --include <file>` (what dipm used to do) fails for a
+    // file git does not know about yet, which is exactly the case for a brand new `pkgs.ini`.
+    if (try runCommand(io, dir, &.{ "git", "add", "--", file }) != 0)
+        return error.GitAddFailed;
+
+    // Limiting the commit to `file` keeps staged changes of other files out of the commit.
+    return switch (try runCommand(io, dir, &.{ "git", "commit", "-m", msg, "--", file })) {
         0 => {},
         else => error.GitCommitFailed,
     };
 }
 
-pub fn hasDiffForFile(io: std.Io, dir: std.Io.Dir, file: []const u8) !bool {
-    const code = try runCommand(io, dir, &.{ "git", "diff", "--quiet", "--", file });
-    return switch (code) {
-        0 => false,
-        1 => true,
-        else => error.GitDiffFailed,
-    };
+/// Returns whether `file` has changes that are not committed yet (staged or unstaged), including
+/// the case where the file is not tracked yet.
+pub fn hasDiffForFile(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    dir: std.Io.Dir,
+    file: []const u8,
+) !bool {
+    // `git diff --quiet` only reports unstaged changes, so staged changes and a brand new,
+    // untracked `pkgs.ini` would be reported as "no diff" and never committed.
+    // `git status --porcelain` reports both, and works in a repo that has no commits yet.
+    const res = try std.process.run(gpa, io, .{
+        .argv = &.{ "git", "status", "--porcelain", "--", file },
+        .cwd = .{ .dir = dir },
+    });
+    defer gpa.free(res.stdout);
+    defer gpa.free(res.stderr);
+
+    switch (res.term) {
+        .exited => |code| if (code != 0) return error.GitStatusFailed,
+        else => return error.ProcessExitedAbnormally,
+    }
+
+    return std.mem.trim(u8, res.stdout, " \r\n\t").len != 0;
 }
 
 pub fn currentBranch(gpa: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) ![]u8 {

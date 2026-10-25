@@ -725,7 +725,7 @@ fn pkgsAddInner(prog: *Program, add_pkg: AddPackage, options: PackagesAddOptions
 
     if (!options.commit and !options.pr)
         return;
-    if (!try git.hasDiffForFile(io, pkgs_ini_dir, pkgs_ini_base_name))
+    if (!try git.hasDiffForFile(prog.init.arena.allocator(), io, pkgs_ini_dir, pkgs_ini_base_name))
         return;
 
     const msg = try git.createCommitMessage(arena, pkg, old_pkg, .{
