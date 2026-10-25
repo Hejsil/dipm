@@ -1353,6 +1353,8 @@ fn findShare(
             continue;
 
         var share_dir = try dir.openDir(io, entry.path, .{ .iterate = true });
+        defer share_dir.close(io);
+
         var it = share_dir.iterate();
         share_dir_loop: while (try it.next(io)) |share_dir_entry| {
             // Some of the folders we don't want to install
