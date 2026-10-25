@@ -79,11 +79,15 @@ pub fn download(options: DownloadOptions) !Packages {
         };
         defer http_client.deinit();
 
-        var pkgs_file_buf: [std.heap.page_size_min]u8 = undefined;
-        var pkgs_file_writer = pkgs_file.writer(io, &pkgs_file_buf);
+        // Download into memory first. A download that fails halfway through must not overwrite
+        // the local index, otherwise the half written file is what later runs (which don't
+        // download the index) will try to parse.
+        var content = std.Io.Writer.Allocating.init(options.gpa);
+        defer content.deinit();
+
         const result = try @import("download.zig").download(.{
             .io = options.io,
-            .writer = &pkgs_file_writer.interface,
+            .writer = &content.writer,
             .client = &http_client,
             .uri_str = options.pkgs_uri,
             .progress = download_node,
@@ -92,6 +96,9 @@ pub fn download(options: DownloadOptions) !Packages {
         if (result.status != .ok)
             return error.DownloadGotNoneOkStatusCode; // TODO: Diagnostics
 
+        var pkgs_file_buf: [std.heap.page_size_min]u8 = undefined;
+        var pkgs_file_writer = pkgs_file.writer(io, &pkgs_file_buf);
+        try pkgs_file_writer.interface.writeAll(content.written());
         try pkgs_file_writer.end();
     }
 
